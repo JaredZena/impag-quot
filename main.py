@@ -32,16 +32,16 @@ if index_name not in pc.list_indexes().names():
 index = pc.Index(index_name)
 
 # Load and chunk PDFs
-def load_and_chunk_pdf(pdf_path):
-    reader = PdfReader(pdf_path)
-    chunks = []
-    for page in reader.pages:
-        text = page.extract_text()
-        chunks.extend(text.split("\n\n"))
-    return chunks
+# def load_and_chunk_pdf(pdf_path):
+#     reader = PdfReader(pdf_path)
+#     chunks = []
+#     for page in reader.pages:
+#         text = page.extract_text()
+#         chunks.extend(text.split("\n\n"))
+#     return chunks
 
-pdf_path = "/Users/jared/Documents/impag/Cotizaciones/COT-IMPAG030923DGO M.V.Z. EUGENIO NEVARES- GEOMEMBRANAS.pdf"
-chunks = load_and_chunk_pdf(pdf_path)
+# pdf_path = "/Users/jared/Documents/impag/Cotizaciones/COT-IMPAG030923DGO M.V.Z. EUGENIO NEVARES- GEOMEMBRANAS.pdf"
+# chunks = load_and_chunk_pdf(pdf_path)
 
 client = openai.OpenAI()  # Create an OpenAI client
 
