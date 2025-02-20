@@ -10,6 +10,7 @@ from llama_index.core.query_pipeline import QueryPipeline
 from llama_index.llms.openai import OpenAI
 from fastapi import FastAPI
 from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
 
 # Load environment variables
 load_dotenv()
@@ -75,6 +76,14 @@ def query_rag_system(query):
 
 # FastAPI app
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://impag-quot-rkwav5gwd-jaredzenas-projects.vercel.app"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Define a request model
 class QueryRequest(BaseModel):
