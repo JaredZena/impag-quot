@@ -1,5 +1,7 @@
 from dotenv import load_dotenv
 import os
+import requests
+from bs4 import BeautifulSoup
 from pinecone import Pinecone
 from PyPDF2 import PdfReader
 import openai
@@ -26,7 +28,7 @@ if index_name not in pc.list_indexes().names():
     pc.create_index(
         name=index_name,
         dimension=1536,  # Match OpenAI's embedding size
-        metric="cosine",  # Use 'euclidean' or 'dotproduct' if preferred
+        metric="cosine",
     )
 
 # Connect to the existing Pinecone index
@@ -37,10 +39,35 @@ client = openai.OpenAI()  # Create an OpenAI client
 # Generate embeddings and store in Pinecone
 def generate_embeddings(texts):
     response = client.embeddings.create(input=texts, model="text-embedding-ada-002")
-    return [item.embedding for item in response.data]  # Use `.embedding` instead of `["embedding"]`
+    return [item.embedding for item in response.data]
+
+# Function to scrape product prices from Shopify store
+def fetch_shopify_prices():
+    base_url = "https://todoparaelcampo.com.mx/collections"
+    response = requests.get(base_url)
+
+    if response.status_code != 200:
+        print(f"Error fetching Shopify store: {response.status_code}")
+        return {}
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    products = {}
+
+    # Find all product listings
+    product_containers = soup.find_all("div", class_="product-card")
+
+    for product in product_containers:
+        title_tag = product.find("h2", class_="product-card__title")
+        price_tag = product.find("span", class_="price")
+
+        if title_tag and price_tag:
+            product_name = title_tag.text.strip()
+            product_price = price_tag.text.strip()
+            products[product_name.lower()] = product_price
+
+    return products
 
 # Set up LlamaIndex and RAG pipeline
-# Configure LlamaIndex settings
 Settings.llm = OpenAI(model="gpt-4")
 vector_index = VectorStoreIndex.from_documents([])
 retriever = VectorIndexRetriever(index=vector_index, similarity_top_k=5)
@@ -50,19 +77,30 @@ query_pipeline = QueryPipeline(
     pipeline=["retriever", "llm"],
 )
 
-# Query the RAG system
+# Query the RAG system with real-time pricing
 def query_rag_system(query):
     query_embedding = generate_embeddings([query])[0]
     results = index.query(vector=query_embedding, top_k=5, include_metadata=True)
     context = " ".join([match["metadata"]["text"] for match in results["matches"]])
-    
+
+    # Fetch real-time prices from Shopify
+    shopify_prices = fetch_shopify_prices()
+
+    # Match relevant products from Shopify store
+    price_context = ""
+    for product, price in shopify_prices.items():
+        if product in query.lower():
+            price_context += f"{product}: {price}\n"
+
     prompt = (f"Genera una cotización de Impag basada en el catálogo de productos y cotizaciones previas. "
-            f"Si el usuario proporciona un término general (ej. geomembranas, sistemas de riego, drones agrícolas), "
-            f"genera múltiples opciones con diferentes tipos, especificaciones y precios cuando estén disponibles. "
-            f"Si el usuario especifica un producto con detalles exactos (ej. modelo, capacidad, dimensiones), "
-            f"solo incluye ese producto en la cotización. Usa cotizaciones previas para determinar precios, "
-            f"y si no hay referencias, deja el precio en blanco. Responde en español.\n\n"
-            f"Context: {context}\n\nQuestion: {query}")
+              f"Si el usuario proporciona un término general (ej. geomembranas, sistemas de riego, drones agrícolas), "
+              f"genera múltiples opciones con diferentes tipos, especificaciones y precios cuando estén disponibles. "
+              f"Si el usuario especifica un producto con detalles exactos (ej. modelo, capacidad, dimensiones), "
+              f"solo incluye ese producto en la cotización. Usa cotizaciones previas para determinar precios, "
+              f"y si no hay referencias, deja el precio en blanco. Responde en español.\n\n"
+              f"Precios actuales en tienda online:\n{price_context}\n"
+              f"Contexto adicional:\n{context}\n\n"
+              f"Pregunta: {query}")
 
     response = llm.complete(prompt)
     return response.text
@@ -84,5 +122,5 @@ class QueryRequest(BaseModel):
 
 @app.post("/query")
 async def query(request: QueryRequest):
-    response = query_rag_system(request.query)  # Access query from the request object
+    response = query_rag_system(request.query)
     return {"response": response}
