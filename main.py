@@ -73,7 +73,7 @@ def fetch_shopify_prices():
         return {}
     
 # ✅ Function to find the best matching Shopify product names based on query
-def find_best_matching_products(query, shopify_prices, threshold=85):
+def find_best_matching_products(query, shopify_prices, threshold=90):
     """
     Uses fuzzy matching to find products that closely match the user's query.
     
