@@ -32,28 +32,12 @@ if index_name not in pc.list_indexes().names():
 # Connect to the existing Pinecone index
 index = pc.Index(index_name)
 
-# Load and chunk PDFs
-# def load_and_chunk_pdf(pdf_path):
-#     reader = PdfReader(pdf_path)
-#     chunks = []
-#     for page in reader.pages:
-#         text = page.extract_text()
-#         chunks.extend(text.split("\n\n"))
-#     return chunks
-
-# pdf_path = "/Users/jared/Documents/impag/Cotizaciones/COT-IMPAG030923DGO M.V.Z. EUGENIO NEVARES- GEOMEMBRANAS.pdf"
-# chunks = load_and_chunk_pdf(pdf_path)
-
 client = openai.OpenAI()  # Create an OpenAI client
 
 # Generate embeddings and store in Pinecone
 def generate_embeddings(texts):
     response = client.embeddings.create(input=texts, model="text-embedding-ada-002")
     return [item.embedding for item in response.data]  # Use `.embedding` instead of `["embedding"]`
-
-# embeddings = generate_embeddings(chunks)
-# for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-#     index.upsert([(f"chunk_{i}", embedding, {"text": chunk})])
 
 # Set up LlamaIndex and RAG pipeline
 # Configure LlamaIndex settings
@@ -71,7 +55,16 @@ def query_rag_system(query):
     query_embedding = generate_embeddings([query])[0]
     results = index.query(vector=query_embedding, top_k=5, include_metadata=True)
     context = " ".join([match["metadata"]["text"] for match in results["matches"]])
-    response = llm.complete(f"Context: {context}\n\nQuestion: {query}")
+    
+    prompt = (f"Genera una cotización de Impag basada en el catálogo de productos y cotizaciones previas. "
+            f"Si el usuario proporciona un término general (ej. geomembranas, sistemas de riego, drones agrícolas), "
+            f"genera múltiples opciones con diferentes tipos, especificaciones y precios cuando estén disponibles. "
+            f"Si el usuario especifica un producto con detalles exactos (ej. modelo, capacidad, dimensiones), "
+            f"solo incluye ese producto en la cotización. Usa cotizaciones previas para determinar precios, "
+            f"y si no hay referencias, deja el precio en blanco. Responde en español.\n\n"
+            f"Context: {context}\n\nQuestion: {query}")
+
+    response = llm.complete(prompt)
     return response.text
 
 # FastAPI app
