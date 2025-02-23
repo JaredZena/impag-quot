@@ -73,7 +73,7 @@ def fetch_shopify_prices():
         return {}
     
 # ✅ Function to find the best matching Shopify product names based on query
-def find_best_matching_products(query, shopify_prices, threshold=90):
+def find_best_matching_products(query, shopify_prices, threshold=85):
     """
     Uses fuzzy matching to find products that closely match the user's query.
     
@@ -122,12 +122,15 @@ def query_rag_system(query):
 
     print(f'🔹 Matched Products: {matched_products}')
 
-    prompt = (f"Genera una cotización de Impag basada en el catálogo de productos y cotizaciones previas. "
+    prompt = (f"Genera una cotización de Impag basada en el catálogo de productos y cotizaciones previas, "
+              f"asegurate de incluir especificaciones completas de los productos, en la descripcion. "
               f"Si el usuario proporciona un término general (ej. geomembranas, sistemas de riego, drones agrícolas), "
               f"genera múltiples opciones con diferentes tipos, especificaciones y precios cuando estén disponibles. "
+              f"Si el usuario proporciona datos tecnicos para calcular los productos (ej. acolchado agricola para dos hectareas), " 
+              f"basate en otras cotizaciones para realizar los calculos y en metododologias de calculo, proporcionadas en el contexto. "
               f"Si el usuario especifica un producto con detalles exactos (ej. modelo, capacidad, dimensiones), "
-              f"solo incluye ese producto en la cotización. "
-              f"Usa los precios actuales de la tienda online o de cotizaciones previas para determinar precios, "
+              f"solo incluye ese producto en la cotización, con descripcion y especificaciones detalladas y precio. "
+              f"Usa los precios de la tienda online o de cotizaciones previas para determinar precios y especificaciones, "
               f"y solo si no hay referencias, deja el precio en blanco. Responde en español.\n\n"
               f"🔹 **Precios actuales en tienda online:**\n{price_context}\n"
               f"🔹 **Contexto adicional:**\n{context}\n\n"
