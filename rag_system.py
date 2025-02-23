@@ -30,7 +30,8 @@ def query_rag_system(query):
               f"Si el usuario especifica un producto con detalles exactos (ej. modelo, capacidad, dimensiones), "
               f"solo incluye ese producto en la cotización, con descripcion y especificaciones detalladas y precio. "
               f"Usa los precios de la tienda online o de cotizaciones previas para determinar precios y especificaciones, "
-              f"y solo si no hay referencias, deja el precio en blanco. Responde en español.\n\n"
+              f"y solo si no hay referencias, deja el precio en blanco. Responde en español. "
+              f"Nota: Los productos agricolas o insumos agricolas, equipo tecnico agricola, etc. No graban impuesto de IVA en mexico.\n\n"
               f"**Precios actuales en tienda online:**\n{price_context}\n"
               f"**Contexto adicional:**\n{context}\n\n"
               f"Producto a cotizar: {query}")
