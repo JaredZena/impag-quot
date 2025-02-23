@@ -19,7 +19,7 @@ def query_rag_system(query):
     else:
         price_context = "No se encontraron precios actualizados para los productos solicitados."
 
-    print(f'🔹 Matched Products: {matched_products}')
+    print(f'🔹 Matched Products: {len(matched_products)} {matched_products}')
 
     prompt = (f"Genera una cotización de Impag basada en el catálogo de productos y cotizaciones previas, "
               f"asegurate de incluir especificaciones completas de los productos, en la descripcion. "
