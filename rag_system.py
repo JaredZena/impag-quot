@@ -9,7 +9,7 @@ def query_rag_system(query):
     results = index.query(vector=query_embedding, top_k=10, include_metadata=True)
     context = " ".join([match["metadata"]["text"] for match in results["matches"]])
 
-    print(f'Context: {context}')
+    print(f'Context Fetched from Pinecone')
 
     shopify_prices = fetch_shopify_prices()
     matched_products = find_best_matching_products(query.lower(), shopify_prices)
@@ -19,7 +19,7 @@ def query_rag_system(query):
     else:
         price_context = "No se encontraron precios actualizados para los productos solicitados."
 
-    print(f'🔹 Matched Products: {len(matched_products)} {matched_products}')
+    print(f'Matched Products: {len(matched_products)} {matched_products}')
 
     prompt = (f"Genera una cotización de Impag basada en el catálogo de productos y cotizaciones previas, "
               f"asegurate de incluir especificaciones completas de los productos, en la descripcion. "
