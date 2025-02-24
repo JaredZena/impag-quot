@@ -60,7 +60,6 @@ def find_best_matching_products(query, shopify_prices, threshold=53):
         # Use the cleaned title for calculating similarity score
         clean_product = clean_title(product)
         similarity_score = process.extractOne(cleaned_query, [clean_product])[1]
-        print(f"Similarity between '{cleaned_query}' and '{clean_product}': {similarity_score}")
         if similarity_score >= threshold:
             matched_products[product] = shopify_prices[product]
 
