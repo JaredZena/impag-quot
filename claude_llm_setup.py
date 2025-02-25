@@ -11,7 +11,7 @@ anthropic_client = AnthropicClient(api_key=claude_api_key)
 # Set up LlamaIndex
 vector_index = VectorStoreIndex.from_documents([])
 retriever = VectorIndexRetriever(index=vector_index, similarity_top_k=5)
-llm = Anthropic(model="claude-3-5-sonnet-20241022", api_key=claude_api_key)
+llm = Anthropic(model="claude-3-5-sonnet-20241022", api_key=claude_api_key, max_tokens=1000)
 query_pipeline = QueryPipeline(
     modules={"retriever": retriever, "llm": llm},
     pipeline=["retriever", "llm"],
