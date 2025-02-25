@@ -1,6 +1,6 @@
 from embeddings import generate_embeddings
 from pinecone_setup import index
-from shopify_products import fetch_shopify_prices, find_best_matching_products
+from shopify_products import fetch_shopify_prices
 from claude_llm_setup import llm
 
 def query_rag_system(query):
@@ -12,14 +12,8 @@ def query_rag_system(query):
     print(f'Context Fetched from Pinecone')
 
     shopify_prices = fetch_shopify_prices()
-    matched_products = find_best_matching_products(query.lower(), shopify_prices)
 
-    if matched_products:
-        price_context = "\n".join([f"{product}: {price}" for product, price in matched_products.items()])
-    else:
-        price_context = "No se encontraron precios actualizados para los productos solicitados."
-
-    print(f'Matched Products: {len(matched_products)} {matched_products}')
+    price_context = "\n".join([f"{product}: {price}" for product, price in shopify_prices.items()]) or "No hay precios disponibles en la tienda online."
 
     prompt = (f"Genera una cotización de Impag basada en el catálogo de productos y cotizaciones previas, "
               f"asegurate de incluir especificaciones completas de los productos, en la descripcion. "
