@@ -92,46 +92,47 @@ def query_rag_system(query):
     prompt = (f"Genera una cotización detallada basada en el catálogo de productos, cotizaciones previas, "
           f"y características y precios de productos disponibles en el contexto. "
           f"Incluye especificaciones completas de los productos y precios disponibles, "
-          f"tomando en cuenta tanto los productos listados en la tienda online como aquellos que han sido cotizados previamente. "
+          f"considerando tanto los productos listados en la tienda online como aquellos que han sido cotizados previamente. "
           
-          f"- Si el usuario proporciona un término general (ej. geomembranas, sistemas de riego, drones agrícolas), "
-          f"genera varias opciones con diferentes modelos, especificaciones y precios. "
+          f"📌 **Reglas para la cotización:**\n"
+          f"1️⃣ **Si el usuario usa un término general** (ej. geomembranas, sistemas de riego, drones agrícolas), "
+          f"genera varias opciones con diferentes modelos, especificaciones y precios.\n"
           
-          f"- No te limites a los productos listados en la tienda online, también considera productos previamente cotizados "
-          f"o registrados en el catálogo del contexto. Si un producto no aparece en la tienda online, "
-          f"pero existen cotizaciones previas, usa esos datos para generar la cotización. "
+          f"2️⃣ **Si el usuario no especifica una variante (color, modelo, etc.),** "
+          f"incluye **todas las opciones disponibles** en la cotización. "
+          f"Ejemplo: si solicita 'acolchado 1.2m', muestra **negro/plata y negro/blanco** en lugar de solo la opción más barata.\n"
+          
+          f"3️⃣ **Si el usuario especifica un producto exacto** (modelo, capacidad, dimensiones, color, etc.), "
+          f"incluye solo esa opción con su descripción, especificaciones y precio correspondiente.\n"
+          
+          f"4️⃣ **No te limites solo a los productos de la tienda online.** "
+          f"Si un producto no aparece en la tienda online, pero ha sido cotizado previamente, usa esos datos para generar la cotización.\n"
 
-          f"📌 **Asegúrate de incluir:**\n"
-          f"1️⃣ **Cálculos completos** (si aplica).\n"
-          f"2️⃣ **Especificaciones técnicas** de cada producto.\n"
-          f"3️⃣ **Tabla de precios** con detalles de cantidad, unidad y total, incluyendo múltiples opciones de productos (si aplica).\n"
-          f"4️⃣ **Notas importantes** sobre impuestos y recomendaciones.\n"
-          
-          f"- Si el usuario proporciona datos técnicos para calcular los productos (ej. acolchado agrícola para dos hectáreas), "
-          f"usa las metodologías de cálculo y cotizaciones previas disponibles en el contexto para estimar los productos y costos. "
-          
-          f"- Si el usuario especifica un producto exacto (ej. modelo, capacidad, dimensiones, color, etc.), "
-          f"incluye solo ese producto con su descripción, especificaciones y precio correspondiente. "
-          
-          f"- Si múltiples productos o variantes coinciden con la solicitud, incluye todas las opciones relevantes en la cotización. "
-          
-          f"- Usa los precios de la tienda online o cotizaciones previas para calcular los costos. "
-          f"Si no hay referencia de precio ni en la tienda online ni en cotizaciones previas, deja el campo de precio en blanco. "
+          f"5️⃣ **Si el usuario proporciona datos técnicos para calcular un producto** (ej. acolchado agrícola para dos hectáreas), "
+          f"usa las metodologías de cálculo y cotizaciones previas del contexto para estimar los productos y costos.\n"
 
-          f"La cotización debe incluir detalles técnicos, cantidades, precios unitarios, totales y notas adicionales en un formato estructurado. "
-          
+          f"6️⃣ **Usa los precios más actualizados disponibles.** "
+          f"Si hay precios en la tienda online y cotizaciones previas, prioriza la información más reciente. "
+          f"Si no hay referencia de precio en ninguna fuente, deja el campo de precio en blanco.\n"
+
+          f"📌 **Estructura esperada en la cotización:**\n"
+          f"- **Cálculos completos** (si aplica).\n"
+          f"- **Especificaciones técnicas** detalladas de cada producto.\n"
+          f"- **Tabla de precios** con cantidad, unidad y total, mostrando múltiples opciones (si aplica).\n"
+          f"- **Notas importantes** sobre impuestos y recomendaciones.\n"
+
           f"📌 **Importante:**\n"
-          f"- No asumas que un producto no existe si no está en la tienda online. Verifica en cotizaciones previas y el catálogo del contexto.\n"
+          f"- No asumas que un producto no existe solo porque no está en la tienda online. Verifica en cotizaciones previas y el catálogo del contexto.\n"
           f"- Prioriza siempre la información más reciente y relevante para la cotización.\n"
-          
-          f"Responde en español. "
-          
-          f"**Nota:** Los productos agrícolas, insumos agrícolas y equipo técnico agrícola están exentos de IVA en México.\n\n"
+          f"- Responde en español.\n"
+
+          f"📌 **Nota:** Los productos agrícolas, insumos agrícolas y equipo técnico agrícola están exentos de IVA en México.\n\n"
           
           f"**📄 Contexto adicional (productos previamente cotizados o en catálogo):**\n{context}\n\n"
           f"**🛒 Precios actuales en tienda online:**\n{matched_products}\n"
           
           f"**🔍 Producto a cotizar:** {query}")
+
 
     response = llm.complete(prompt)
     return response.text
