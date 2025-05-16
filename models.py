@@ -24,15 +24,20 @@ query_params = parse_qs(parsed_url.query)
 query_params['options'] = [f'endpoint={endpoint_id}']
 new_query = urlencode(query_params, doseq=True)
 
-# Reconstruct the URL with the new query parameters
+# Reconstruct the URL with the new query parameters and explicit psycopg2 driver
 modified_url = parsed_url._replace(query=new_query).geturl()
+if not modified_url.startswith('postgresql+psycopg2://'):
+    modified_url = modified_url.replace('postgresql://', 'postgresql+psycopg2://')
 
-# Database setup
+# Database setup with explicit driver configuration
 engine = create_engine(
     modified_url,
-    pool_pre_ping=True,  # Enable connection health checks
-    pool_size=5,  # Set connection pool size
-    max_overflow=10  # Allow up to 10 connections beyond pool_size
+    pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=10,
+    connect_args={
+        "application_name": "impag-quot"
+    }
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
