@@ -1,7 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from rag_system import query_rag_system
+from sqlalchemy.orm import Session
+from models import get_db, Query
+from typing import List
+from datetime import datetime
 
 app = FastAPI()
 
@@ -16,7 +20,32 @@ app.add_middleware(
 class QueryRequest(BaseModel):
     query: str
 
+class QueryResponse(BaseModel):
+    id: int
+    query_text: str
+    response_text: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 @app.post("/query")
-async def query(request: QueryRequest):
+async def query(request: QueryRequest, db: Session = Depends(get_db)):
+    # Get response from RAG system
     response = query_rag_system(request.query)
+    
+    # Save query and response to database
+    db_query = Query(
+        query_text=request.query,
+        response_text=response
+    )
+    db.add(db_query)
+    db.commit()
+    db.refresh(db_query)
+    
     return {"response": response}
+
+@app.get("/queries", response_model=List[QueryResponse])
+async def get_queries(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    queries = db.query(Query).order_by(Query.created_at.desc()).offset(skip).limit(limit).all()
+    return queries
