@@ -1,19 +1,66 @@
-from sqlalchemy import Column, Integer, String, DateTime, create_engine
+from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, create_engine, Boolean, Text
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 from config import database_url
 from urllib.parse import urlparse, parse_qs, urlencode
+from sqlalchemy.sql import func
 
 Base = declarative_base()
+
+class Supplier(Base):
+    __tablename__ = "suppliers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, index=True)
+    description = Column(Text, nullable=True)
+    contact_info = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    address = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    products = relationship("SupplierProduct", back_populates="supplier")
+
+class Product(Base):
+    __tablename__ = "products"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, index=True)
+    description = Column(Text, nullable=True)
+    category = Column(String, nullable=True)
+    specifications = Column(Text, nullable=True)
+    iva = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    suppliers = relationship("SupplierProduct", back_populates="product")
+
+class SupplierProduct(Base):
+    __tablename__ = "supplier_products"
+
+    id = Column(Integer, primary_key=True, index=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"))
+    product_id = Column(Integer, ForeignKey("products.id"))
+    base_price = Column(Float, nullable=True)
+    min_margin = Column(Float, nullable=True)
+    max_margin = Column(Float, nullable=True)
+    stock = Column(Integer, default=0)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    supplier = relationship("Supplier", back_populates="products")
+    product = relationship("Product", back_populates="suppliers")
 
 class Query(Base):
     __tablename__ = "queries"
 
     id = Column(Integer, primary_key=True, index=True)
-    query_text = Column(String, nullable=False)
-    response_text = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    query_text = Column(Text)
+    response_text = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 # Parse the database URL to get the endpoint ID
 parsed_url = urlparse(database_url)

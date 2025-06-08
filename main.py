@@ -6,16 +6,21 @@ from sqlalchemy.orm import Session
 from models import get_db, Query
 from typing import List
 from datetime import datetime
+from routes import suppliers, products
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://impag-quot-web.vercel.app"],
+    allow_origins=["*"],  # Allows all origins
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
 )
+
+# Include routers
+app.include_router(suppliers.router)
+app.include_router(products.router)
 
 class QueryRequest(BaseModel):
     query: str
@@ -49,3 +54,7 @@ async def query(request: QueryRequest, db: Session = Depends(get_db)):
 async def get_queries(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     queries = db.query(Query).order_by(Query.created_at.desc()).offset(skip).limit(limit).all()
     return queries
+
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to the Quotation System API"}
