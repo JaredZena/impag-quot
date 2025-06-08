@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
-from models import get_db, Product, Supplier, SupplierProduct
+from models import get_db, Product, Supplier, SupplierProduct, ProductUnit
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -13,6 +13,8 @@ class ProductBase(BaseModel):
     description: Optional[str] = None
     category: Optional[str] = None
     specifications: Optional[str] = None
+    unit: Optional[ProductUnit] = ProductUnit.PIEZA
+    package_size: Optional[int] = None
     iva: Optional[bool] = True
 
 class ProductCreate(ProductBase):

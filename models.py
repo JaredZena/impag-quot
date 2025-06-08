@@ -1,18 +1,27 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, create_engine, Boolean, Text
+from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, create_engine, Boolean, Text, Numeric, JSON, Enum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 from config import database_url
 from urllib.parse import urlparse, parse_qs, urlencode
 from sqlalchemy.sql import func
+import enum
 
 Base = declarative_base()
 
+class ProductUnit(enum.Enum):
+    PIEZA = "pieza"
+    ROLLO = "rollo"
+    METRO = "metro"
+    KG = "kg"
+
 class Supplier(Base):
-    __tablename__ = "suppliers"
+    __tablename__ = "supplier"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)
+    common_name = Column(String, nullable=True)  # Common name or trading name of the supplier
+    legal_name = Column(String, nullable=True)  # Legal/registered name of the supplier
     rfc = Column(String, index=True, nullable=False)  # RFC is required and indexed for faster lookups
     description = Column(Text, nullable=True)
     contact_name = Column(String, nullable=True)  # Full name of the contact person
@@ -22,43 +31,74 @@ class Supplier(Base):
     phone = Column(String, nullable=True)
     address = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    last_updated = Column(DateTime(timezone=True), onupdate=func.now())
 
     products = relationship("SupplierProduct", back_populates="supplier")
 
+class ProductCategory(Base):
+    __tablename__ = "product_category"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    slug = Column(String(100), unique=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+    products = relationship("Product", back_populates="category")
+
 class Product(Base):
-    __tablename__ = "products"
+    __tablename__ = "product"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)
     description = Column(Text, nullable=True)
-    category = Column(String, nullable=True)
-    specifications = Column(Text, nullable=True)
+    base_sku = Column(String(50), nullable=True)
+    category_id = Column(Integer, ForeignKey("product_category.id"))
+    unit = Column(Enum(ProductUnit), nullable=False, default=ProductUnit.PIEZA)
+    package_size = Column(Integer, nullable=True)  # Number of units in a package (e.g., 1000 pieces per package)
     iva = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    last_updated = Column(DateTime(timezone=True), onupdate=func.now())
 
-    suppliers = relationship("SupplierProduct", back_populates="product")
+    category = relationship("ProductCategory", back_populates="products")
+    variants = relationship("ProductVariant", back_populates="product")
 
-class SupplierProduct(Base):
-    __tablename__ = "supplier_products"
+class ProductVariant(Base):
+    __tablename__ = "product_variant"
 
     id = Column(Integer, primary_key=True, index=True)
-    supplier_id = Column(Integer, ForeignKey("suppliers.id"))
-    product_id = Column(Integer, ForeignKey("products.id"))
-    base_price = Column(Float, nullable=True)
-    min_margin = Column(Float, nullable=True)
-    max_margin = Column(Float, nullable=True)
+    product_id = Column(Integer, ForeignKey("product.id"))
+    sku = Column(String(100), unique=True, nullable=False)
+    price = Column(Numeric(10, 2), nullable=True)
     stock = Column(Integer, default=0)
+    specifications = Column(JSON, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+    product = relationship("Product", back_populates="variants")
+    supplier_products = relationship("SupplierProduct", back_populates="variant")
+
+class SupplierProduct(Base):
+    __tablename__ = "supplier_product"
+
+    id = Column(Integer, primary_key=True, index=True)
+    supplier_id = Column(Integer, ForeignKey("supplier.id"))
+    variant_id = Column(Integer, ForeignKey("product_variant.id", ondelete="CASCADE"))
+    supplier_sku = Column(String(100), nullable=True)
+    cost = Column(Numeric(10, 2), nullable=True)
+    stock = Column(Integer, default=0)
+    lead_time_days = Column(Integer, nullable=True)
+    is_active = Column(Boolean, default=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    last_updated = Column(DateTime(timezone=True), onupdate=func.now())
 
     supplier = relationship("Supplier", back_populates="products")
-    product = relationship("Product", back_populates="suppliers")
+    variant = relationship("ProductVariant", back_populates="supplier_products")
 
 class Query(Base):
-    __tablename__ = "queries"
+    __tablename__ = "query"
 
     id = Column(Integer, primary_key=True, index=True)
     query_text = Column(Text)
