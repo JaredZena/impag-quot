@@ -10,7 +10,10 @@ router = APIRouter(prefix="/suppliers", tags=["suppliers"])
 # Pydantic models for request/response
 class SupplierBase(BaseModel):
     name: str
+    rfc: str  # RFC is required
     description: Optional[str] = None
+    contact_name: Optional[str] = None  # Full name of the contact person
+    contact_common_name: Optional[str] = None  # Common name/nickname of the contact person
     contact_info: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None

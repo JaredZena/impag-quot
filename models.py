@@ -13,7 +13,10 @@ class Supplier(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)
+    rfc = Column(String, index=True, nullable=False)  # RFC is required and indexed for faster lookups
     description = Column(Text, nullable=True)
+    contact_name = Column(String, nullable=True)  # Full name of the contact person
+    contact_common_name = Column(String, nullable=True)  # Common name/nickname of the contact person
     contact_info = Column(String, nullable=True)
     email = Column(String, nullable=True)
     phone = Column(String, nullable=True)
