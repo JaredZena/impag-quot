@@ -20,20 +20,21 @@ class SupplierBase(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     address: Optional[str] = None
+    website_url: Optional[str] = None  # Website URL of the supplier
 
 class SupplierCreate(SupplierBase):
     pass
 
-class Supplier(SupplierBase):
+class SupplierResponse(SupplierBase):
     id: int
     created_at: datetime
-    updated_at: datetime
+    last_updated: Optional[datetime] = None
 
     class Config:
         from_attributes = True
 
 # Supplier endpoints
-@router.post("/", response_model=Supplier)
+@router.post("/", response_model=SupplierResponse)
 def create_supplier(supplier: SupplierCreate, db: Session = Depends(get_db)):
     db_supplier = Supplier(**supplier.model_dump())
     db.add(db_supplier)
@@ -41,19 +42,19 @@ def create_supplier(supplier: SupplierCreate, db: Session = Depends(get_db)):
     db.refresh(db_supplier)
     return db_supplier
 
-@router.get("/", response_model=List[Supplier])
+@router.get("/", response_model=List[SupplierResponse])
 def get_suppliers(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     suppliers = db.query(Supplier).offset(skip).limit(limit).all()
     return suppliers
 
-@router.get("/{supplier_id}", response_model=Supplier)
+@router.get("/{supplier_id}", response_model=SupplierResponse)
 def get_supplier(supplier_id: int, db: Session = Depends(get_db)):
     supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
     if supplier is None:
         raise HTTPException(status_code=404, detail="Supplier not found")
     return supplier
 
-@router.put("/{supplier_id}", response_model=Supplier)
+@router.put("/{supplier_id}", response_model=SupplierResponse)
 def update_supplier(supplier_id: int, supplier: SupplierCreate, db: Session = Depends(get_db)):
     db_supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
     if db_supplier is None:

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from models import get_db, Query
 from typing import List
 from datetime import datetime
-from routes import suppliers, products
+from routes import suppliers, products, quotations
 
 app = FastAPI()
 
@@ -21,6 +21,7 @@ app.add_middleware(
 # Include routers
 app.include_router(suppliers.router)
 app.include_router(products.router)
+app.include_router(quotations.router)
 
 class QueryRequest(BaseModel):
     query: str

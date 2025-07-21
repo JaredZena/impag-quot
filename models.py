@@ -10,10 +10,10 @@ import enum
 Base = declarative_base()
 
 class ProductUnit(enum.Enum):
-    PIEZA = "pieza"
-    ROLLO = "rollo"
-    METRO = "metro"
-    KG = "kg"
+    PIEZA = "PIEZA"
+    ROLLO = "ROLLO"
+    METRO = "METRO"
+    KG = "KG"
 
 class Supplier(Base):
     __tablename__ = "supplier"
@@ -22,14 +22,14 @@ class Supplier(Base):
     name = Column(String, index=True)
     common_name = Column(String, nullable=True)  # Common name or trading name of the supplier
     legal_name = Column(String, nullable=True)  # Legal/registered name of the supplier
-    rfc = Column(String, index=True, nullable=False)  # RFC is required and indexed for faster lookups
+    rfc = Column(String, index=True, nullable=True)  # RFC is optional and indexed for faster lookups
     description = Column(Text, nullable=True)
     contact_name = Column(String, nullable=True)  # Full name of the contact person
     contact_common_name = Column(String, nullable=True)  # Common name/nickname of the contact person
-    contact_info = Column(String, nullable=True)
     email = Column(String, nullable=True)
     phone = Column(String, nullable=True)
     address = Column(String, nullable=True)
+    website_url = Column(String, nullable=True)  # Website URL of the supplier
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_updated = Column(DateTime(timezone=True), onupdate=func.now())
 
