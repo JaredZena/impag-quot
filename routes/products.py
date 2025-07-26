@@ -3,16 +3,8 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Any
 from pydantic import BaseModel
 from datetime import datetime
-<<<<<<< HEAD
-<<<<<<< HEAD
-from models import get_db, Product, Supplier, SupplierProduct, ProductUnit
-=======
 from models import get_db, Product, Supplier, SupplierProduct, ProductUnit, ProductVariant
 from auth import verify_google_token
->>>>>>> 6bc8303 (adding oauth authentication)
-=======
-from models import get_db, Product, Supplier, SupplierProduct, ProductUnit, ProductVariant
->>>>>>> b449efd056a66ca365366a3cdad3697783518d50
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -57,71 +49,6 @@ class SupplierProductResponse(SupplierProductBase):
     class Config:
         from_attributes = True
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-# Product endpoints
-@router.post("/", response_model=Product)
-def create_product(product: ProductCreate, db: Session = Depends(get_db)):
-    db_product = Product(**product.model_dump())
-    db.add(db_product)
-    db.commit()
-    db.refresh(db_product)
-    return db_product
-=======
-# GET /products with advanced filtering and JSON wrapper
-@router.get("/")
-def get_products(
-    id: Optional[int] = Query(None),
-    name: Optional[str] = Query(None),
-    sku: Optional[str] = Query(None),
-    category_id: Optional[int] = Query(None),
-    supplier_id: Optional[int] = Query(None),
-    is_active: Optional[bool] = Query(None),
-    skip: int = 0,
-    limit: int = 100,
-    db: Session = Depends(get_db)
-):
-    query = db.query(Product)
-    if id:
-        query = query.filter(Product.id == id)
-    if name:
-        query = query.filter(Product.name.ilike(f"%{name}%"))
-    if sku:
-        like_pattern = f"%{sku}%"
-        # Join with variants and filter by either base_sku or any variant's sku
-        query = query.outerjoin(Product.variants).filter(
-            (Product.base_sku.ilike(like_pattern)) |
-            (ProductVariant.sku.ilike(like_pattern))
-        )
-    if category_id:
-        query = query.filter(Product.category_id == category_id)
-    if is_active is not None:
-        query = query.join(Product.variants).filter(ProductVariant.is_active == is_active)
-    if supplier_id:
-        query = query.join(Product.variants).join(ProductVariant.supplier_products).filter(SupplierProduct.supplier_id == supplier_id)
-    products = query.offset(skip).limit(limit).all()
-    data = [
-        {
-            "id": p.id,
-            "name": p.name,
-            "description": p.description,
-            "category_id": p.category_id,
-            "base_sku": p.base_sku,
-            "iva": p.iva,
-            "unit": p.unit.value if p.unit else None,
-            "package_size": p.package_size,
-            "created_at": p.created_at,
-            "last_updated": p.last_updated,
-        }
-        for p in products
-    ]
-    return {"success": True, "data": data, "error": None, "message": None}
->>>>>>> b449efd056a66ca365366a3cdad3697783518d50
-
-# GET /products/{product_id}
-@router.get("/{product_id}")
-def get_product(product_id: int, db: Session = Depends(get_db)):
-=======
 # GET /products with advanced filtering and JSON wrapper
 @router.get("/")
 def get_products(
@@ -175,7 +102,6 @@ def get_products(
 # GET /products/{product_id}
 @router.get("/{product_id}")
 def get_product(product_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
->>>>>>> 6bc8303 (adding oauth authentication)
     product = db.query(Product).filter(Product.id == product_id).first()
     if product is None:
         return {"success": False, "data": None, "error": "Product not found", "message": None}
@@ -193,19 +119,9 @@ def get_product(product_id: int, db: Session = Depends(get_db), user: dict = Dep
     }
     return {"success": True, "data": data, "error": None, "message": None}
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-@router.put("/{product_id}", response_model=Product)
-=======
-# PUT /products/{product_id}
-@router.put("/{product_id}")
->>>>>>> b449efd056a66ca365366a3cdad3697783518d50
-def update_product(product_id: int, product: ProductCreate, db: Session = Depends(get_db)):
-=======
 # PUT /products/{product_id}
 @router.put("/{product_id}")
 def update_product(product_id: int, product: ProductCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
->>>>>>> 6bc8303 (adding oauth authentication)
     db_product = db.query(Product).filter(Product.id == product_id).first()
     if db_product is None:
         return {"success": False, "data": None, "error": "Product not found", "message": None}
@@ -228,17 +144,8 @@ def update_product(product_id: int, product: ProductCreate, db: Session = Depend
     return {"success": True, "data": data, "error": None, "message": None}
 
 # SupplierProduct endpoints
-<<<<<<< HEAD
-<<<<<<< HEAD
-@router.post("/supplier-product/", response_model=SupplierProduct)
-=======
-@router.post("/supplier-product/", response_model=SupplierProductResponse)
->>>>>>> b449efd056a66ca365366a3cdad3697783518d50
-def create_supplier_product(supplier_product: SupplierProductCreate, db: Session = Depends(get_db)):
-=======
 @router.post("/supplier-product/", response_model=SupplierProductResponse)
 def create_supplier_product(supplier_product: SupplierProductCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
->>>>>>> 6bc8303 (adding oauth authentication)
     # Verify supplier and product exist
     supplier = db.query(Supplier).filter(Supplier.id == supplier_product.supplier_id).first()
     product = db.query(Product).filter(Product.id == supplier_product.product_id).first()
@@ -252,19 +159,6 @@ def create_supplier_product(supplier_product: SupplierProductCreate, db: Session
     db.refresh(db_supplier_product)
     return db_supplier_product
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-@router.get("/supplier-product/", response_model=List[SupplierProduct])
-=======
-@router.get("/supplier-product/", response_model=List[SupplierProductResponse])
->>>>>>> b449efd056a66ca365366a3cdad3697783518d50
-def get_supplier_products(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    supplier_products = db.query(SupplierProduct).offset(skip).limit(limit).all()
-    return supplier_products
-
-@router.get("/supplier-product/{supplier_product_id}", response_model=SupplierProductResponse)
-def get_supplier_product(supplier_product_id: int, db: Session = Depends(get_db)):
-=======
 @router.get("/supplier-product/", response_model=List[SupplierProductResponse])
 def get_supplier_products(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     supplier_products = db.query(SupplierProduct).offset(skip).limit(limit).all()
@@ -272,7 +166,6 @@ def get_supplier_products(skip: int = 0, limit: int = 100, db: Session = Depends
 
 @router.get("/supplier-product/{supplier_product_id}", response_model=SupplierProductResponse)
 def get_supplier_product(supplier_product_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
->>>>>>> 6bc8303 (adding oauth authentication)
     supplier_product = db.query(SupplierProduct).filter(SupplierProduct.id == supplier_product_id).first()
     if supplier_product is None:
         raise HTTPException(status_code=404, detail="Supplier Product not found")
@@ -294,12 +187,6 @@ def update_supplier_product(
     
     db.commit()
     db.refresh(db_supplier_product)
-<<<<<<< HEAD
-<<<<<<< HEAD
-    return db_supplier_product 
-=======
-=======
->>>>>>> b449efd056a66ca365366a3cdad3697783518d50
     return db_supplier_product 
 
 # Variant models
@@ -316,11 +203,7 @@ class VariantCreate(VariantBase):
 # Variant endpoints
 # GET /products/{product_id}/variants
 @router.get("/{product_id}/variants")
-<<<<<<< HEAD
 def get_variants_for_product(product_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
-=======
-def get_variants_for_product(product_id: int, db: Session = Depends(get_db)):
->>>>>>> b449efd056a66ca365366a3cdad3697783518d50
     variants = db.query(ProductVariant).filter(ProductVariant.product_id == product_id).all()
     data = [
         {
@@ -340,11 +223,7 @@ def get_variants_for_product(product_id: int, db: Session = Depends(get_db)):
 
 # POST /products/{product_id}/variants
 @router.post("/{product_id}/variants")
-<<<<<<< HEAD
 def create_variant(product_id: int, variant: VariantCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
-=======
-def create_variant(product_id: int, variant: VariantCreate, db: Session = Depends(get_db)):
->>>>>>> b449efd056a66ca365366a3cdad3697783518d50
     # Check product exists
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
@@ -375,9 +254,4 @@ def create_variant(product_id: int, variant: VariantCreate, db: Session = Depend
         "created_at": new_variant.created_at,
         "last_updated": new_variant.last_updated,
     }
-<<<<<<< HEAD
     return {"success": True, "data": data, "error": None, "message": None}
->>>>>>> 6bc8303 (adding oauth authentication)
-=======
-    return {"success": True, "data": data, "error": None, "message": None}
->>>>>>> b449efd056a66ca365366a3cdad3697783518d50
