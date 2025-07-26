@@ -77,6 +77,18 @@ curl http://localhost:8000/query -X POST -H "Content-Type: application/json" -d 
 }
 ```
 
+#### **Test Quotation Processing**
+
+```bash
+# Test single file processing
+python test_quotation_processor.py
+
+# Test batch processing
+python test_batch_quotation_processor.py
+```
+
+**Note:** For batch processing, create a directory with PDF files and update the `test_directory` path in the test script.
+
 ---
 
 ## 📌 API Endpoints
@@ -94,6 +106,64 @@ curl http://localhost:8000/query -X POST -H "Content-Type: application/json" -d 
   ```json
   {
     "response": "Aquí tienes una cotización basada en el catálogo de Impag..."
+  }
+  ```
+
+### 🔹 `POST /quotations/process`
+
+- **Description:** Process a single quotation PDF file and extract structured data.
+- **Request:** Multipart form data with PDF file upload
+- **Parameters:**
+  - `file`: PDF file to process
+  - `category_id`: Optional product category ID (default: 3)
+- **Response Example:**
+  ```json
+  {
+    "supplier": "Supplier Name",
+    "products_processed": 5,
+    "variants_created": 5,
+    "supplier_products_created": 5,
+    "skus_generated": [
+      {
+        "product_name": "Product Name",
+        "base_sku": "PROD-001",
+        "variant_sku": "PROD-001-VAR1",
+        "ai_suggested": "PROD-001",
+        "category_id": 3
+      }
+    ]
+  }
+  ```
+
+### 🔹 `POST /quotations/process-batch`
+
+- **Description:** Process all PDF files in a directory and extract structured data.
+- **Request:** Form data with directory path
+- **Parameters:**
+  - `folder_path`: Path to directory containing PDF files
+  - `category_id`: Optional product category ID (default: 3)
+- **Response Example:**
+  ```json
+  {
+    "total_files_processed": 3,
+    "successful_files": 2,
+    "failed_files": 1,
+    "results": [
+      {
+        "supplier": "Supplier Name",
+        "products_processed": 5,
+        "variants_created": 5,
+        "supplier_products_created": 5,
+        "skus_generated": [...]
+      }
+    ],
+    "errors": [
+      {
+        "filename": "failed_file.pdf",
+        "file_path": "/path/to/failed_file.pdf",
+        "error": "Error message"
+      }
+    ]
   }
   ```
 

@@ -7,16 +7,22 @@ from models import get_db, Query
 from typing import List
 from datetime import datetime
 <<<<<<< HEAD
+<<<<<<< HEAD
 from routes import suppliers, products
 =======
+=======
+>>>>>>> b449efd056a66ca365366a3cdad3697783518d50
 from routes import suppliers, products, quotations
 from routes.products import router as products_router
 from routes.suppliers import router as suppliers_router
 from routes.quotations import router as quotations_router
 from routes.variants import router as variants_router
 from routes.categories import router as categories_router
+<<<<<<< HEAD
 from auth import verify_google_token
 >>>>>>> 6bc8303 (adding oauth authentication)
+=======
+>>>>>>> b449efd056a66ca365366a3cdad3697783518d50
 
 app = FastAPI()
 
@@ -34,8 +40,11 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(suppliers.router)
-app.include_router(products.router)
+app.include_router(products_router)
+app.include_router(suppliers_router)
+app.include_router(quotations_router)
+app.include_router(variants_router)
+app.include_router(categories_router)
 
 class QueryRequest(BaseModel):
     query: str

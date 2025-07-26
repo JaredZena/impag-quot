@@ -1,14 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Any
 from pydantic import BaseModel
 from datetime import datetime
+<<<<<<< HEAD
 <<<<<<< HEAD
 from models import get_db, Product, Supplier, SupplierProduct, ProductUnit
 =======
 from models import get_db, Product, Supplier, SupplierProduct, ProductUnit, ProductVariant
 from auth import verify_google_token
 >>>>>>> 6bc8303 (adding oauth authentication)
+=======
+from models import get_db, Product, Supplier, SupplierProduct, ProductUnit, ProductVariant
+>>>>>>> b449efd056a66ca365366a3cdad3697783518d50
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -16,19 +20,19 @@ router = APIRouter(prefix="/products", tags=["products"])
 class ProductBase(BaseModel):
     name: str
     description: Optional[str] = None
-    category: Optional[str] = None
-    specifications: Optional[str] = None
+    category_id: Optional[int] = None
+    base_sku: Optional[str] = None
+    iva: Optional[bool] = True
     unit: Optional[ProductUnit] = ProductUnit.PIEZA
     package_size: Optional[int] = None
-    iva: Optional[bool] = True
 
 class ProductCreate(ProductBase):
     pass
 
-class Product(ProductBase):
+class ProductResponse(ProductBase):
     id: int
     created_at: datetime
-    updated_at: datetime
+    last_updated: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -45,7 +49,7 @@ class SupplierProductBase(BaseModel):
 class SupplierProductCreate(SupplierProductBase):
     pass
 
-class SupplierProduct(SupplierProductBase):
+class SupplierProductResponse(SupplierProductBase):
     id: int
     created_at: datetime
     updated_at: datetime
@@ -53,6 +57,7 @@ class SupplierProduct(SupplierProductBase):
     class Config:
         from_attributes = True
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 # Product endpoints
 @router.post("/", response_model=Product)
@@ -62,13 +67,59 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_product)
     return db_product
+=======
+# GET /products with advanced filtering and JSON wrapper
+@router.get("/")
+def get_products(
+    id: Optional[int] = Query(None),
+    name: Optional[str] = Query(None),
+    sku: Optional[str] = Query(None),
+    category_id: Optional[int] = Query(None),
+    supplier_id: Optional[int] = Query(None),
+    is_active: Optional[bool] = Query(None),
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    query = db.query(Product)
+    if id:
+        query = query.filter(Product.id == id)
+    if name:
+        query = query.filter(Product.name.ilike(f"%{name}%"))
+    if sku:
+        like_pattern = f"%{sku}%"
+        # Join with variants and filter by either base_sku or any variant's sku
+        query = query.outerjoin(Product.variants).filter(
+            (Product.base_sku.ilike(like_pattern)) |
+            (ProductVariant.sku.ilike(like_pattern))
+        )
+    if category_id:
+        query = query.filter(Product.category_id == category_id)
+    if is_active is not None:
+        query = query.join(Product.variants).filter(ProductVariant.is_active == is_active)
+    if supplier_id:
+        query = query.join(Product.variants).join(ProductVariant.supplier_products).filter(SupplierProduct.supplier_id == supplier_id)
+    products = query.offset(skip).limit(limit).all()
+    data = [
+        {
+            "id": p.id,
+            "name": p.name,
+            "description": p.description,
+            "category_id": p.category_id,
+            "base_sku": p.base_sku,
+            "iva": p.iva,
+            "unit": p.unit.value if p.unit else None,
+            "package_size": p.package_size,
+            "created_at": p.created_at,
+            "last_updated": p.last_updated,
+        }
+        for p in products
+    ]
+    return {"success": True, "data": data, "error": None, "message": None}
+>>>>>>> b449efd056a66ca365366a3cdad3697783518d50
 
-@router.get("/", response_model=List[Product])
-def get_products(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    products = db.query(Product).offset(skip).limit(limit).all()
-    return products
-
-@router.get("/{product_id}", response_model=Product)
+# GET /products/{product_id}
+@router.get("/{product_id}")
 def get_product(product_id: int, db: Session = Depends(get_db)):
 =======
 # GET /products with advanced filtering and JSON wrapper
@@ -127,11 +178,28 @@ def get_product(product_id: int, db: Session = Depends(get_db), user: dict = Dep
 >>>>>>> 6bc8303 (adding oauth authentication)
     product = db.query(Product).filter(Product.id == product_id).first()
     if product is None:
-        raise HTTPException(status_code=404, detail="Product not found")
-    return product
+        return {"success": False, "data": None, "error": "Product not found", "message": None}
+    data = {
+        "id": product.id,
+        "name": product.name,
+        "description": product.description,
+        "category_id": product.category_id,
+        "base_sku": product.base_sku,
+        "iva": product.iva,
+        "unit": product.unit.value if product.unit else None,
+        "package_size": product.package_size,
+        "created_at": product.created_at,
+        "last_updated": product.last_updated,
+    }
+    return {"success": True, "data": data, "error": None, "message": None}
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 @router.put("/{product_id}", response_model=Product)
+=======
+# PUT /products/{product_id}
+@router.put("/{product_id}")
+>>>>>>> b449efd056a66ca365366a3cdad3697783518d50
 def update_product(product_id: int, product: ProductCreate, db: Session = Depends(get_db)):
 =======
 # PUT /products/{product_id}
@@ -140,18 +208,32 @@ def update_product(product_id: int, product: ProductCreate, db: Session = Depend
 >>>>>>> 6bc8303 (adding oauth authentication)
     db_product = db.query(Product).filter(Product.id == product_id).first()
     if db_product is None:
-        raise HTTPException(status_code=404, detail="Product not found")
-    
+        return {"success": False, "data": None, "error": "Product not found", "message": None}
     for key, value in product.model_dump().items():
         setattr(db_product, key, value)
-    
     db.commit()
     db.refresh(db_product)
-    return db_product
+    data = {
+        "id": db_product.id,
+        "name": db_product.name,
+        "description": db_product.description,
+        "category_id": db_product.category_id,
+        "base_sku": db_product.base_sku,
+        "iva": db_product.iva,
+        "unit": db_product.unit.value if db_product.unit else None,
+        "package_size": db_product.package_size,
+        "created_at": db_product.created_at,
+        "last_updated": db_product.last_updated,
+    }
+    return {"success": True, "data": data, "error": None, "message": None}
 
 # SupplierProduct endpoints
 <<<<<<< HEAD
+<<<<<<< HEAD
 @router.post("/supplier-product/", response_model=SupplierProduct)
+=======
+@router.post("/supplier-product/", response_model=SupplierProductResponse)
+>>>>>>> b449efd056a66ca365366a3cdad3697783518d50
 def create_supplier_product(supplier_product: SupplierProductCreate, db: Session = Depends(get_db)):
 =======
 @router.post("/supplier-product/", response_model=SupplierProductResponse)
@@ -171,12 +253,16 @@ def create_supplier_product(supplier_product: SupplierProductCreate, db: Session
     return db_supplier_product
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 @router.get("/supplier-product/", response_model=List[SupplierProduct])
+=======
+@router.get("/supplier-product/", response_model=List[SupplierProductResponse])
+>>>>>>> b449efd056a66ca365366a3cdad3697783518d50
 def get_supplier_products(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     supplier_products = db.query(SupplierProduct).offset(skip).limit(limit).all()
     return supplier_products
 
-@router.get("/supplier-product/{supplier_product_id}", response_model=SupplierProduct)
+@router.get("/supplier-product/{supplier_product_id}", response_model=SupplierProductResponse)
 def get_supplier_product(supplier_product_id: int, db: Session = Depends(get_db)):
 =======
 @router.get("/supplier-product/", response_model=List[SupplierProductResponse])
@@ -192,7 +278,7 @@ def get_supplier_product(supplier_product_id: int, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="Supplier Product not found")
     return supplier_product
 
-@router.put("/supplier-product/{supplier_product_id}", response_model=SupplierProduct)
+@router.put("/supplier-product/{supplier_product_id}", response_model=SupplierProductResponse)
 def update_supplier_product(
     supplier_product_id: int,
     supplier_product: SupplierProductCreate,
@@ -209,8 +295,11 @@ def update_supplier_product(
     db.commit()
     db.refresh(db_supplier_product)
 <<<<<<< HEAD
+<<<<<<< HEAD
     return db_supplier_product 
 =======
+=======
+>>>>>>> b449efd056a66ca365366a3cdad3697783518d50
     return db_supplier_product 
 
 # Variant models
@@ -227,7 +316,11 @@ class VariantCreate(VariantBase):
 # Variant endpoints
 # GET /products/{product_id}/variants
 @router.get("/{product_id}/variants")
+<<<<<<< HEAD
 def get_variants_for_product(product_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
+=======
+def get_variants_for_product(product_id: int, db: Session = Depends(get_db)):
+>>>>>>> b449efd056a66ca365366a3cdad3697783518d50
     variants = db.query(ProductVariant).filter(ProductVariant.product_id == product_id).all()
     data = [
         {
@@ -247,7 +340,11 @@ def get_variants_for_product(product_id: int, db: Session = Depends(get_db), use
 
 # POST /products/{product_id}/variants
 @router.post("/{product_id}/variants")
+<<<<<<< HEAD
 def create_variant(product_id: int, variant: VariantCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
+=======
+def create_variant(product_id: int, variant: VariantCreate, db: Session = Depends(get_db)):
+>>>>>>> b449efd056a66ca365366a3cdad3697783518d50
     # Check product exists
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
@@ -278,5 +375,9 @@ def create_variant(product_id: int, variant: VariantCreate, db: Session = Depend
         "created_at": new_variant.created_at,
         "last_updated": new_variant.last_updated,
     }
+<<<<<<< HEAD
     return {"success": True, "data": data, "error": None, "message": None}
 >>>>>>> 6bc8303 (adding oauth authentication)
+=======
+    return {"success": True, "data": data, "error": None, "message": None}
+>>>>>>> b449efd056a66ca365366a3cdad3697783518d50
