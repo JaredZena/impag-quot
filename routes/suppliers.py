@@ -4,6 +4,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
 from models import get_db, Supplier
+from auth import verify_google_token
 
 router = APIRouter(prefix="/suppliers", tags=["suppliers"])
 
@@ -34,7 +35,7 @@ class SupplierResponse(SupplierBase):
 
 # Supplier endpoints
 @router.post("/")
-def create_supplier(supplier: SupplierCreate, db: Session = Depends(get_db)):
+def create_supplier(supplier: SupplierCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     db_supplier = Supplier(**supplier.model_dump())
     db.add(db_supplier)
     db.commit()
@@ -62,7 +63,8 @@ def get_suppliers(
     search: Optional[str] = None,
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token)
 ):
     query = db.query(Supplier)
     if search:
@@ -95,7 +97,7 @@ def get_suppliers(
     return {"success": True, "data": data, "error": None, "message": None}
 
 @router.get("/{supplier_id}")
-def get_supplier(supplier_id: int, db: Session = Depends(get_db)):
+def get_supplier(supplier_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
     if supplier is None:
         return {"success": False, "data": None, "error": "Supplier not found", "message": None}
@@ -118,7 +120,7 @@ def get_supplier(supplier_id: int, db: Session = Depends(get_db)):
     return {"success": True, "data": data, "error": None, "message": None}
 
 @router.put("/{supplier_id}")
-def update_supplier(supplier_id: int, supplier: SupplierCreate, db: Session = Depends(get_db)):
+def update_supplier(supplier_id: int, supplier: SupplierCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     db_supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
     if db_supplier is None:
         return {"success": False, "data": None, "error": "Supplier not found", "message": None}

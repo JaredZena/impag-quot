@@ -12,15 +12,21 @@ from routes.suppliers import router as suppliers_router
 from routes.quotations import router as quotations_router
 from routes.variants import router as variants_router
 from routes.categories import router as categories_router
+from auth import verify_google_token
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
+    allow_origins=[
+        "https://impag-admin-app.vercel.app",  # Production domain Product Manager
+        "https://impag-quot-web.vercel.app",  # Production domain Cotizador
+        "http://localhost:5173",              # Local development
+        "http://localhost:3000"               # Alternative local port
+    ],
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["*"],
 )
 
 # Include routers
@@ -43,7 +49,7 @@ class QueryResponse(BaseModel):
         from_attributes = True
 
 @app.post("/query")
-async def query(request: QueryRequest, db: Session = Depends(get_db)):
+async def query(request: QueryRequest, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     # Get response from RAG system
     response = query_rag_system(request.query)
     
@@ -59,7 +65,7 @@ async def query(request: QueryRequest, db: Session = Depends(get_db)):
     return {"response": response}
 
 @app.get("/queries", response_model=List[QueryResponse])
-async def get_queries(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+async def get_queries(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     queries = db.query(Query).order_by(Query.created_at.desc()).offset(skip).limit(limit).all()
     return queries
 

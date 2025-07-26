@@ -9,6 +9,7 @@ import glob
 from models import get_db
 from quotation_processor import QuotationProcessor
 from config import claude_api_key
+from auth import verify_google_token
 
 router = APIRouter(prefix="/quotations", tags=["quotations"])
 
@@ -30,7 +31,8 @@ class BatchQuotationResponse(BaseModel):
 async def process_quotation(
     file: UploadFile = File(...),
     category_id: Optional[int] = Form(3),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token)
 ):
     """
     Process a quotation PDF file and extract structured data.
@@ -72,7 +74,8 @@ async def process_quotation(
 async def process_quotation_batch(
     folder_path: str = Form(...),
     category_id: Optional[int] = Form(3),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token)
 ):
     """
     Process all PDF files in a directory and extract structured data.

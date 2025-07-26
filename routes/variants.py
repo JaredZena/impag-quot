@@ -4,6 +4,7 @@ from typing import List, Optional, Any
 from pydantic import BaseModel
 from datetime import datetime
 from models import get_db, Product, ProductVariant, SupplierProduct, Supplier
+from auth import verify_google_token
 
 router = APIRouter(prefix="/variants", tags=["variants"])
 
@@ -47,7 +48,7 @@ class VariantResponse(VariantBase):
 
 # GET /variants/{variant_id}
 @router.get("/{variant_id}")
-def get_variant(variant_id: int, db: Session = Depends(get_db)):
+def get_variant(variant_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     variant = db.query(ProductVariant).filter(ProductVariant.id == variant_id).first()
     if not variant:
         return {"success": False, "data": None, "error": "Variant not found", "message": None}
@@ -84,7 +85,7 @@ def get_variant(variant_id: int, db: Session = Depends(get_db)):
 
 # PUT /variants/{variant_id}
 @router.put("/{variant_id}")
-def update_variant(variant_id: int, variant: VariantUpdate, db: Session = Depends(get_db)):
+def update_variant(variant_id: int, variant: VariantUpdate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     db_variant = db.query(ProductVariant).filter(ProductVariant.id == variant_id).first()
     if not db_variant:
         return {"success": False, "data": None, "error": "Variant not found", "message": None}
@@ -107,7 +108,7 @@ def update_variant(variant_id: int, variant: VariantUpdate, db: Session = Depend
 
 # GET /variants/{variant_id}/suppliers
 @router.get("/{variant_id}/suppliers")
-def get_suppliers_for_variant(variant_id: int, db: Session = Depends(get_db)):
+def get_suppliers_for_variant(variant_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     supplier_products = db.query(SupplierProduct).filter(SupplierProduct.variant_id == variant_id).all()
     suppliers = []
     for sp in supplier_products:

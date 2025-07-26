@@ -4,6 +4,7 @@ from typing import List, Optional, Any
 from pydantic import BaseModel
 from datetime import datetime
 from models import get_db, Product, Supplier, SupplierProduct, ProductUnit, ProductVariant
+from auth import verify_google_token
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -59,7 +60,8 @@ def get_products(
     is_active: Optional[bool] = Query(None),
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token)
 ):
     query = db.query(Product)
     if id:
@@ -99,7 +101,7 @@ def get_products(
 
 # GET /products/{product_id}
 @router.get("/{product_id}")
-def get_product(product_id: int, db: Session = Depends(get_db)):
+def get_product(product_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     product = db.query(Product).filter(Product.id == product_id).first()
     if product is None:
         return {"success": False, "data": None, "error": "Product not found", "message": None}
@@ -119,7 +121,7 @@ def get_product(product_id: int, db: Session = Depends(get_db)):
 
 # PUT /products/{product_id}
 @router.put("/{product_id}")
-def update_product(product_id: int, product: ProductCreate, db: Session = Depends(get_db)):
+def update_product(product_id: int, product: ProductCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     db_product = db.query(Product).filter(Product.id == product_id).first()
     if db_product is None:
         return {"success": False, "data": None, "error": "Product not found", "message": None}
@@ -143,7 +145,7 @@ def update_product(product_id: int, product: ProductCreate, db: Session = Depend
 
 # SupplierProduct endpoints
 @router.post("/supplier-product/", response_model=SupplierProductResponse)
-def create_supplier_product(supplier_product: SupplierProductCreate, db: Session = Depends(get_db)):
+def create_supplier_product(supplier_product: SupplierProductCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     # Verify supplier and product exist
     supplier = db.query(Supplier).filter(Supplier.id == supplier_product.supplier_id).first()
     product = db.query(Product).filter(Product.id == supplier_product.product_id).first()
@@ -158,12 +160,12 @@ def create_supplier_product(supplier_product: SupplierProductCreate, db: Session
     return db_supplier_product
 
 @router.get("/supplier-product/", response_model=List[SupplierProductResponse])
-def get_supplier_products(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def get_supplier_products(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     supplier_products = db.query(SupplierProduct).offset(skip).limit(limit).all()
     return supplier_products
 
 @router.get("/supplier-product/{supplier_product_id}", response_model=SupplierProductResponse)
-def get_supplier_product(supplier_product_id: int, db: Session = Depends(get_db)):
+def get_supplier_product(supplier_product_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     supplier_product = db.query(SupplierProduct).filter(SupplierProduct.id == supplier_product_id).first()
     if supplier_product is None:
         raise HTTPException(status_code=404, detail="Supplier Product not found")
@@ -173,7 +175,8 @@ def get_supplier_product(supplier_product_id: int, db: Session = Depends(get_db)
 def update_supplier_product(
     supplier_product_id: int,
     supplier_product: SupplierProductCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token)
 ):
     db_supplier_product = db.query(SupplierProduct).filter(SupplierProduct.id == supplier_product_id).first()
     if db_supplier_product is None:
@@ -200,7 +203,7 @@ class VariantCreate(VariantBase):
 # Variant endpoints
 # GET /products/{product_id}/variants
 @router.get("/{product_id}/variants")
-def get_variants_for_product(product_id: int, db: Session = Depends(get_db)):
+def get_variants_for_product(product_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     variants = db.query(ProductVariant).filter(ProductVariant.product_id == product_id).all()
     data = [
         {
@@ -220,7 +223,7 @@ def get_variants_for_product(product_id: int, db: Session = Depends(get_db)):
 
 # POST /products/{product_id}/variants
 @router.post("/{product_id}/variants")
-def create_variant(product_id: int, variant: VariantCreate, db: Session = Depends(get_db)):
+def create_variant(product_id: int, variant: VariantCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     # Check product exists
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
