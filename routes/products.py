@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Any
 from pydantic import BaseModel
 from datetime import datetime
 from models import get_db, Product, Supplier, SupplierProduct, ProductUnit, ProductVariant
@@ -51,6 +51,7 @@ class SupplierProductResponse(SupplierProductBase):
 # GET /products with advanced filtering and JSON wrapper
 @router.get("/")
 def get_products(
+    id: Optional[int] = Query(None),
     name: Optional[str] = Query(None),
     sku: Optional[str] = Query(None),
     category_id: Optional[int] = Query(None),
@@ -61,6 +62,8 @@ def get_products(
     db: Session = Depends(get_db)
 ):
     query = db.query(Product)
+    if id:
+        query = query.filter(Product.id == id)
     if name:
         query = query.filter(Product.name.ilike(f"%{name}%"))
     if sku:
@@ -75,7 +78,7 @@ def get_products(
     if is_active is not None:
         query = query.join(Product.variants).filter(ProductVariant.is_active == is_active)
     if supplier_id:
-        query = query.join(Product.variants).join(ProductVariant.supplier_products).filter(SupplierProduct.id == supplier_id)
+        query = query.join(Product.variants).join(ProductVariant.supplier_products).filter(SupplierProduct.supplier_id == supplier_id)
     products = query.offset(skip).limit(limit).all()
     data = [
         {
@@ -182,3 +185,70 @@ def update_supplier_product(
     db.commit()
     db.refresh(db_supplier_product)
     return db_supplier_product 
+
+# Variant models
+class VariantBase(BaseModel):
+    sku: str
+    price: Optional[float] = None
+    stock: Optional[int] = 0
+    specifications: Optional[Any] = None
+    is_active: Optional[bool] = True
+
+class VariantCreate(VariantBase):
+    pass
+
+# Variant endpoints
+# GET /products/{product_id}/variants
+@router.get("/{product_id}/variants")
+def get_variants_for_product(product_id: int, db: Session = Depends(get_db)):
+    variants = db.query(ProductVariant).filter(ProductVariant.product_id == product_id).all()
+    data = [
+        {
+            "id": v.id,
+            "product_id": v.product_id,
+            "sku": v.sku,
+            "price": float(v.price) if v.price is not None else None,
+            "stock": v.stock,
+            "specifications": v.specifications,
+            "is_active": v.is_active,
+            "created_at": v.created_at,
+            "last_updated": v.last_updated,
+        }
+        for v in variants
+    ]
+    return {"success": True, "data": data, "error": None, "message": None}
+
+# POST /products/{product_id}/variants
+@router.post("/{product_id}/variants")
+def create_variant(product_id: int, variant: VariantCreate, db: Session = Depends(get_db)):
+    # Check product exists
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        return {"success": False, "data": None, "error": "Product not found", "message": None}
+    # Check for duplicate SKU
+    existing = db.query(ProductVariant).filter(ProductVariant.sku == variant.sku).first()
+    if existing:
+        return {"success": False, "data": None, "error": "Variant with this SKU already exists", "message": None}
+    new_variant = ProductVariant(
+        product_id=product_id,
+        sku=variant.sku,
+        price=variant.price,
+        stock=variant.stock,
+        specifications=variant.specifications,
+        is_active=variant.is_active
+    )
+    db.add(new_variant)
+    db.commit()
+    db.refresh(new_variant)
+    data = {
+        "id": new_variant.id,
+        "product_id": new_variant.product_id,
+        "sku": new_variant.sku,
+        "price": float(new_variant.price) if new_variant.price is not None else None,
+        "stock": new_variant.stock,
+        "specifications": new_variant.specifications,
+        "is_active": new_variant.is_active,
+        "created_at": new_variant.created_at,
+        "last_updated": new_variant.last_updated,
+    }
+    return {"success": True, "data": data, "error": None, "message": None}
