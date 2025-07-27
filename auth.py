@@ -7,12 +7,18 @@ import os
 # Your Google OAuth Client ID
 GOOGLE_CLIENT_ID = "223254458497-5tllach8urthlqtcau15sr35kaeicaqc.apps.googleusercontent.com"
 
-# Allowed emails (your 3 users)
-ALLOWED_EMAILS = {
-    "zena.hernandez.010195@gmail.com",
-    "user2@company.com",  # Replace with actual emails
-    "user3@company.com"   # Replace with actual emails
-}
+# Allowed emails from environment variable (no fallback)
+def get_allowed_emails():
+    emails_str = os.getenv("ALLOWED_EMAILS")
+    if not emails_str:
+        raise Exception("ALLOWED_EMAILS environment variable must be set")
+    # Split by comma and clean whitespace
+    emails = [email.strip().lower() for email in emails_str.split(",") if email.strip()]
+    if not emails:
+        raise Exception("ALLOWED_EMAILS must contain at least one valid email")
+    return set(emails)
+
+ALLOWED_EMAILS = get_allowed_emails()
 
 security = HTTPBearer()
 
@@ -28,12 +34,12 @@ def verify_google_token(token = Depends(security)):
             GOOGLE_CLIENT_ID
         )
 
-        # Extract user email
-        email = idinfo.get('email')
+        # Extract user email (case-insensitive)
+        email = idinfo.get('email').lower() if idinfo.get('email') else None
         if not email:
             raise HTTPException(status_code=401, detail="Token missing email")
 
-        # Check if email is in allowed list
+        # Check if email is in allowed list (case-insensitive comparison)
         if email not in ALLOWED_EMAILS:
             raise HTTPException(
                 status_code=403,
