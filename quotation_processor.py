@@ -79,7 +79,7 @@ class HybridSKUGenerator:
             if grade in self.variant_rules['grade_mapping']:
                 sku_parts.append(self.variant_rules['grade_mapping'][grade])
             else:
-                sku_parts.append(grade.upper()[:3])
+                sku_parts.append((grade or '').upper()[:3])
         
         # Material
         if 'material' in specifications:
@@ -89,7 +89,7 @@ class HybridSKUGenerator:
         
         # Color (if significant)
         if 'color' in specifications and specifications['color'].lower() not in ['natural', 'transparente']:
-            sku_parts.append(specifications['color'][:3].upper())
+            sku_parts.append((specifications['color'] or '')[:3].upper())
         
         return "-".join(sku_parts)
 
@@ -99,7 +99,7 @@ class HybridSKUGenerator:
         
         if 'suggested_base_sku' in product_info and product_info['suggested_base_sku']:
             # Validate and clean AI suggestion
-            ai_sku = product_info['suggested_base_sku'].upper().strip()
+            ai_sku = (product_info['suggested_base_sku'] or '').upper().strip()
             # Remove any invalid characters and ensure reasonable length
             ai_sku = re.sub(r'[^A-Z0-9-]', '', ai_sku)[:12]
             if len(ai_sku) >= 3:  # Minimum viable SKU length
@@ -342,7 +342,7 @@ Respond only with the JSON object, no extra explanation."""
             # Post-process supplier information to ensure IMPAG is not extracted as supplier
             if 'supplier' in data:
                 supplier_info = data['supplier']
-                supplier_name = supplier_info.get('name', '').upper()
+                supplier_name = (supplier_info.get('name') or '').upper()
                 
                 # Check if the extracted supplier name contains IMPAG
                 if 'IMPAG' in supplier_name:
@@ -459,7 +459,7 @@ Respond only with the JSON object, no extra explanation."""
     def get_or_create_supplier(self, session: Session, supplier_info: Dict) -> Supplier:
         """Check if supplier exists by RFC or name, create if not."""
         rfc = supplier_info.get("rfc")
-        name = supplier_info["name"]
+        name = supplier_info.get("name") or "Unknown Supplier"
         
         # Try to find existing supplier by RFC first, then by name
         existing = None
@@ -508,7 +508,12 @@ Respond only with the JSON object, no extra explanation."""
         print(f"\nReceived unit value: {product_info.get('unit')}")
         
         # Get the unit value and convert to enum member
-        unit_str = product_info.get("unit", "PIEZA").upper()
+        unit_value = product_info.get("unit")
+        if unit_value is None:
+            unit_str = "PIEZA"
+        else:
+            unit_str = str(unit_value).upper()
+
         try:
             unit = ProductUnit[unit_str]
         except KeyError:
@@ -633,7 +638,7 @@ Respond only with the JSON object, no extra explanation."""
             
             # Process supplier
             supplier = self.get_or_create_supplier(session, structured_data["supplier"])
-            results["supplier"] = supplier.name
+            results["supplier"] = supplier.name or "Unknown Supplier"
             
             print(f"\nProcessing {len(structured_data['products'])} products...")
             print("-" * 40)
@@ -683,6 +688,12 @@ Respond only with the JSON object, no extra explanation."""
             print(f"✓ Successfully processed {results['products_processed']} products")
             print(f"✓ Created {results['variants_created']} variants")
             print(f"✓ Created {results['supplier_products_created']} supplier relationships")
+            
+            # Display processed product names
+            if results["skus_generated"]:
+                print(f"✓ Products processed:")
+                for sku_info in results["skus_generated"]:
+                    print(f"   • {sku_info['product_name']} ({sku_info['variant_sku']})")
             
         except Exception as e:
             session.rollback()

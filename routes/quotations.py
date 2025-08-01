@@ -14,7 +14,7 @@ from auth import verify_google_token
 router = APIRouter(prefix="/quotations", tags=["quotations"])
 
 class QuotationResponse(BaseModel):
-    supplier: str
+    supplier: Optional[str]
     products_processed: int
     variants_created: int
     supplier_products_created: int
@@ -30,7 +30,7 @@ class BatchQuotationResponse(BaseModel):
 @router.post("/process", response_model=QuotationResponse)
 async def process_quotation(
     file: UploadFile = File(...),
-    category_id: Optional[int] = Form(3),
+    category_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
     user: dict = Depends(verify_google_token)
 ):
@@ -38,13 +38,10 @@ async def process_quotation(
     Process a quotation PDF file and extract structured data.
     
     Args:
-        file: The PDF file to process
-        category_id: Optional product category ID (default: 3)
-        
-    Returns:
-        Dict with processing results including SKU information
+        file: PDF file to process
+        category_id: Optional product category ID (if not provided, AI will auto-categorize)
     """
-    if not file.filename.endswith('.pdf'):
+    if not file.filename.lower().endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted")
     
     # Create a temporary file to store the uploaded PDF
@@ -73,7 +70,7 @@ async def process_quotation(
 @router.post("/process-batch", response_model=BatchQuotationResponse)
 async def process_quotation_batch(
     folder_path: str = Form(...),
-    category_id: Optional[int] = Form(3),
+    category_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
     user: dict = Depends(verify_google_token)
 ):
@@ -82,10 +79,7 @@ async def process_quotation_batch(
     
     Args:
         folder_path: Path to the directory containing PDF files
-        category_id: Optional product category ID (default: 3)
-        
-    Returns:
-        Dict with batch processing results including individual file results
+        category_id: Optional product category ID (if not provided, AI will auto-categorize)
     """
     # Validate folder path exists
     if not os.path.exists(folder_path):
@@ -94,9 +88,10 @@ async def process_quotation_batch(
     if not os.path.isdir(folder_path):
         raise HTTPException(status_code=400, detail=f"Path is not a directory: {folder_path}")
     
-    # Find all PDF files in the directory
-    pdf_pattern = os.path.join(folder_path, "*.pdf")
-    pdf_files = glob.glob(pdf_pattern)
+    # Find all PDF files in the directory (case-insensitive)
+    pdf_pattern_lower = os.path.join(folder_path, "*.pdf")
+    pdf_pattern_upper = os.path.join(folder_path, "*.PDF")
+    pdf_files = glob.glob(pdf_pattern_lower) + glob.glob(pdf_pattern_upper)
     
     if not pdf_files:
         raise HTTPException(status_code=400, detail=f"No PDF files found in directory: {folder_path}")
@@ -132,6 +127,12 @@ async def process_quotation_batch(
             print(f"   Products: {result['products_processed']}")
             print(f"   Variants: {result['variants_created']}")
             
+            # Display product names
+            if result.get('skus_generated'):
+                print(f"   Product names:")
+                for sku_info in result['skus_generated']:
+                    print(f"     • {sku_info['product_name']}")
+            
         except Exception as e:
             error_info = {
                 "filename": filename,
@@ -149,5 +150,17 @@ async def process_quotation_batch(
     print(f"   Total files: {batch_results['total_files_processed']}")
     print(f"   Successful: {batch_results['successful_files']}")
     print(f"   Failed: {batch_results['failed_files']}")
+    
+    # Show all processed products
+    if batch_results['successful_files'] > 0:
+        all_products = []
+        for result in batch_results['results']:
+            for sku_info in result.get('skus_generated', []):
+                all_products.append(sku_info['product_name'])
+        
+        if all_products:
+            print(f"   Products added to database:")
+            for product_name in all_products:
+                print(f"     • {product_name}")
     
     return batch_results 
