@@ -6,8 +6,9 @@ from auth import verify_google_token
 
 router = APIRouter(prefix="/categories", tags=["categories"])
 
+# GET /categories - PUBLIC for quotation web app
 @router.get("/")
-def get_categories(db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
+def get_categories(db: Session = Depends(get_db)):
     categories = db.query(ProductCategory).all()
     data = [
         {

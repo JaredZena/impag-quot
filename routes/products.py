@@ -49,7 +49,7 @@ class SupplierProductResponse(SupplierProductBase):
     class Config:
         from_attributes = True
 
-# GET /products with advanced filtering and JSON wrapper
+# GET /products with advanced filtering and JSON wrapper - PUBLIC for quotation web app
 @router.get("/")
 def get_products(
     id: Optional[int] = Query(None),
@@ -60,8 +60,9 @@ def get_products(
     is_active: Optional[bool] = Query(None),
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db),
-    user: dict = Depends(verify_google_token)
+    sort_by: Optional[str] = Query(None),
+    sort_order: Optional[str] = Query("asc"),
+    db: Session = Depends(get_db)
 ):
     query = db.query(Product)
     if id:
@@ -81,6 +82,13 @@ def get_products(
         query = query.join(Product.variants).filter(ProductVariant.is_active == is_active)
     if supplier_id:
         query = query.join(Product.variants).join(ProductVariant.supplier_products).filter(SupplierProduct.supplier_id == supplier_id)
+    
+    # Add sorting
+    if sort_by == "name" and sort_order == "asc":
+        query = query.order_by(Product.name.asc())
+    elif sort_by == "name" and sort_order == "desc":
+        query = query.order_by(Product.name.desc())
+    
     products = query.offset(skip).limit(limit).all()
     data = [
         {
@@ -99,9 +107,9 @@ def get_products(
     ]
     return {"success": True, "data": data, "error": None, "message": None}
 
-# GET /products/{product_id}
+# GET /products/{product_id} - PUBLIC for quotation web app
 @router.get("/{product_id}")
-def get_product(product_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
+def get_product(product_id: int, db: Session = Depends(get_db)):
     product = db.query(Product).filter(Product.id == product_id).first()
     if product is None:
         return {"success": False, "data": None, "error": "Product not found", "message": None}
@@ -119,7 +127,7 @@ def get_product(product_id: int, db: Session = Depends(get_db), user: dict = Dep
     }
     return {"success": True, "data": data, "error": None, "message": None}
 
-# PUT /products/{product_id}
+# PUT /products/{product_id} - REQUIRES AUTHENTICATION for admin operations
 @router.put("/{product_id}")
 def update_product(product_id: int, product: ProductCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     db_product = db.query(Product).filter(Product.id == product_id).first()
@@ -143,7 +151,7 @@ def update_product(product_id: int, product: ProductCreate, db: Session = Depend
     }
     return {"success": True, "data": data, "error": None, "message": None}
 
-# SupplierProduct endpoints
+# SupplierProduct endpoints - ALL REQUIRE AUTHENTICATION for admin operations
 @router.post("/supplier-product/", response_model=SupplierProductResponse)
 def create_supplier_product(supplier_product: SupplierProductCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     # Verify supplier and product exist
@@ -200,10 +208,10 @@ class VariantBase(BaseModel):
 class VariantCreate(VariantBase):
     pass
 
-# Variant endpoints
-# GET /products/{product_id}/variants
+# Variant endpoints - PUBLIC read access for quotation web app
+# GET /products/{product_id}/variants - PUBLIC for quotation web app
 @router.get("/{product_id}/variants")
-def get_variants_for_product(product_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
+def get_variants_for_product(product_id: int, db: Session = Depends(get_db)):
     variants = db.query(ProductVariant).filter(ProductVariant.product_id == product_id).all()
     data = [
         {
@@ -221,7 +229,7 @@ def get_variants_for_product(product_id: int, db: Session = Depends(get_db), use
     ]
     return {"success": True, "data": data, "error": None, "message": None}
 
-# POST /products/{product_id}/variants
+# POST /products/{product_id}/variants - REQUIRES AUTHENTICATION for admin operations
 @router.post("/{product_id}/variants")
 def create_variant(product_id: int, variant: VariantCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     # Check product exists

@@ -34,6 +34,7 @@ class SupplierResponse(SupplierBase):
         from_attributes = True
 
 # Supplier endpoints
+# POST /suppliers - REQUIRES AUTHENTICATION for admin operations
 @router.post("/")
 def create_supplier(supplier: SupplierCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     db_supplier = Supplier(**supplier.model_dump())
@@ -58,13 +59,13 @@ def create_supplier(supplier: SupplierCreate, db: Session = Depends(get_db), use
     }
     return {"success": True, "data": data, "error": None, "message": None}
 
+# GET /suppliers - PUBLIC for quotation web app
 @router.get("/")
 def get_suppliers(
     search: Optional[str] = None,
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db),
-    user: dict = Depends(verify_google_token)
+    db: Session = Depends(get_db)
 ):
     query = db.query(Supplier)
     if search:
@@ -96,8 +97,9 @@ def get_suppliers(
     ]
     return {"success": True, "data": data, "error": None, "message": None}
 
+# GET /suppliers/{supplier_id} - PUBLIC for quotation web app
 @router.get("/{supplier_id}")
-def get_supplier(supplier_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
+def get_supplier(supplier_id: int, db: Session = Depends(get_db)):
     supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
     if supplier is None:
         return {"success": False, "data": None, "error": "Supplier not found", "message": None}
@@ -119,6 +121,7 @@ def get_supplier(supplier_id: int, db: Session = Depends(get_db), user: dict = D
     }
     return {"success": True, "data": data, "error": None, "message": None}
 
+# PUT /suppliers/{supplier_id} - REQUIRES AUTHENTICATION for admin operations
 @router.put("/{supplier_id}")
 def update_supplier(supplier_id: int, supplier: SupplierCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     db_supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()

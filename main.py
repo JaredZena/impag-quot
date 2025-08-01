@@ -49,7 +49,7 @@ class QueryResponse(BaseModel):
         from_attributes = True
 
 @app.post("/query")
-async def query(request: QueryRequest, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
+async def query(request: QueryRequest, db: Session = Depends(get_db)):
     # Get response from RAG system
     response = query_rag_system(request.query)
     
