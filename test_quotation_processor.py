@@ -36,7 +36,6 @@ def test_quotation_processing():
             print("=" * 50)
             print(f"Supplier: {result['supplier']}")
             print(f"Products Processed: {result['products_processed']}")
-            print(f"Variants Created: {result['variants_created']}")
             print(f"Supplier Products Created: {result['supplier_products_created']}")
             
             print("\nSKU Generation Details:")
@@ -45,7 +44,7 @@ def test_quotation_processing():
                 print(f"\nProduct: {sku_info['product_name']}")
                 print(f"  AI Suggested SKU: {sku_info['ai_suggested']}")
                 print(f"  Base SKU: {sku_info['base_sku']}")
-                print(f"  Variant SKU: {sku_info['variant_sku']}")
+                print(f"  Product SKU: {sku_info['variant_sku']}")
         else:
             print(f"Error: {response.status_code}")
             print(response.text)

@@ -6,7 +6,7 @@ import copy
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional
 from models import (
-    Supplier, Product, ProductVariant, SupplierProduct, 
+    Supplier, Product, SupplierProduct, 
     ProductCategory, ProductUnit, SessionLocal
 )
 
@@ -490,19 +490,26 @@ Respond only with the JSON object, no extra explanation."""
         return new_supplier
 
     def get_or_create_product(self, session: Session, product_info: Dict) -> Product:
-        """Check if product exists by base_sku, create if not. Uses hybrid SKU generation."""
+        
         print(f'Getting or creating product: {product_info}')
         print(f'Category ID at start of get_or_create_product: {product_info.get("category_id")}')
         
-        # Get base SKU using hybrid approach (AI suggestion + code fallback)
-        base_sku = self.sku_generator.get_base_sku(product_info)
-        print(f"Base SKU: {base_sku}")
+        # Get SKU using hybrid approach (AI suggestion + code fallback)
+        # For flattened model, we use the main SKU directly
+        sku = self.sku_generator.get_variant_sku(
+            product_info.get("base_sku", ""), 
+            product_info.get("specifications", {})
+        )
+        print(f"Generated SKU: {sku}")
 
-        existing = session.query(Product).filter_by(base_sku=base_sku).first()
+        existing = session.query(Product).filter_by(sku=sku).first()
         if existing:
-            print(f"Found existing product: {existing.name} (ID: {existing.id}) [SKU: {existing.base_sku}]")
+            print(f"Found existing product: {existing.name} (ID: {existing.id}) [SKU: {existing.sku}]")
             return existing
         
+        # Get base SKU for backward compatibility
+        base_sku = self.sku_generator.get_base_sku(product_info)
+        print(f"Base SKU: {base_sku}")
         
         # Debug: Print the unit value we received
         print(f"\nReceived unit value: {product_info.get('unit')}")
@@ -538,47 +545,27 @@ Respond only with the JSON object, no extra explanation."""
             base_sku=base_sku,
             category_id=category_id,
             unit=unit,  # Use the enum member directly
-            iva=product_info.get("iva", True)
-        )
-        
-        session.add(new_product)
-        session.commit()
-        print(f"Created new product: {new_product.name} (ID: {new_product.id}) [SKU: {new_product.base_sku}]")
-        return new_product
-
-    def create_product_variant(self, session: Session, product: Product, product_info: Dict) -> ProductVariant:
-        """Create a new product variant with hybrid SKU generation."""
-        # Generate variant SKU using code rules for consistency
-        variant_sku = self.sku_generator.get_variant_sku(
-            product.base_sku, 
-            product_info.get("specifications", {})
-        )
-        
-        # Check if variant with this SKU already exists
-        existing = session.query(ProductVariant).filter_by(sku=variant_sku).first()
-        if existing:
-            print(f"Found existing variant: {existing.sku} (ID: {existing.id})")
-            return existing
-        
-        new_variant = ProductVariant(
-            product_id=product.id,
-            sku=variant_sku,
+            iva=product_info.get("iva", True),
+            # New flattened fields
+            sku=sku,
+            price=product_info.get("price"),
+            stock=product_info.get("stock", 0),
             specifications=product_info.get("specifications", {}),
             is_active=True
         )
         
-        session.add(new_variant)
+        session.add(new_product)
         session.commit()
-        print(f"Created new variant: {new_variant.sku} (ID: {new_variant.id})")
-        return new_variant
+        print(f"Created new product: {new_product.name} (ID: {new_product.id}) [SKU: {new_product.sku}]")
+        return new_product
 
-    def create_supplier_product(self, session: Session, supplier: Supplier, variant: ProductVariant, 
+    def create_supplier_product(self, session: Session, supplier: Supplier, product: Product, 
                               product_info: Dict, supplier_sku: str = None) -> SupplierProduct:
         """Create supplier-product relationship."""
-        # Check if this supplier-variant relationship already exists
+        # Check if this supplier-product relationship already exists
         existing = session.query(SupplierProduct).filter_by(
             supplier_id=supplier.id,
-            variant_id=variant.id
+            product_id=product.id
         ).first()
         
         if existing:
@@ -587,7 +574,7 @@ Respond only with the JSON object, no extra explanation."""
         
         new_supplier_product = SupplierProduct(
             supplier_id=supplier.id,
-            variant_id=variant.id,
+            product_id=product.id,
             supplier_sku=supplier_sku,
             cost=product_info.get("cost"),
             lead_time_days=0,  # Default, can be updated later
@@ -631,7 +618,6 @@ Respond only with the JSON object, no extra explanation."""
             results = {
                 "supplier": None,
                 "products_processed": 0,
-                "variants_created": 0,
                 "supplier_products_created": 0,
                 "skus_generated": []
             }
@@ -661,13 +647,9 @@ Respond only with the JSON object, no extra explanation."""
                 # Create/get product
                 product = self.get_or_create_product(session, product_info_copy)
                 
-                # Create variant (no price/stock set initially)
-                variant = self.create_product_variant(session, product, product_info_copy)
-                results["variants_created"] += 1
-                
                 # Create supplier-product relationship
                 self.create_supplier_product(
-                    session, supplier, variant, product_info_copy, 
+                    session, supplier, product, product_info_copy, 
                     supplier_sku=product_info_copy.get("supplier_sku")
                 )
                 results["supplier_products_created"] += 1
@@ -676,7 +658,7 @@ Respond only with the JSON object, no extra explanation."""
                 results["skus_generated"].append({
                     "product_name": product_info_copy["name"],
                     "base_sku": product.base_sku,
-                    "variant_sku": variant.sku,
+                    "variant_sku": product.sku,
                     "ai_suggested": product_info_copy.get("suggested_base_sku", "N/A"),
                     "category_id": product_info_copy["category_id"]
                 })
@@ -686,7 +668,6 @@ Respond only with the JSON object, no extra explanation."""
             session.commit()
             print(f"\n" + "=" * 50)
             print(f"✓ Successfully processed {results['products_processed']} products")
-            print(f"✓ Created {results['variants_created']} variants")
             print(f"✓ Created {results['supplier_products_created']} supplier relationships")
             
             # Display processed product names

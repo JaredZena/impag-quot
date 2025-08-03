@@ -10,7 +10,6 @@ from routes import suppliers, products, quotations
 from routes.products import router as products_router
 from routes.suppliers import router as suppliers_router
 from routes.quotations import router as quotations_router
-from routes.variants import router as variants_router
 from routes.categories import router as categories_router
 from auth import verify_google_token
 
@@ -33,7 +32,6 @@ app.add_middleware(
 app.include_router(products_router)
 app.include_router(suppliers_router)
 app.include_router(quotations_router)
-app.include_router(variants_router)
 app.include_router(categories_router)
 
 class QueryRequest(BaseModel):

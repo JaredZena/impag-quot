@@ -16,7 +16,6 @@ router = APIRouter(prefix="/quotations", tags=["quotations"])
 class QuotationResponse(BaseModel):
     supplier: Optional[str]
     products_processed: int
-    variants_created: int
     supplier_products_created: int
     skus_generated: list
 
@@ -125,7 +124,6 @@ async def process_quotation_batch(
             print(f"✅ Successfully processed: {filename}")
             print(f"   Supplier: {result['supplier']}")
             print(f"   Products: {result['products_processed']}")
-            print(f"   Variants: {result['variants_created']}")
             
             # Display product names
             if result.get('skus_generated'):

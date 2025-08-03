@@ -57,34 +57,24 @@ class Product(Base):
     unit = Column(Enum(ProductUnit), nullable=False, default=ProductUnit.PIEZA)
     package_size = Column(Integer, nullable=True)  # Number of units in a package (e.g., 1000 pieces per package)
     iva = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    last_updated = Column(DateTime(timezone=True), onupdate=func.now())
-
-    category = relationship("ProductCategory", back_populates="products")
-    variants = relationship("ProductVariant", back_populates="product")
-
-class ProductVariant(Base):
-    __tablename__ = "product_variant"
-
-    id = Column(Integer, primary_key=True, index=True)
-    product_id = Column(Integer, ForeignKey("product.id"))
+    # New columns from ProductVariant
     sku = Column(String(100), unique=True, nullable=False)
     price = Column(Numeric(10, 2), nullable=True)
     stock = Column(Integer, default=0)
     specifications = Column(JSON, nullable=True)
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_updated = Column(DateTime(timezone=True), onupdate=func.now())
 
-    product = relationship("Product", back_populates="variants")
-    supplier_products = relationship("SupplierProduct", back_populates="variant")
+    category = relationship("ProductCategory", back_populates="products")
+    supplier_products = relationship("SupplierProduct", back_populates="product")
 
 class SupplierProduct(Base):
     __tablename__ = "supplier_product"
 
     id = Column(Integer, primary_key=True, index=True)
     supplier_id = Column(Integer, ForeignKey("supplier.id"))
-    variant_id = Column(Integer, ForeignKey("product_variant.id", ondelete="CASCADE"))
+    product_id = Column(Integer, ForeignKey("product.id", ondelete="CASCADE"))
     supplier_sku = Column(String(100), nullable=True)
     cost = Column(Numeric(10, 2), nullable=True)
     stock = Column(Integer, default=0)
@@ -95,7 +85,7 @@ class SupplierProduct(Base):
     last_updated = Column(DateTime(timezone=True), onupdate=func.now())
 
     supplier = relationship("Supplier", back_populates="products")
-    variant = relationship("ProductVariant", back_populates="supplier_products")
+    product = relationship("Product", back_populates="supplier_products")
 
 class Query(Base):
     __tablename__ = "query"
