@@ -22,11 +22,26 @@ class SupplierBase(BaseModel):
     address: Optional[str] = None
     website_url: Optional[str] = None
 
+class SupplierUpdate(BaseModel):
+    name: Optional[str] = None
+    common_name: Optional[str] = None
+    legal_name: Optional[str] = None
+    rfc: Optional[str] = None
+    description: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_common_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    website_url: Optional[str] = None
+    archived_at: Optional[datetime] = None
+
 class SupplierCreate(SupplierBase):
     pass
 
 class SupplierResponse(SupplierBase):
     id: int
+    archived_at: Optional[datetime] = None
     created_at: datetime
     last_updated: Optional[datetime] = None
 
@@ -54,6 +69,7 @@ def create_supplier(supplier: SupplierCreate, db: Session = Depends(get_db), use
         "phone": db_supplier.phone,
         "address": db_supplier.address,
         "website_url": db_supplier.website_url,
+        "archived_at": db_supplier.archived_at,
         "created_at": db_supplier.created_at,
         "last_updated": db_supplier.last_updated,
     }
@@ -63,11 +79,17 @@ def create_supplier(supplier: SupplierCreate, db: Session = Depends(get_db), use
 @router.get("/")
 def get_suppliers(
     search: Optional[str] = None,
+    include_archived: bool = False,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db)
 ):
     query = db.query(Supplier)
+    
+    # Filter out archived records by default
+    if not include_archived:
+        query = query.filter(Supplier.archived_at.is_(None))
+    
     if search:
         like_pattern = f"%{search}%"
         query = query.filter(
@@ -90,6 +112,7 @@ def get_suppliers(
             "phone": s.phone,
             "address": s.address,
             "website_url": s.website_url,
+            "archived_at": s.archived_at,
             "created_at": s.created_at,
             "last_updated": s.last_updated,
         }
@@ -99,8 +122,14 @@ def get_suppliers(
 
 # GET /suppliers/{supplier_id} - PUBLIC for quotation web app
 @router.get("/{supplier_id}")
-def get_supplier(supplier_id: int, db: Session = Depends(get_db)):
-    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+def get_supplier(supplier_id: int, include_archived: bool = False, db: Session = Depends(get_db)):
+    query = db.query(Supplier).filter(Supplier.id == supplier_id)
+    
+    # Filter out archived records by default
+    if not include_archived:
+        query = query.filter(Supplier.archived_at.is_(None))
+        
+    supplier = query.first()
     if supplier is None:
         return {"success": False, "data": None, "error": "Supplier not found", "message": None}
     data = {
@@ -116,6 +145,7 @@ def get_supplier(supplier_id: int, db: Session = Depends(get_db)):
         "phone": supplier.phone,
         "address": supplier.address,
         "website_url": supplier.website_url,
+        "archived_at": supplier.archived_at,
         "created_at": supplier.created_at,
         "last_updated": supplier.last_updated,
     }
@@ -123,11 +153,11 @@ def get_supplier(supplier_id: int, db: Session = Depends(get_db)):
 
 # PUT /suppliers/{supplier_id} - REQUIRES AUTHENTICATION for admin operations
 @router.put("/{supplier_id}")
-def update_supplier(supplier_id: int, supplier: SupplierCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
+def update_supplier(supplier_id: int, supplier: SupplierUpdate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     db_supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
     if db_supplier is None:
         return {"success": False, "data": None, "error": "Supplier not found", "message": None}
-    for key, value in supplier.model_dump().items():
+    for key, value in supplier.model_dump(exclude_unset=True).items():
         setattr(db_supplier, key, value)
     db.commit()
     db.refresh(db_supplier)
@@ -144,7 +174,34 @@ def update_supplier(supplier_id: int, supplier: SupplierCreate, db: Session = De
         "phone": db_supplier.phone,
         "address": db_supplier.address,
         "website_url": db_supplier.website_url,
+        "archived_at": db_supplier.archived_at,
         "created_at": db_supplier.created_at,
         "last_updated": db_supplier.last_updated,
     }
     return {"success": True, "data": data, "error": None, "message": None} 
+# Archive/Unarchive endpoints
+@router.patch("/{supplier_id}/archive")
+def archive_supplier(supplier_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
+    """Archive a supplier (soft delete)"""
+    db_supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    if db_supplier is None:
+        return {"success": False, "data": None, "error": "Supplier not found", "message": None}
+    
+    db_supplier.archived_at = datetime.utcnow()
+    db.commit()
+    db.refresh(db_supplier)
+    
+    return {"success": True, "data": {"id": supplier_id, "archived_at": db_supplier.archived_at}, "error": None, "message": "Supplier archived successfully"}
+
+@router.patch("/{supplier_id}/unarchive")
+def unarchive_supplier(supplier_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
+    """Unarchive a supplier (restore from soft delete)"""
+    db_supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    if db_supplier is None:
+        return {"success": False, "data": None, "error": "Supplier not found", "message": None}
+    
+    db_supplier.archived_at = None
+    db.commit()
+    db.refresh(db_supplier)
+    
+    return {"success": True, "data": {"id": supplier_id, "archived_at": None}, "error": None, "message": "Supplier restored successfully"}

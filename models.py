@@ -30,6 +30,7 @@ class Supplier(Base):
     phone = Column(String, nullable=True)
     address = Column(String, nullable=True)
     website_url = Column(String, nullable=True)  # Website URL of the supplier
+    archived_at = Column(DateTime(timezone=True), nullable=True)  # Soft delete timestamp
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_updated = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -63,6 +64,7 @@ class Product(Base):
     stock = Column(Integer, default=0)
     specifications = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
+    archived_at = Column(DateTime(timezone=True), nullable=True)  # Soft delete timestamp
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_updated = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -81,6 +83,7 @@ class SupplierProduct(Base):
     lead_time_days = Column(Integer, nullable=True)
     is_active = Column(Boolean, default=True)
     notes = Column(Text, nullable=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True)  # Soft delete timestamp
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_updated = Column(DateTime(timezone=True), onupdate=func.now())
 

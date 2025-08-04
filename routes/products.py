@@ -40,9 +40,11 @@ class ProductUpdate(BaseModel):
     stock: Optional[int] = None
     specifications: Optional[Any] = None
     is_active: Optional[bool] = None
+    archived_at: Optional[datetime] = None
 
 class ProductResponse(ProductBase):
     id: int
+    archived_at: Optional[datetime] = None
     created_at: datetime
     last_updated: Optional[datetime] = None
 
@@ -62,8 +64,20 @@ class SupplierProductBase(BaseModel):
 class SupplierProductCreate(SupplierProductBase):
     pass
 
+class SupplierProductUpdate(BaseModel):
+    supplier_id: Optional[int] = None
+    product_id: Optional[int] = None
+    supplier_sku: Optional[str] = None
+    cost: Optional[float] = None
+    stock: Optional[int] = None
+    lead_time_days: Optional[int] = None
+    is_active: Optional[bool] = None
+    notes: Optional[str] = None
+    archived_at: Optional[datetime] = None
+
 class SupplierProductResponse(SupplierProductBase):
     id: int
+    archived_at: Optional[datetime] = None
     created_at: datetime
     last_updated: Optional[datetime] = None
 
@@ -79,6 +93,7 @@ def get_products(
     category_id: Optional[int] = Query(None),
     supplier_id: Optional[int] = Query(None),
     is_active: Optional[bool] = Query(None),
+    include_archived: bool = False,
     skip: int = 0,
     limit: int = 100,
     sort_by: Optional[str] = Query(None),
@@ -86,6 +101,10 @@ def get_products(
     db: Session = Depends(get_db)
 ):
     query = db.query(Product)
+    
+    # Filter out archived records by default
+    if not include_archived:
+        query = query.filter(Product.archived_at.is_(None))
     if id:
         query = query.filter(Product.id == id)
     if name:
@@ -126,6 +145,7 @@ def get_products(
             "stock": p.stock,
             "specifications": p.specifications,
             "is_active": p.is_active,
+            "archived_at": p.archived_at,
             "created_at": p.created_at,
             "last_updated": p.last_updated,
         }
@@ -135,8 +155,14 @@ def get_products(
 
 # GET /products/{product_id} - PUBLIC for quotation web app
 @router.get("/{product_id}")
-def get_product(product_id: int, db: Session = Depends(get_db)):
-    product = db.query(Product).filter(Product.id == product_id).first()
+def get_product(product_id: int, include_archived: bool = False, db: Session = Depends(get_db)):
+    query = db.query(Product).filter(Product.id == product_id)
+    
+    # Filter out archived records by default
+    if not include_archived:
+        query = query.filter(Product.archived_at.is_(None))
+        
+    product = query.first()
     if product is None:
         return {"success": False, "data": None, "error": "Product not found", "message": None}
     data = {
@@ -153,6 +179,7 @@ def get_product(product_id: int, db: Session = Depends(get_db)):
         "stock": product.stock,
         "specifications": product.specifications,
         "is_active": product.is_active,
+        "archived_at": product.archived_at,
         "created_at": product.created_at,
         "last_updated": product.last_updated,
     }
@@ -185,6 +212,7 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db), user: 
         "stock": db_product.stock,
         "specifications": db_product.specifications,
         "is_active": db_product.is_active,
+        "archived_at": db_product.archived_at,
         "created_at": db_product.created_at,
         "last_updated": db_product.last_updated,
     }
@@ -223,6 +251,7 @@ def update_product(product_id: int, product: ProductUpdate, db: Session = Depend
         "stock": db_product.stock,
         "specifications": db_product.specifications,
         "is_active": db_product.is_active,
+        "archived_at": db_product.archived_at,
         "created_at": db_product.created_at,
         "last_updated": db_product.last_updated,
     }
@@ -283,24 +312,42 @@ def debug_supplier_products(db: Session = Depends(get_db)):
     }
 
 @router.get("/supplier-product/", response_model=List[SupplierProductResponse])
-def get_supplier_products(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    supplier_products = db.query(SupplierProduct).offset(skip).limit(limit).all()
+def get_supplier_products(include_archived: bool = False, skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    query = db.query(SupplierProduct)
+    
+    # Filter out archived records by default
+    if not include_archived:
+        query = query.filter(SupplierProduct.archived_at.is_(None))
+        
+    supplier_products = query.offset(skip).limit(limit).all()
     return supplier_products
 
 @router.get("/{product_id}/supplier-products", response_model=List[SupplierProductResponse])
-def get_supplier_products_by_product(product_id: int, db: Session = Depends(get_db)):
+def get_supplier_products_by_product(product_id: int, include_archived: bool = False, db: Session = Depends(get_db)):
     """Get all supplier-product relationships for a specific product"""
     # Verify product exists
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     
-    supplier_products = db.query(SupplierProduct).filter(SupplierProduct.product_id == product_id).all()
+    query = db.query(SupplierProduct).filter(SupplierProduct.product_id == product_id)
+    
+    # Filter out archived records by default
+    if not include_archived:
+        query = query.filter(SupplierProduct.archived_at.is_(None))
+        
+    supplier_products = query.all()
     return supplier_products
 
 @router.get("/supplier-product/{supplier_product_id}", response_model=SupplierProductResponse)
-def get_supplier_product(supplier_product_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
-    supplier_product = db.query(SupplierProduct).filter(SupplierProduct.id == supplier_product_id).first()
+def get_supplier_product(supplier_product_id: int, include_archived: bool = False, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
+    query = db.query(SupplierProduct).filter(SupplierProduct.id == supplier_product_id)
+    
+    # Filter out archived records by default
+    if not include_archived:
+        query = query.filter(SupplierProduct.archived_at.is_(None))
+        
+    supplier_product = query.first()
     if supplier_product is None:
         raise HTTPException(status_code=404, detail="Supplier Product not found")
     return supplier_product
@@ -308,7 +355,7 @@ def get_supplier_product(supplier_product_id: int, db: Session = Depends(get_db)
 @router.put("/supplier-product/{supplier_product_id}", response_model=SupplierProductResponse)
 def update_supplier_product(
     supplier_product_id: int,
-    supplier_product: SupplierProductCreate,
+    supplier_product: SupplierProductUpdate,
     db: Session = Depends(get_db),
     user: dict = Depends(verify_google_token)
 ):
@@ -316,9 +363,63 @@ def update_supplier_product(
     if db_supplier_product is None:
         raise HTTPException(status_code=404, detail="Supplier Product not found")
     
-    for key, value in supplier_product.model_dump().items():
+    for key, value in supplier_product.model_dump(exclude_unset=True).items():
         setattr(db_supplier_product, key, value)
     
     db.commit()
     db.refresh(db_supplier_product)
     return db_supplier_product
+
+# Archive/Unarchive endpoints for Products
+@router.patch("/{product_id}/archive")
+def archive_product(product_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
+    """Archive a product (soft delete)"""
+    db_product = db.query(Product).filter(Product.id == product_id).first()
+    if db_product is None:
+        return {"success": False, "data": None, "error": "Product not found", "message": None}
+    
+    db_product.archived_at = datetime.utcnow()
+    db.commit()
+    db.refresh(db_product)
+    
+    return {"success": True, "data": {"id": product_id, "archived_at": db_product.archived_at}, "error": None, "message": "Product archived successfully"}
+
+@router.patch("/{product_id}/unarchive")
+def unarchive_product(product_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
+    """Unarchive a product (restore from soft delete)"""
+    db_product = db.query(Product).filter(Product.id == product_id).first()
+    if db_product is None:
+        return {"success": False, "data": None, "error": "Product not found", "message": None}
+    
+    db_product.archived_at = None
+    db.commit()
+    db.refresh(db_product)
+    
+    return {"success": True, "data": {"id": product_id, "archived_at": None}, "error": None, "message": "Product restored successfully"}
+
+# Archive/Unarchive endpoints for SupplierProducts
+@router.patch("/supplier-product/{supplier_product_id}/archive")
+def archive_supplier_product(supplier_product_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
+    """Archive a supplier-product relationship (soft delete)"""
+    db_supplier_product = db.query(SupplierProduct).filter(SupplierProduct.id == supplier_product_id).first()
+    if db_supplier_product is None:
+        raise HTTPException(status_code=404, detail="Supplier Product not found")
+    
+    db_supplier_product.archived_at = datetime.utcnow()
+    db.commit()
+    db.refresh(db_supplier_product)
+    
+    return {"success": True, "data": {"id": supplier_product_id, "archived_at": db_supplier_product.archived_at}, "error": None, "message": "Supplier Product archived successfully"}
+
+@router.patch("/supplier-product/{supplier_product_id}/unarchive")
+def unarchive_supplier_product(supplier_product_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
+    """Unarchive a supplier-product relationship (restore from soft delete)"""
+    db_supplier_product = db.query(SupplierProduct).filter(SupplierProduct.id == supplier_product_id).first()
+    if db_supplier_product is None:
+        raise HTTPException(status_code=404, detail="Supplier Product not found")
+    
+    db_supplier_product.archived_at = None
+    db.commit()
+    db.refresh(db_supplier_product)
+    
+    return {"success": True, "data": {"id": supplier_product_id, "archived_at": None}, "error": None, "message": "Supplier Product restored successfully"}
