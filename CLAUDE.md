@@ -68,13 +68,15 @@ DATABASE_URL=your-database-url
 
 **rag_system.py**: Orchestrates the RAG pipeline by combining Pinecone historical context with live Shopify product data using OpenAI embeddings and Claude for response generation.
 
-**quotation_processor.py**: Processes PDF quotations using Claude AI to extract structured supplier and product data. Features hybrid SKU generation and automatic category selection.
+**quotation_processor.py**: Processes PDF and image quotations using Claude AI to extract structured supplier and product data. Features hybrid SKU generation, automatic category selection, and OCR text extraction from images using EasyOCR.
 
-**routes/quotations.py**: Handles both single file uploads (`/process`) and batch directory processing (`/process-batch`) for quotation PDFs.
+**routes/quotations.py**: Handles both single file uploads (`/process`) and batch directory processing (`/process-batch`) for quotation files. Supports PDF and image formats (PNG, JPG, JPEG, GIF, BMP, TIFF, WEBP).
 
 ### API Integration Points
 
-**Claude AI**: Used for PDF text extraction and structured data parsing with temperature=0 for consistency. Model: claude-sonnet-4-20250514
+**Claude AI**: Used for text processing and structured data parsing with temperature=0 for consistency. Model: claude-sonnet-4-20250514
+
+**EasyOCR**: Multi-language OCR engine for extracting text from images. Supports English and Spanish with confidence-based filtering.
 
 **OpenAI**: Generates embeddings for product search and context matching in the RAG system
 
@@ -85,6 +87,6 @@ DATABASE_URL=your-database-url
 ### Data Flow
 
 1. **Quotation Generation**: User query → OpenAI embedding → Pinecone context search → Shopify product matching → Claude response generation
-2. **PDF Processing**: PDF upload → text extraction → Claude structured parsing → database storage with SKU generation
-3. **Batch PDF Processing**: Directory path → find all PDFs → process each file individually → aggregate results with error handling
+2. **File Processing**: PDF/Image upload → text extraction (PyMuPDF for PDFs, EasyOCR for images) → Claude structured parsing → database storage with SKU generation
+3. **Batch File Processing**: Directory path → find all supported files → process each file individually → aggregate results with error handling
 4. **Product Management**: Base products → variants with specifications → supplier pricing relationships

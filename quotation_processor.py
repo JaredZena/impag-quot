@@ -1,8 +1,11 @@
 import re
 import json
+import os
 import fitz  # PyMuPDF
 import anthropic
 import copy
+import easyocr
+from PIL import Image
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional
 from models import (
@@ -147,6 +150,38 @@ class QuotationProcessor:
             return text
         except Exception as e:
             raise Exception(f"Error extracting text from PDF: {str(e)}")
+    
+    def extract_text_from_image(self, image_path: str) -> str:
+        """Extract text from image file using OCR."""
+        try:
+            # Initialize EasyOCR reader for English and Spanish
+            reader = easyocr.Reader(['en', 'es'])
+            
+            # Read text from image
+            results = reader.readtext(image_path)
+            
+            # Extract text from results (results contain bounding box, text, confidence)
+            text_lines = []
+            for (bbox, text, confidence) in results:
+                # Only include text with reasonable confidence (> 0.5)
+                if confidence > 0.5:
+                    text_lines.append(text)
+            
+            # Join all text lines
+            extracted_text = "\n".join(text_lines)
+            return extracted_text
+            
+        except Exception as e:
+            raise Exception(f"Error extracting text from image: {str(e)}")
+    
+    def is_image_file(self, file_path: str) -> bool:
+        """Check if file is a supported image format."""
+        image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp'}
+        return os.path.splitext(file_path.lower())[1] in image_extensions
+    
+    def is_pdf_file(self, file_path: str) -> bool:
+        """Check if file is a PDF."""
+        return os.path.splitext(file_path.lower())[1] == '.pdf'
 
     def get_suggested_category(self, product_name: str, description: str = "") -> Optional[int]:
         """
@@ -586,23 +621,33 @@ Respond only with the JSON object, no extra explanation."""
         print(f"Created supplier-product relationship (ID: {new_supplier_product.id}) [Cost: ${new_supplier_product.cost}]")
         return new_supplier_product
 
-    def process_quotation(self, pdf_path: str, category_id: Optional[int] = None) -> Dict:
+    def process_quotation(self, file_path: str, category_id: Optional[int] = None) -> Dict:
         """
-        Main method to process a quotation PDF with enhanced SKU generation.
+        Main method to process a quotation file (PDF or image) with enhanced SKU generation.
         
         Args:
-            pdf_path: Path to the PDF file
+            file_path: Path to the PDF or image file
             category_id: Optional product category ID. If not provided, will be determined automatically.
             
         Returns:
             Dict with processing results including SKU information
         """
-        print(f"Processing quotation: {pdf_path}")
+        print(f"Processing quotation: {file_path}")
         print("=" * 50)
         
-        # Extract text from PDF
-        pdf_text = self.extract_text_from_pdf(pdf_path)
-        print("✓ Text extracted from PDF")
+        # Extract text from file (PDF or image)
+        if self.is_pdf_file(file_path):
+            extracted_text = self.extract_text_from_pdf(file_path)
+            print("✓ Text extracted from PDF")
+        elif self.is_image_file(file_path):
+            extracted_text = self.extract_text_from_image(file_path)
+            print("✓ Text extracted from image using OCR")
+        else:
+            supported_formats = "PDF, PNG, JPG, JPEG, GIF, BMP, TIFF, WEBP"
+            raise ValueError(f"Unsupported file format. Supported formats: {supported_formats}")
+        
+        if not extracted_text.strip():
+            raise ValueError("No text could be extracted from the file")
         
         session = SessionLocal()
         try:
@@ -612,7 +657,7 @@ Respond only with the JSON object, no extra explanation."""
                 raise ValueError("No product categories found in the database")
             
             # Use AI to extract structured data (including SKU suggestions and category selection)
-            structured_data = self.extract_structured_data(pdf_text, categories)
+            structured_data = self.extract_structured_data(extracted_text, categories)
             print("✓ Structured data extracted using Claude AI")
             
             results = {

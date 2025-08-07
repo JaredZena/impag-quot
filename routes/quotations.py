@@ -34,17 +34,22 @@ async def process_quotation(
     user: dict = Depends(verify_google_token)
 ):
     """
-    Process a quotation PDF file and extract structured data.
+    Process a quotation file (PDF or image) and extract structured data.
     
     Args:
-        file: PDF file to process
+        file: PDF or image file to process (supported: PDF, PNG, JPG, JPEG, GIF, BMP, TIFF, WEBP)
         category_id: Optional product category ID (if not provided, AI will auto-categorize)
     """
-    if not file.filename.lower().endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="Only PDF files are accepted")
+    # Check if file format is supported
+    supported_extensions = {'.pdf', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp'}
+    file_extension = os.path.splitext(file.filename.lower())[1]
+    if file_extension not in supported_extensions:
+        supported_formats = "PDF, PNG, JPG, JPEG, GIF, BMP, TIFF, WEBP"
+        raise HTTPException(status_code=400, detail=f"Unsupported file format. Supported formats: {supported_formats}")
     
-    # Create a temporary file to store the uploaded PDF
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+    # Create a temporary file to store the uploaded file
+    file_extension = os.path.splitext(file.filename.lower())[1]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
         content = await file.read()
         temp_file.write(content)
         temp_file_path = temp_file.name
@@ -74,10 +79,10 @@ async def process_quotation_batch(
     user: dict = Depends(verify_google_token)
 ):
     """
-    Process all PDF files in a directory and extract structured data.
+    Process all PDF and image files in a directory and extract structured data.
     
     Args:
-        folder_path: Path to the directory containing PDF files
+        folder_path: Path to the directory containing PDF and image files
         category_id: Optional product category ID (if not provided, AI will auto-categorize)
     """
     # Validate folder path exists
@@ -87,37 +92,47 @@ async def process_quotation_batch(
     if not os.path.isdir(folder_path):
         raise HTTPException(status_code=400, detail=f"Path is not a directory: {folder_path}")
     
-    # Find all PDF files in the directory (case-insensitive)
-    pdf_pattern_lower = os.path.join(folder_path, "*.pdf")
-    pdf_pattern_upper = os.path.join(folder_path, "*.PDF")
-    pdf_files = glob.glob(pdf_pattern_lower) + glob.glob(pdf_pattern_upper)
+    # Find all supported files in the directory (case-insensitive)
+    supported_patterns = [
+        "*.pdf", "*.PDF",
+        "*.png", "*.PNG",
+        "*.jpg", "*.JPG", "*.jpeg", "*.JPEG",
+        "*.gif", "*.GIF",
+        "*.bmp", "*.BMP",
+        "*.tiff", "*.TIFF",
+        "*.webp", "*.WEBP"
+    ]
     
-    if not pdf_files:
-        raise HTTPException(status_code=400, detail=f"No PDF files found in directory: {folder_path}")
+    all_files = []
+    for pattern in supported_patterns:
+        all_files.extend(glob.glob(os.path.join(folder_path, pattern)))
+    
+    if not all_files:
+        raise HTTPException(status_code=400, detail=f"No supported files found in directory: {folder_path}. Supported formats: PDF, PNG, JPG, JPEG, GIF, BMP, TIFF, WEBP")
     
     # Initialize the quotation processor
     processor = QuotationProcessor(claude_api_key)
     
     batch_results = {
-        "total_files_processed": len(pdf_files),
+        "total_files_processed": len(all_files),
         "successful_files": 0,
         "failed_files": 0,
         "results": [],
         "errors": []
     }
     
-    print(f"Processing {len(pdf_files)} PDF files from directory: {folder_path}")
+    print(f"Processing {len(all_files)} files from directory: {folder_path}")
     print("=" * 60)
     
-    # Process each PDF file
-    for i, pdf_path in enumerate(pdf_files, 1):
-        filename = os.path.basename(pdf_path)
-        print(f"\n[{i}/{len(pdf_files)}] Processing: {filename}")
+    # Process each file
+    for i, file_path in enumerate(all_files, 1):
+        filename = os.path.basename(file_path)
+        print(f"\n[{i}/{len(all_files)}] Processing: {filename}")
         print("-" * 40)
         
         try:
             # Process the quotation
-            result = processor.process_quotation(pdf_path, category_id)
+            result = processor.process_quotation(file_path, category_id)
             batch_results["results"].append(result)
             batch_results["successful_files"] += 1
             
@@ -134,7 +149,7 @@ async def process_quotation_batch(
         except Exception as e:
             error_info = {
                 "filename": filename,
-                "file_path": pdf_path,
+                "file_path": file_path,
                 "error": str(e)
             }
             batch_results["errors"].append(error_info)
