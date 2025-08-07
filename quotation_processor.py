@@ -10,9 +10,27 @@ from PIL import Image
 try:
     import pytesseract
     HAS_TESSERACT = True
+    # Configure Tesseract executable path for different environments
+    import shutil
+    tesseract_path = shutil.which('tesseract')
+    if tesseract_path:
+        pytesseract.pytesseract.tesseract_cmd = tesseract_path
+        print(f"✅ Tesseract found at: {tesseract_path}")
+    else:
+        # Try common paths
+        common_paths = ['/usr/bin/tesseract', '/usr/local/bin/tesseract']
+        for path in common_paths:
+            if os.path.exists(path):
+                pytesseract.pytesseract.tesseract_cmd = path
+                tesseract_path = path
+                print(f"✅ Tesseract found at: {path}")
+                break
+        else:
+            print("❌ Tesseract executable not found in PATH or common locations")
+            HAS_TESSERACT = False
 except ImportError:
     HAS_TESSERACT = False
-    print("Tesseract not available - install pytesseract for image processing")
+    print("❌ pytesseract not available - install pytesseract for image processing")
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional
 from models import (

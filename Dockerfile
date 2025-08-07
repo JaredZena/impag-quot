@@ -16,10 +16,16 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
+# Verify Tesseract installation and make it accessible
+RUN which tesseract && tesseract --version
+
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash app
 USER app
 WORKDIR /home/app
+
+# Verify Tesseract is accessible to app user
+RUN which tesseract || echo "Tesseract not in PATH for app user"
 
 # Install Python dependencies
 COPY --chown=app:app requirements.txt .
