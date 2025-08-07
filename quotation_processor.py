@@ -4,8 +4,15 @@ import os
 import fitz  # PyMuPDF
 import anthropic
 import copy
-import easyocr
 from PIL import Image
+
+# Conditional import for EasyOCR (temporarily disabled for deployment size)
+try:
+    import easyocr
+    HAS_EASYOCR = True
+except ImportError:
+    HAS_EASYOCR = False
+    print("EasyOCR not available - image processing disabled for deployment size optimization")
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional
 from models import (
@@ -153,6 +160,13 @@ class QuotationProcessor:
     
     def extract_text_from_image(self, image_path: str) -> str:
         """Extract text from image file using OCR."""
+        if not HAS_EASYOCR:
+            raise Exception(
+                "Image OCR processing is currently disabled for deployment size optimization. "
+                "EasyOCR library (~2GB with PyTorch dependencies) was removed to fit within Koyeb's 2GB limit. "
+                "For image processing, please use PDF files or wait for OCR microservice deployment."
+            )
+        
         try:
             # Initialize EasyOCR reader for English and Spanish
             reader = easyocr.Reader(['en', 'es'])

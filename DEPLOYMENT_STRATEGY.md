@@ -4,16 +4,21 @@
 
 ### 📊 **Results:**
 - **Original monolith**: 4,381 MB ❌ (Too large for Koyeb)
-- **Minimal quotation service**: 1,460 MB ✅ (Fits within 2GB limit)
-- **Size reduction**: 67% smaller
+- **Without OCR dependencies**: 521 MB ✅ (Well within 2GB limit)
+- **Size reduction**: 88% smaller
 - **Architecture**: Now modular microservices
+
+### 🔍 **Size Analysis:**
+- EasyOCR alone: ~940MB (PyTorch + CUDA dependencies)
+- RAG system: ~370MB (OpenAI + Pinecone + LlamaIndex)
+- Core app: ~521MB (FastAPI + PyMuPDF + Anthropic)
 
 ## 🏗️ **Architecture Split**
 
 ### **Main App (this branch)** - Quotation Processing Service
 - ✅ **PDF quotation processing** (`/process`)
-- ✅ **Image OCR processing** (`/process`) 
-- ✅ **Batch processing** (`/process-batch`)
+- ⏸️ **Image OCR processing** (temporarily disabled for size)
+- ✅ **Batch processing** (`/process-batch`) 
 - ✅ **Product/Supplier CRUD** (`/products`, `/suppliers`)
 - ✅ **Categories management** (`/categories`)
 - ✅ **Authentication** (Google OAuth)
@@ -36,32 +41,35 @@
 - `shopify_products.py` - Live pricing integration
 
 ### **Dependencies Removed:**
-- `openai` - Embeddings and LLM
-- `pinecone` - Vector search
-- `llama-index-*` - RAG framework
-- `tenacity` - Retry logic
+- `openai` - Embeddings and LLM (~100MB)
+- `pinecone` - Vector search (~50MB)
+- `llama-index-*` - RAG framework (~200MB)
+- `easyocr` - OCR processing (~940MB) ⚡ **Biggest size reduction**
+- `tenacity` - Retry logic (~20MB)
 
 ### **Models Removed:**
 - `Query` model - Only used for RAG
 
 ## 🎯 **Deployment Benefits**
 
-1. **✅ Fits Koyeb limits** - 1.46GB < 2GB limit
-2. **🚀 Faster deployments** - Smaller images deploy quicker
-3. **🔧 Independent scaling** - Scale quotation processing separately from RAG
-4. **💰 Cost optimization** - Deploy heavy RAG service only when needed
+1. **✅ Fits Koyeb limits** - 521MB << 2GB limit (75% headroom)
+2. **🚀 Faster deployments** - 88% smaller images deploy much quicker  
+3. **🔧 Independent scaling** - Scale services independently
+4. **💰 Cost optimization** - Deploy heavy services only when needed
 5. **🛠️ Better maintainability** - Clear separation of concerns
+6. **🚀 Future OCR microservice** - Can add EasyOCR back as separate service
 
 ## 📋 **Current Functionality**
 
-The quotation service **retains full quotation processing**:
+The quotation service **retains core quotation processing**:
 - ✅ PDF text extraction (PyMuPDF)
-- ✅ Image OCR (EasyOCR) 
+- ⏸️ Image OCR (temporarily disabled for deployment size)
 - ✅ Claude AI processing (Anthropic)
 - ✅ Database operations (PostgreSQL)
 - ✅ SKU generation
 - ✅ Category management
 - ✅ Supplier/Product management
+- ✅ Graceful error handling for image uploads
 
 ## 🔮 **Future Deployment**
 

@@ -34,11 +34,14 @@ async def process_quotation(
     user: dict = Depends(verify_google_token)
 ):
     """
-    Process a quotation file (PDF or image) and extract structured data.
+    Process a quotation file and extract structured data.
     
     Args:
-        file: PDF or image file to process (supported: PDF, PNG, JPG, JPEG, GIF, BMP, TIFF, WEBP)
+        file: PDF file to process (PDFs supported, images temporarily disabled for deployment size)
         category_id: Optional product category ID (if not provided, AI will auto-categorize)
+    
+    Note: Image processing temporarily disabled to fit within Koyeb 2GB deployment limit.
+    EasyOCR library (~2GB) will be added back in future OCR microservice.
     """
     # Check if file format is supported
     supported_extensions = {'.pdf', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp'}
