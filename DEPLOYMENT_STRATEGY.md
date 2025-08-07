@@ -17,7 +17,7 @@
 
 ### **Main App (this branch)** - Quotation Processing Service
 - ✅ **PDF quotation processing** (`/process`)
-- ⏸️ **Image OCR processing** (temporarily disabled for size)
+- ✅ **Image OCR processing** (Tesseract - lightweight alternative)
 - ✅ **Batch processing** (`/process-batch`) 
 - ✅ **Product/Supplier CRUD** (`/products`, `/suppliers`)
 - ✅ **Categories management** (`/categories`)
@@ -40,12 +40,13 @@
 - `claude_llm_setup.py` - Claude integration
 - `shopify_products.py` - Live pricing integration
 
-### **Dependencies Removed:**
-- `openai` - Embeddings and LLM (~100MB)
-- `pinecone` - Vector search (~50MB)
-- `llama-index-*` - RAG framework (~200MB)
-- `easyocr` - OCR processing (~940MB) ⚡ **Biggest size reduction**
-- `tenacity` - Retry logic (~20MB)
+### **Dependencies Optimized:**
+- `openai` - Embeddings and LLM (~100MB) ❌ **Removed**
+- `pinecone` - Vector search (~50MB) ❌ **Removed**
+- `llama-index-*` - RAG framework (~200MB) ❌ **Removed**
+- `easyocr` - Heavy OCR with PyTorch (~940MB) ❌ **Removed**
+- `pytesseract` - Lightweight OCR (~10MB) ✅ **Added**
+- `tenacity` - Retry logic (~20MB) ❌ **Removed**
 
 ### **Models Removed:**
 - `Query` model - Only used for RAG
@@ -61,15 +62,15 @@
 
 ## 📋 **Current Functionality**
 
-The quotation service **retains core quotation processing**:
+The quotation service **retains full quotation processing**:
 - ✅ PDF text extraction (PyMuPDF)
-- ⏸️ Image OCR (temporarily disabled for deployment size)
+- ✅ Image OCR (Tesseract - lightweight, no PyTorch dependencies)
 - ✅ Claude AI processing (Anthropic)
 - ✅ Database operations (PostgreSQL)
 - ✅ SKU generation
 - ✅ Category management
 - ✅ Supplier/Product management
-- ✅ Graceful error handling for image uploads
+- ✅ Multi-language OCR support (English + Spanish)
 
 ## 🔮 **Future Deployment**
 

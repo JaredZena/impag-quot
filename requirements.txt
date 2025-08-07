@@ -20,8 +20,8 @@ anthropic>=0.3.0
 # PDF Processing - ESSENTIAL
 PyMuPDF>=1.19.0
 
-# OCR - TEMPORARILY REMOVED due to size (2GB+ with PyTorch dependencies)
-# easyocr>=1.7.0  # Will be added back in v2 or separate OCR microservice
+# OCR - Lightweight Tesseract solution
+pytesseract>=0.3.10
 
 # REMOVED RAG-related dependencies (moved to separate microservice):
 # - openai (embeddings/LLM)

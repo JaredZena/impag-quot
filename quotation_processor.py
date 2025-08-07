@@ -6,13 +6,13 @@ import anthropic
 import copy
 from PIL import Image
 
-# Conditional import for EasyOCR (temporarily disabled for deployment size)
+# Lightweight OCR using Tesseract
 try:
-    import easyocr
-    HAS_EASYOCR = True
+    import pytesseract
+    HAS_TESSERACT = True
 except ImportError:
-    HAS_EASYOCR = False
-    print("EasyOCR not available - image processing disabled for deployment size optimization")
+    HAS_TESSERACT = False
+    print("Tesseract not available - install pytesseract for image processing")
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional
 from models import (
@@ -159,31 +159,31 @@ class QuotationProcessor:
             raise Exception(f"Error extracting text from PDF: {str(e)}")
     
     def extract_text_from_image(self, image_path: str) -> str:
-        """Extract text from image file using OCR."""
-        if not HAS_EASYOCR:
+        """Extract text from image file using Tesseract OCR."""
+        if not HAS_TESSERACT:
             raise Exception(
-                "Image OCR processing is currently disabled for deployment size optimization. "
-                "EasyOCR library (~2GB with PyTorch dependencies) was removed to fit within Koyeb's 2GB limit. "
-                "For image processing, please use PDF files or wait for OCR microservice deployment."
+                "Tesseract OCR not available. Install pytesseract package for image processing."
             )
         
         try:
-            # Initialize EasyOCR reader for English and Spanish
-            reader = easyocr.Reader(['en', 'es'])
+            # Open image with PIL
+            image = Image.open(image_path)
             
-            # Read text from image
-            results = reader.readtext(image_path)
+            # Configure Tesseract for English and Spanish
+            # --psm 6: Assume a single uniform block of text
+            # -l eng+spa: English and Spanish languages
+            custom_config = r'--oem 3 --psm 6 -l eng+spa'
             
-            # Extract text from results (results contain bounding box, text, confidence)
-            text_lines = []
-            for (bbox, text, confidence) in results:
-                # Only include text with reasonable confidence (> 0.5)
-                if confidence > 0.5:
-                    text_lines.append(text)
+            # Extract text using Tesseract
+            extracted_text = pytesseract.image_to_string(image, config=custom_config)
             
-            # Join all text lines
-            extracted_text = "\n".join(text_lines)
-            return extracted_text
+            # Clean up the extracted text
+            cleaned_text = extracted_text.strip()
+            
+            if not cleaned_text:
+                raise Exception("No text could be extracted from the image")
+            
+            return cleaned_text
             
         except Exception as e:
             raise Exception(f"Error extracting text from image: {str(e)}")

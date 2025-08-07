@@ -5,10 +5,10 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y \
     # For PostgreSQL
     libpq5 \
-    # For EasyOCR and image processing
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libgomp1 \
+    # For Tesseract OCR
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-spa \
     # For general image processing
     libjpeg62-turbo \
     libfreetype6 \
