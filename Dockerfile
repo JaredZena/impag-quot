@@ -1,47 +1,29 @@
-# Multi-stage build to reduce final image size
-FROM python:3.11-slim as builder
-
-# Install system dependencies needed for building
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    build-essential \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create virtual environment
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
-
-# Production stage
+# Optimized Docker build for Koyeb deployment
 FROM python:3.11-slim
 
-# Install only runtime dependencies
+# Install essential system dependencies
 RUN apt-get update && apt-get install -y \
+    # For PostgreSQL
     libpq5 \
+    # For EasyOCR and image processing
     libgl1-mesa-glx \
     libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
     libgomp1 \
-    libgthread-2.0-0 \
+    # For general image processing
+    libjpeg62-turbo \
+    libfreetype6 \
+    # Cleanup to reduce image size
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Copy virtual environment from builder stage
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Create non-root user
+# Create non-root user for security
 RUN useradd --create-home --shell /bin/bash app
 USER app
 WORKDIR /home/app
+
+# Install Python dependencies
+COPY --chown=app:app requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
 
 # Copy application code
 COPY --chown=app:app . .
@@ -49,9 +31,9 @@ COPY --chown=app:app . .
 # Expose port
 EXPOSE 8000
 
-# Health check (using Python instead of curl to avoid extra dependency)
+# Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
 
-# Run the application
-CMD ["gunicorn", "-w", "2", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000", "main:app"]
+# Run with reduced workers for memory efficiency
+CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000", "main:app", "--timeout", "120"]
