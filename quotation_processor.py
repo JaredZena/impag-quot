@@ -494,10 +494,14 @@ Respond only with the JSON object, no extra explanation."""
         print(f'Getting or creating product: {product_info}')
         print(f'Category ID at start of get_or_create_product: {product_info.get("category_id")}')
         
+        # Get base SKU first
+        base_sku = self.sku_generator.get_base_sku(product_info)
+        print(f"Base SKU: {base_sku}")
+        
         # Get SKU using hybrid approach (AI suggestion + code fallback)
         # For flattened model, we use the main SKU directly
         sku = self.sku_generator.get_variant_sku(
-            product_info.get("base_sku", ""), 
+            base_sku, 
             product_info.get("specifications", {})
         )
         print(f"Generated SKU: {sku}")
@@ -506,10 +510,6 @@ Respond only with the JSON object, no extra explanation."""
         if existing:
             print(f"Found existing product: {existing.name} (ID: {existing.id}) [SKU: {existing.sku}]")
             return existing
-        
-        # Get base SKU for backward compatibility
-        base_sku = self.sku_generator.get_base_sku(product_info)
-        print(f"Base SKU: {base_sku}")
         
         # Debug: Print the unit value we received
         print(f"\nReceived unit value: {product_info.get('unit')}")
@@ -555,7 +555,7 @@ Respond only with the JSON object, no extra explanation."""
         )
         
         session.add(new_product)
-        session.commit()
+        session.flush()  # Assign ID without committing transaction
         print(f"Created new product: {new_product.name} (ID: {new_product.id}) [SKU: {new_product.sku}]")
         return new_product
 
@@ -582,7 +582,7 @@ Respond only with the JSON object, no extra explanation."""
         )
         
         session.add(new_supplier_product)
-        session.commit()
+        session.flush()  # Assign ID without committing transaction
         print(f"Created supplier-product relationship (ID: {new_supplier_product.id}) [Cost: ${new_supplier_product.cost}]")
         return new_supplier_product
 
@@ -631,39 +631,45 @@ Respond only with the JSON object, no extra explanation."""
             
             # Process products
             for i, product_info in enumerate(structured_data["products"], 1):
-                # Create a deep copy to prevent modifications
-                product_info_copy = copy.deepcopy(product_info)
-                
-                print(f"\n[{i}/{len(structured_data['products'])}] Processing: {product_info_copy['name']}")
-                print(f"Category ID before override: {product_info_copy['category_id']}")
+                try:
+                    # Create a deep copy to prevent modifications
+                    product_info_copy = copy.deepcopy(product_info)
+                    
+                    print(f"\n[{i}/{len(structured_data['products'])}] Processing: {product_info_copy['name']}")
+                    print(f"Category ID before override: {product_info_copy['category_id']}")
 
-                # Override category_id if provided
-                if category_id is not None:
-                    product_info_copy["category_id"] = category_id
-                    print(f"Category ID after override: {product_info_copy['category_id']}")
-                
-                print(f"Category ID before get_or_create_product: {product_info_copy['category_id']}")
-                
-                # Create/get product
-                product = self.get_or_create_product(session, product_info_copy)
-                
-                # Create supplier-product relationship
-                self.create_supplier_product(
-                    session, supplier, product, product_info_copy, 
-                    supplier_sku=product_info_copy.get("supplier_sku")
-                )
-                results["supplier_products_created"] += 1
-                
-                # Track SKU generation
-                results["skus_generated"].append({
-                    "product_name": product_info_copy["name"],
-                    "base_sku": product.base_sku,
-                    "variant_sku": product.sku,
-                    "ai_suggested": product_info_copy.get("suggested_base_sku", "N/A"),
-                    "category_id": product_info_copy["category_id"]
-                })
-                
-                results["products_processed"] += 1
+                    # Override category_id if provided
+                    if category_id is not None:
+                        product_info_copy["category_id"] = category_id
+                        print(f"Category ID after override: {product_info_copy['category_id']}")
+                    
+                    print(f"Category ID before get_or_create_product: {product_info_copy['category_id']}")
+                    
+                    # Create/get product
+                    product = self.get_or_create_product(session, product_info_copy)
+                    
+                    # Create supplier-product relationship
+                    self.create_supplier_product(
+                        session, supplier, product, product_info_copy, 
+                        supplier_sku=product_info_copy.get("supplier_sku")
+                    )
+                    results["supplier_products_created"] += 1
+                    
+                    # Track SKU generation
+                    results["skus_generated"].append({
+                        "product_name": product_info_copy["name"],
+                        "base_sku": product.base_sku,
+                        "variant_sku": product.sku,
+                        "ai_suggested": product_info_copy.get("suggested_base_sku", "N/A"),
+                        "category_id": product_info_copy["category_id"]
+                    })
+                    
+                    results["products_processed"] += 1
+                    
+                except Exception as e:
+                    print(f"❌ Error processing product {i} '{product_info.get('name', 'Unknown')}': {str(e)}")
+                    # Continue processing other products instead of failing the entire batch
+                    continue
             
             session.commit()
             print(f"\n" + "=" * 50)
