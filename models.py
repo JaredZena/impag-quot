@@ -90,13 +90,7 @@ class SupplierProduct(Base):
     supplier = relationship("Supplier", back_populates="products")
     product = relationship("Product", back_populates="supplier_products")
 
-class Query(Base):
-    __tablename__ = "query"
-
-    id = Column(Integer, primary_key=True, index=True)
-    query_text = Column(Text)
-    response_text = Column(Text)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+# Query model removed - RAG functionality moved to separate microservice
 
 # Parse the database URL to get the endpoint ID
 parsed_url = urlparse(database_url)
