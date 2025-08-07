@@ -70,3 +70,7 @@ async def get_queries(skip: int = 0, limit: int = 100, db: Session = Depends(get
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Quotation System API"}
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy", "service": "impag-quot"}

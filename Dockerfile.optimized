@@ -1,0 +1,39 @@
+# Optimized Docker build that keeps functionality while reducing size
+FROM python:3.11-slim
+
+# Install essential system dependencies
+RUN apt-get update && apt-get install -y \
+    # For PostgreSQL
+    libpq5 \
+    # For EasyOCR and image processing
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libgomp1 \
+    # For general image processing
+    libjpeg62-turbo \
+    libfreetype6 \
+    # Cleanup to reduce image size
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash app
+USER app
+WORKDIR /home/app
+
+# Install Python dependencies
+COPY --chown=app:app requirements-optimized.txt .
+RUN pip install --no-cache-dir --user -r requirements-optimized.txt
+
+# Copy application code
+COPY --chown=app:app . .
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+
+# Run with reduced workers for memory efficiency
+CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000", "main:app", "--timeout", "120"]
