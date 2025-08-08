@@ -31,6 +31,9 @@ RUN which tesseract || echo "Tesseract not in PATH for app user"
 COPY --chown=app:app requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
+# Add user's local bin to PATH
+ENV PATH="/home/app/.local/bin:$PATH"
+
 # Copy application code
 COPY --chown=app:app . .
 
