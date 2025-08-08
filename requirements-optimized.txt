@@ -23,6 +23,7 @@ PyMuPDF>=1.19.0
 
 # OCR - ESSENTIAL for image processing
 easyocr>=1.7.0
+paddleocr
 
 # Vector search - ESSENTIAL for RAG
 pinecone==5.4.2

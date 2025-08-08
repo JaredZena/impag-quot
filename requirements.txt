@@ -20,9 +20,9 @@ anthropic>=0.3.0
 # PDF Processing - ESSENTIAL
 PyMuPDF>=1.19.0
 
-# OCR - PaddleOCR solution
+# OCR - Both EasyOCR and PaddleOCR for image processing
+easyocr
 paddleocr
-paddlepaddle>=2.5.0
 
 # REMOVED RAG-related dependencies (moved to separate microservice):
 # - openai (embeddings/LLM)

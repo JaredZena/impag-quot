@@ -30,8 +30,8 @@ requests==2.32.3
 python-dateutil==2.9.0.post0
 tenacity==9.0.0
 
-# Optional: Only include if OCR is absolutely necessary
-# easyocr>=1.7.0  # Comment out if not essential
+# OCR - Essential for image processing (using PaddleOCR)
+paddleocr
 
 # Pinecone (if vector search is essential)
 # pinecone==5.4.2  # Comment out if not essential
