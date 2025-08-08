@@ -86,6 +86,7 @@ class SupplierProductResponse(SupplierProductBase):
 
 # GET /products with advanced filtering and JSON wrapper - PUBLIC for quotation web app
 @router.get("/")
+@router.get("")  # Handle both /products and /products/ explicitly
 def get_products(
     id: Optional[int] = Query(None),
     name: Optional[str] = Query(None),
