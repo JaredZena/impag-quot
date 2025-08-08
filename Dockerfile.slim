@@ -19,6 +19,9 @@ WORKDIR /home/app
 
 # Copy and install requirements
 COPY --chown=app:app requirements.txt .
+# Force CPU-only installation by setting environment variables
+ENV FORCE_CUDA=0
+ENV TORCH_CUDA_ARCH_LIST=""
 RUN pip install --no-cache-dir --user -r requirements.txt
 
 # Copy application code
