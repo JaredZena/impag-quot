@@ -178,10 +178,31 @@ class QuotationProcessor:
     
     def extract_text_from_image(self, image_path: str) -> str:
         """Extract text from image file using Tesseract OCR."""
-        if not HAS_TESSERACT:
+        # Try to import pytesseract dynamically
+        try:
+            import pytesseract
+        except ImportError:
             raise Exception(
-                "Tesseract OCR not available. Install pytesseract package for image processing."
+                "pytesseract package not available. Install pytesseract for image processing."
             )
+        
+        # Try to configure Tesseract path dynamically
+        import shutil
+        tesseract_path = shutil.which('tesseract')
+        if not tesseract_path:
+            # Try common paths
+            common_paths = ['/usr/bin/tesseract', '/usr/local/bin/tesseract', '/opt/homebrew/bin/tesseract']
+            for path in common_paths:
+                if os.path.exists(path):
+                    tesseract_path = path
+                    break
+        
+        if tesseract_path:
+            pytesseract.pytesseract.tesseract_cmd = tesseract_path
+            print(f"🔧 Using Tesseract at: {tesseract_path}")
+        else:
+            # Last resort - try without explicit path (maybe it's in PATH but which() failed)
+            print("⚠️ Tesseract path not found, trying default path...")
         
         try:
             # Open image with PIL
@@ -203,6 +224,11 @@ class QuotationProcessor:
             
             return cleaned_text
             
+        except pytesseract.TesseractNotFoundError:
+            raise Exception(
+                "Tesseract executable not found. Please install tesseract-ocr system package. "
+                "On Ubuntu: 'apt-get install tesseract-ocr', On macOS: 'brew install tesseract'"
+            )
         except Exception as e:
             raise Exception(f"Error extracting text from image: {str(e)}")
     
