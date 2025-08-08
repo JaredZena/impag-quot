@@ -19,7 +19,9 @@ anthropic>=0.3.0
 # PDF Processing
 PyMuPDF>=1.19.0
 
-# OCR - Essential for image processing (using EasyOCR)
+# OCR - Essential for image processing (using EasyOCR with CPU-only PyTorch)
+torch==2.5.1+cpu --find-links https://download.pytorch.org/whl/torch_stable.html
+torchvision==0.20.1+cpu --find-links https://download.pytorch.org/whl/torch_stable.html
 easyocr>=1.7.0
 
 # Image Processing
