@@ -27,6 +27,7 @@ class BatchQuotationResponse(BaseModel):
     errors: List[dict]
 
 @router.post("/process", response_model=QuotationResponse)
+@router.post("process", response_model=QuotationResponse)  # Handle both /quotations/process and /quotations/process/ explicitly  
 async def process_quotation(
     file: UploadFile = File(...),
     category_id: Optional[int] = Form(None),
@@ -74,6 +75,7 @@ async def process_quotation(
             os.unlink(temp_file_path)
 
 @router.post("/process-batch", response_model=BatchQuotationResponse)
+@router.post("process-batch", response_model=BatchQuotationResponse)  # Handle both /quotations/process-batch and /quotations/process-batch/ explicitly
 async def process_quotation_batch(
     folder_path: str = Form(...),
     category_id: Optional[int] = Form(None),

@@ -51,6 +51,7 @@ class SupplierResponse(SupplierBase):
 # Supplier endpoints
 # POST /suppliers - REQUIRES AUTHENTICATION for admin operations
 @router.post("/")
+@router.post("")  # Handle both /suppliers and /suppliers/ explicitly
 def create_supplier(supplier: SupplierCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     db_supplier = Supplier(**supplier.model_dump())
     db.add(db_supplier)
@@ -77,6 +78,7 @@ def create_supplier(supplier: SupplierCreate, db: Session = Depends(get_db), use
 
 # GET /suppliers - PUBLIC for quotation web app
 @router.get("/")
+@router.get("")  # Handle both /suppliers and /suppliers/ explicitly
 def get_suppliers(
     search: Optional[str] = None,
     include_archived: bool = False,

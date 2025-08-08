@@ -188,6 +188,7 @@ def get_product(product_id: int, include_archived: bool = False, db: Session = D
 
 # POST /products - REQUIRES AUTHENTICATION for admin operations
 @router.post("/")
+@router.post("")  # Handle both /products and /products/ explicitly
 def create_product(product: ProductCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     # Check for duplicate SKU
     existing = db.query(Product).filter(Product.sku == product.sku).first()
