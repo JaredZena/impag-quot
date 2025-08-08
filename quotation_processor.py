@@ -6,14 +6,14 @@ import anthropic
 import copy
 from PIL import Image
 
-# OCR using EasyOCR
+# OCR using Tesseract
 try:
-    import easyocr
+    import pytesseract
     HAS_OCR = True
-    print("✅ EasyOCR imported successfully")
+    print("✅ Tesseract imported successfully")
 except ImportError:
     HAS_OCR = False
-    print("❌ EasyOCR not available")
+    print("❌ Tesseract not available")
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional
 from models import (
@@ -160,35 +160,28 @@ class QuotationProcessor:
             raise Exception(f"Error extracting text from PDF: {str(e)}")
     
     def extract_text_from_image(self, image_path: str) -> str:
-        """Extract text from image file using EasyOCR."""
+        """Extract text from image file using Tesseract OCR."""
         if not HAS_OCR:
             raise Exception(
-                "EasyOCR package not available. Install easyocr for image processing."
+                "Tesseract package not available. Install pytesseract for image processing."
             )
         
         try:
-            # Initialize EasyOCR with English and Spanish languages
-            # gpu=False for CPU-only deployment
-            reader = easyocr.Reader(['en', 'es'], gpu=False)
-            print(f"🔧 EasyOCR initialized successfully")
+            # Open image with PIL
+            image = Image.open(image_path)
+            print(f"🔧 Tesseract processing image: {image_path}")
+            
+            # Configure Tesseract for better accuracy
+            # -l eng+spa: English and Spanish languages
+            # --psm 6: Assume a single uniform block of text
+            custom_config = r'-l eng+spa --psm 6'
             
             # Perform OCR on the image
-            result = reader.readtext(image_path)
-            print(f"✅ EasyOCR completed successfully")
+            extracted_text = pytesseract.image_to_string(image, config=custom_config)
+            print(f"✅ Tesseract completed successfully")
             
-            # Extract text from results
-            extracted_texts = []
-            for detection in result:
-                # EasyOCR returns (bbox, text, confidence)
-                text = detection[1]
-                confidence = detection[2]
-                
-                # Filter by confidence (0.5 = 50% confidence threshold)
-                if confidence > 0.5 and text and text.strip():
-                    extracted_texts.append(text.strip())
-            
-            # Join all extracted text with newlines
-            extracted_text = '\n'.join(extracted_texts)
+            # Clean up the extracted text
+            extracted_text = extracted_text.strip()
             
             if not extracted_text:
                 raise Exception("No text could be extracted from the image")

@@ -19,8 +19,8 @@ anthropic>=0.3.0
 # PDF Processing
 PyMuPDF>=1.19.0
 
-# OCR - Essential for image processing (using EasyOCR)
-easyocr>=1.7.0
+# OCR - Essential for image processing (using Tesseract - much lighter than EasyOCR)
+pytesseract>=0.3.10
 
 # Image Processing
 pillow==11.1.0
