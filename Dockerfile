@@ -5,7 +5,7 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y \
     # For PostgreSQL
     libpq5 \
-    # For PaddleOCR and image processing
+    # For EasyOCR and image processing
     libjpeg62-turbo \
     libfreetype6 \
     libgl1-mesa-glx \

@@ -6,14 +6,14 @@ import anthropic
 import copy
 from PIL import Image
 
-# Lightweight OCR using PaddleOCR
+# OCR using EasyOCR
 try:
-    from paddleocr import PaddleOCR
+    import easyocr
     HAS_OCR = True
-    print("✅ PaddleOCR imported successfully")
+    print("✅ EasyOCR imported successfully")
 except ImportError:
     HAS_OCR = False
-    print("❌ PaddleOCR not available")
+    print("❌ EasyOCR not available")
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional
 from models import (
@@ -160,31 +160,32 @@ class QuotationProcessor:
             raise Exception(f"Error extracting text from PDF: {str(e)}")
     
     def extract_text_from_image(self, image_path: str) -> str:
-        """Extract text from image file using PaddleOCR."""
+        """Extract text from image file using EasyOCR."""
         if not HAS_OCR:
             raise Exception(
-                "PaddleOCR package not available. Install paddleocr for image processing."
+                "EasyOCR package not available. Install easyocr for image processing."
             )
         
         try:
-            # Initialize PaddleOCR with English and Spanish languages
-            # use_angle_cls=True helps with rotated text
-            # use_gpu=False for CPU-only deployment
-            ocr = PaddleOCR(use_angle_cls=True, lang='en', use_gpu=False)
-            print(f"🔧 PaddleOCR initialized successfully")
+            # Initialize EasyOCR with English and Spanish languages
+            # gpu=False for CPU-only deployment
+            reader = easyocr.Reader(['en', 'es'], gpu=False)
+            print(f"🔧 EasyOCR initialized successfully")
             
             # Perform OCR on the image
-            result = ocr.ocr(image_path, cls=True)
-            print(f"✅ PaddleOCR completed successfully")
+            result = reader.readtext(image_path)
+            print(f"✅ EasyOCR completed successfully")
             
             # Extract text from results
             extracted_texts = []
-            if result and result[0]:
-                for line in result[0]:
-                    if line and len(line) > 1:
-                        text = line[1][0]  # line[1] is (text, confidence), we want text
-                        if text and text.strip():
-                            extracted_texts.append(text.strip())
+            for detection in result:
+                # EasyOCR returns (bbox, text, confidence)
+                text = detection[1]
+                confidence = detection[2]
+                
+                # Filter by confidence (0.5 = 50% confidence threshold)
+                if confidence > 0.5 and text and text.strip():
+                    extracted_texts.append(text.strip())
             
             # Join all extracted text with newlines
             extracted_text = '\n'.join(extracted_texts)
