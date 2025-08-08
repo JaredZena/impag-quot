@@ -20,8 +20,9 @@ anthropic>=0.3.0
 # PDF Processing - ESSENTIAL
 PyMuPDF>=1.19.0
 
-# OCR - Lightweight Tesseract solution
-pytesseract>=0.3.10
+# OCR - PaddleOCR solution
+paddleocr
+paddlepaddle>=2.5.0
 
 # REMOVED RAG-related dependencies (moved to separate microservice):
 # - openai (embeddings/LLM)

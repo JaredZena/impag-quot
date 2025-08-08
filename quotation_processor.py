@@ -6,31 +6,14 @@ import anthropic
 import copy
 from PIL import Image
 
-# Lightweight OCR using Tesseract
+# Lightweight OCR using PaddleOCR
 try:
-    import pytesseract
-    HAS_TESSERACT = True
-    # Configure Tesseract executable path for different environments
-    import shutil
-    tesseract_path = shutil.which('tesseract')
-    if tesseract_path:
-        pytesseract.pytesseract.tesseract_cmd = tesseract_path
-        print(f"✅ Tesseract found at: {tesseract_path}")
-    else:
-        # Try common paths
-        common_paths = ['/usr/bin/tesseract', '/usr/local/bin/tesseract']
-        for path in common_paths:
-            if os.path.exists(path):
-                pytesseract.pytesseract.tesseract_cmd = path
-                tesseract_path = path
-                print(f"✅ Tesseract found at: {path}")
-                break
-        else:
-            print("❌ Tesseract executable not found in PATH or common locations")
-            HAS_TESSERACT = False
+    from paddleocr import PaddleOCR
+    HAS_OCR = True
+    print("✅ PaddleOCR imported successfully")
 except ImportError:
-    HAS_TESSERACT = False
-    print("❌ pytesseract not available - install pytesseract for image processing")
+    HAS_OCR = False
+    print("❌ PaddleOCR not available")
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional
 from models import (
@@ -177,58 +160,40 @@ class QuotationProcessor:
             raise Exception(f"Error extracting text from PDF: {str(e)}")
     
     def extract_text_from_image(self, image_path: str) -> str:
-        """Extract text from image file using Tesseract OCR."""
-        # Try to import pytesseract dynamically
-        try:
-            import pytesseract
-        except ImportError:
+        """Extract text from image file using PaddleOCR."""
+        if not HAS_OCR:
             raise Exception(
-                "pytesseract package not available. Install pytesseract for image processing."
+                "PaddleOCR package not available. Install paddleocr for image processing."
             )
         
-        # Try to configure Tesseract path dynamically
-        import shutil
-        tesseract_path = shutil.which('tesseract')
-        if not tesseract_path:
-            # Try common paths
-            common_paths = ['/usr/bin/tesseract', '/usr/local/bin/tesseract', '/opt/homebrew/bin/tesseract']
-            for path in common_paths:
-                if os.path.exists(path):
-                    tesseract_path = path
-                    break
-        
-        if tesseract_path:
-            pytesseract.pytesseract.tesseract_cmd = tesseract_path
-            print(f"🔧 Using Tesseract at: {tesseract_path}")
-        else:
-            # Last resort - try without explicit path (maybe it's in PATH but which() failed)
-            print("⚠️ Tesseract path not found, trying default path...")
-        
         try:
-            # Open image with PIL
-            image = Image.open(image_path)
+            # Initialize PaddleOCR with English and Spanish languages
+            # use_angle_cls=True helps with rotated text
+            # use_gpu=False for CPU-only deployment
+            ocr = PaddleOCR(use_angle_cls=True, lang='en', use_gpu=False)
+            print(f"🔧 PaddleOCR initialized successfully")
             
-            # Configure Tesseract for English and Spanish
-            # --psm 6: Assume a single uniform block of text
-            # -l eng+spa: English and Spanish languages
-            custom_config = r'--oem 3 --psm 6 -l eng+spa'
+            # Perform OCR on the image
+            result = ocr.ocr(image_path, cls=True)
+            print(f"✅ PaddleOCR completed successfully")
             
-            # Extract text using Tesseract
-            extracted_text = pytesseract.image_to_string(image, config=custom_config)
+            # Extract text from results
+            extracted_texts = []
+            if result and result[0]:
+                for line in result[0]:
+                    if line and len(line) > 1:
+                        text = line[1][0]  # line[1] is (text, confidence), we want text
+                        if text and text.strip():
+                            extracted_texts.append(text.strip())
             
-            # Clean up the extracted text
-            cleaned_text = extracted_text.strip()
+            # Join all extracted text with newlines
+            extracted_text = '\n'.join(extracted_texts)
             
-            if not cleaned_text:
+            if not extracted_text:
                 raise Exception("No text could be extracted from the image")
             
-            return cleaned_text
+            return extracted_text
             
-        except pytesseract.TesseractNotFoundError:
-            raise Exception(
-                "Tesseract executable not found. Please install tesseract-ocr system package. "
-                "On Ubuntu: 'apt-get install tesseract-ocr', On macOS: 'brew install tesseract'"
-            )
         except Exception as e:
             raise Exception(f"Error extracting text from image: {str(e)}")
     

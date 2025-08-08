@@ -40,7 +40,7 @@ async def process_quotation(
         file: PDF or image file to process (supported: PDF, PNG, JPG, JPEG, GIF, BMP, TIFF, WEBP)
         category_id: Optional product category ID (if not provided, AI will auto-categorize)
     
-    Note: Uses lightweight Tesseract OCR for image processing instead of EasyOCR to maintain small deployment size.
+    Note: Uses PaddleOCR for image processing to maintain small deployment size and reliable OCR performance.
     """
     # Check if file format is supported
     supported_extensions = {'.pdf', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp'}

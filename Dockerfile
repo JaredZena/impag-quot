@@ -5,27 +5,19 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y \
     # For PostgreSQL
     libpq5 \
-    # For Tesseract OCR
-    tesseract-ocr \
-    tesseract-ocr-eng \
-    tesseract-ocr-spa \
-    # For general image processing
+    # For PaddleOCR and image processing
     libjpeg62-turbo \
     libfreetype6 \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
     # Cleanup to reduce image size
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
-
-# Verify Tesseract installation and make it accessible
-RUN which tesseract && tesseract --version
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash app
 USER app
 WORKDIR /home/app
-
-# Verify Tesseract is accessible to app user
-RUN which tesseract || echo "Tesseract not in PATH for app user"
 
 # Install Python dependencies
 COPY --chown=app:app requirements.txt .
