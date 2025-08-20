@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
-from models import get_db, Supplier
+from models import get_db, Supplier, SupplierProduct, Product
 from auth import verify_google_token
 
 router = APIRouter(prefix="/suppliers", tags=["suppliers"])
@@ -207,3 +207,62 @@ def unarchive_supplier(supplier_id: int, db: Session = Depends(get_db), user: di
     db.refresh(db_supplier)
     
     return {"success": True, "data": {"id": supplier_id, "archived_at": None}, "error": None, "message": "Supplier restored successfully"}
+
+@router.get("/{supplier_id}/products")
+def get_supplier_products(supplier_id: int, include_archived: bool = False, db: Session = Depends(get_db)):
+    """Get all products supplied by a specific supplier with pricing and relationship details"""
+    # Verify supplier exists
+    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    if not supplier:
+        return {"success": False, "data": None, "error": "Supplier not found", "message": None}
+    
+    # Query supplier-product relationships for this supplier
+    query = db.query(SupplierProduct).filter(SupplierProduct.supplier_id == supplier_id)
+    
+    # Filter out archived records by default
+    if not include_archived:
+        query = query.filter(SupplierProduct.archived_at.is_(None))
+    
+    supplier_products = query.all()
+    
+    if not supplier_products:
+        return {"success": True, "data": [], "error": None, "message": None}
+    
+    # Get product details and combine with supplier-specific info
+    products_with_supplier_info = []
+    for sp in supplier_products:
+        # Get the product details
+        product = db.query(Product).filter(Product.id == sp.product_id).first()
+        if product and (include_archived or product.archived_at is None):
+            product_data = {
+                # Supplier-specific information
+                "supplier_product_id": sp.id,
+                "supplier_sku": sp.supplier_sku,
+                "cost": float(sp.cost) if sp.cost is not None else None,
+                "stock": sp.stock,
+                "lead_time_days": sp.lead_time_days,
+                "supplier_is_active": sp.is_active,
+                "supplier_notes": sp.notes,
+                "supplier_relationship_created_at": sp.created_at,
+                "supplier_relationship_last_updated": sp.last_updated,
+                
+                # Product information
+                "product_id": product.id,
+                "product_name": product.name,
+                "product_description": product.description,
+                "category_id": product.category_id,
+                "base_sku": product.base_sku,
+                "sku": product.sku,
+                "iva": product.iva,
+                "unit": product.unit.value if product.unit else None,
+                "package_size": product.package_size,
+                "base_price": float(product.price) if product.price is not None else None,
+                "base_stock": product.stock,
+                "specifications": product.specifications,
+                "product_is_active": product.is_active,
+                "product_created_at": product.created_at,
+                "product_last_updated": product.last_updated,
+            }
+            products_with_supplier_info.append(product_data)
+    
+    return {"success": True, "data": products_with_supplier_info, "error": None, "message": None}

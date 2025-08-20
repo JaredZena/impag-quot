@@ -313,7 +313,7 @@ def debug_supplier_products(db: Session = Depends(get_db)):
         ]
     }
 
-@router.get("/supplier-product/", response_model=List[SupplierProductResponse])
+@router.get("/supplier-product/")
 def get_supplier_products(include_archived: bool = False, skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     query = db.query(SupplierProduct)
     
@@ -322,7 +322,26 @@ def get_supplier_products(include_archived: bool = False, skip: int = 0, limit: 
         query = query.filter(SupplierProduct.archived_at.is_(None))
         
     supplier_products = query.offset(skip).limit(limit).all()
-    return supplier_products
+    
+    # Convert to the same format as other endpoints
+    data = [
+        {
+            "id": sp.id,
+            "supplier_id": sp.supplier_id,
+            "product_id": sp.product_id,
+            "supplier_sku": sp.supplier_sku,
+            "cost": float(sp.cost) if sp.cost is not None else None,
+            "stock": sp.stock,
+            "lead_time_days": sp.lead_time_days,
+            "is_active": sp.is_active,
+            "notes": sp.notes,
+            "archived_at": sp.archived_at,
+            "created_at": sp.created_at,
+            "last_updated": sp.last_updated,
+        }
+        for sp in supplier_products
+    ]
+    return data
 
 @router.get("/{product_id}/supplier-products", response_model=List[SupplierProductResponse])
 def get_supplier_products_by_product(product_id: int, include_archived: bool = False, db: Session = Depends(get_db)):
