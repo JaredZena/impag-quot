@@ -84,6 +84,8 @@ def get_suppliers(
     include_archived: bool = False,
     skip: int = 0,
     limit: int = 100,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = "asc",
     db: Session = Depends(get_db)
 ):
     query = db.query(Supplier)
@@ -99,6 +101,21 @@ def get_suppliers(
             (Supplier.contact_name.ilike(like_pattern)) |
             (Supplier.email.ilike(like_pattern))
         )
+    
+    # Add sorting - default sort by name if no sort_by provided
+    if not sort_by:
+        sort_by = "name"
+        
+    if sort_by == "name":
+        query = query.order_by(Supplier.name.asc() if sort_order == "asc" else Supplier.name.desc())
+    elif sort_by == "created_at":
+        query = query.order_by(Supplier.created_at.asc() if sort_order == "asc" else Supplier.created_at.desc())
+    elif sort_by == "last_updated":
+        query = query.order_by(Supplier.last_updated.asc() if sort_order == "asc" else Supplier.last_updated.desc())
+    else:
+        # Default fallback to name sorting
+        query = query.order_by(Supplier.name.asc())
+        
     suppliers = query.offset(skip).limit(limit).all()
     data = [
         {

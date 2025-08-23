@@ -22,6 +22,7 @@ class ProductBase(BaseModel):
     price: Optional[float] = None
     stock: Optional[int] = 0
     specifications: Optional[Any] = None
+    default_margin: Optional[float] = None
     is_active: Optional[bool] = True
 
 class ProductCreate(ProductBase):
@@ -39,6 +40,7 @@ class ProductUpdate(BaseModel):
     price: Optional[float] = None
     stock: Optional[int] = None
     specifications: Optional[Any] = None
+    default_margin: Optional[float] = None
     is_active: Optional[bool] = None
     archived_at: Optional[datetime] = None
 
@@ -58,6 +60,7 @@ class SupplierProductBase(BaseModel):
     cost: Optional[float] = None
     stock: Optional[int] = 0
     lead_time_days: Optional[int] = None
+    shipping_cost: Optional[float] = None
     is_active: Optional[bool] = True
     notes: Optional[str] = None
 
@@ -71,6 +74,7 @@ class SupplierProductUpdate(BaseModel):
     cost: Optional[float] = None
     stock: Optional[int] = None
     lead_time_days: Optional[int] = None
+    shipping_cost: Optional[float] = None
     is_active: Optional[bool] = None
     notes: Optional[str] = None
     archived_at: Optional[datetime] = None
@@ -124,11 +128,24 @@ def get_products(
     if supplier_id:
         query = query.join(Product.supplier_products).filter(SupplierProduct.supplier_id == supplier_id)
     
-    # Add sorting
-    if sort_by == "name" and sort_order == "asc":
+    # Add sorting - default sort by name if no sort_by provided
+    if not sort_by:
+        sort_by = "name"
+        
+    if sort_by == "name":
+        query = query.order_by(Product.name.asc() if sort_order == "asc" else Product.name.desc())
+    elif sort_by == "created_at":
+        query = query.order_by(Product.created_at.asc() if sort_order == "asc" else Product.created_at.desc())
+    elif sort_by == "last_updated":
+        query = query.order_by(Product.last_updated.asc() if sort_order == "asc" else Product.last_updated.desc())
+    elif sort_by == "category_name":
+        # Join with ProductCategory to sort by category name
+        from models import ProductCategory
+        query = query.join(ProductCategory, Product.category_id == ProductCategory.id, isouter=True)
+        query = query.order_by(ProductCategory.name.asc() if sort_order == "asc" else ProductCategory.name.desc())
+    else:
+        # Default fallback to name sorting
         query = query.order_by(Product.name.asc())
-    elif sort_by == "name" and sort_order == "desc":
-        query = query.order_by(Product.name.desc())
     
     products = query.offset(skip).limit(limit).all()
     data = [
@@ -145,6 +162,7 @@ def get_products(
             "price": float(p.price) if p.price is not None else None,
             "stock": p.stock,
             "specifications": p.specifications,
+            "default_margin": float(p.default_margin) if p.default_margin is not None else None,
             "is_active": p.is_active,
             "archived_at": p.archived_at,
             "created_at": p.created_at,
@@ -179,6 +197,7 @@ def get_product(product_id: int, include_archived: bool = False, db: Session = D
         "price": float(product.price) if product.price is not None else None,
         "stock": product.stock,
         "specifications": product.specifications,
+        "default_margin": float(product.default_margin) if product.default_margin is not None else None,
         "is_active": product.is_active,
         "archived_at": product.archived_at,
         "created_at": product.created_at,
@@ -213,6 +232,7 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db), user: 
         "price": float(db_product.price) if db_product.price is not None else None,
         "stock": db_product.stock,
         "specifications": db_product.specifications,
+        "default_margin": float(db_product.default_margin) if db_product.default_margin is not None else None,
         "is_active": db_product.is_active,
         "archived_at": db_product.archived_at,
         "created_at": db_product.created_at,
@@ -252,6 +272,7 @@ def update_product(product_id: int, product: ProductUpdate, db: Session = Depend
         "price": float(db_product.price) if db_product.price is not None else None,
         "stock": db_product.stock,
         "specifications": db_product.specifications,
+        "default_margin": float(db_product.default_margin) if db_product.default_margin is not None else None,
         "is_active": db_product.is_active,
         "archived_at": db_product.archived_at,
         "created_at": db_product.created_at,

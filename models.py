@@ -63,6 +63,7 @@ class Product(Base):
     price = Column(Numeric(10, 2), nullable=True)
     stock = Column(Integer, default=0)
     specifications = Column(JSON, nullable=True)
+    default_margin = Column(Numeric(5, 4), nullable=True)  # Default margin as decimal (0.25 = 25%)
     is_active = Column(Boolean, default=True, nullable=False)
     archived_at = Column(DateTime(timezone=True), nullable=True)  # Soft delete timestamp
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -81,6 +82,7 @@ class SupplierProduct(Base):
     cost = Column(Numeric(10, 2), nullable=True)
     stock = Column(Integer, default=0)
     lead_time_days = Column(Integer, nullable=True)
+    shipping_cost = Column(Numeric(10, 2), nullable=True)  # Shipping cost from this supplier
     is_active = Column(Boolean, default=True)
     notes = Column(Text, nullable=True)
     archived_at = Column(DateTime(timezone=True), nullable=True)  # Soft delete timestamp
