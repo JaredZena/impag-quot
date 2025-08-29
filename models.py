@@ -14,6 +14,8 @@ class ProductUnit(enum.Enum):
     ROLLO = "ROLLO"
     METRO = "METRO"
     KG = "KG"
+    PAQUETE = "PAQUETE"
+    KIT = "KIT"
 
 class Supplier(Base):
     __tablename__ = "supplier"
@@ -30,6 +32,7 @@ class Supplier(Base):
     phone = Column(String, nullable=True)
     address = Column(String, nullable=True)
     website_url = Column(String, nullable=True)  # Website URL of the supplier
+    embedded = Column(Boolean, default=False, nullable=False)  # Whether this supplier has been embedded to embeddings database
     archived_at = Column(DateTime(timezone=True), nullable=True)  # Soft delete timestamp
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_updated = Column(DateTime(timezone=True), onupdate=func.now())
@@ -64,6 +67,9 @@ class Product(Base):
     stock = Column(Integer, default=0)
     specifications = Column(JSON, nullable=True)
     default_margin = Column(Numeric(5, 4), nullable=True)  # Default margin as decimal (0.25 = 25%)
+    calculated_price = Column(Numeric(10, 2), nullable=True)  # Cached calculated price for performance
+    calculated_price_updated_at = Column(DateTime(timezone=True), nullable=True)  # When calculated price was last updated
+    embedded = Column(Boolean, default=False, nullable=False)  # Whether this product has been embedded to embeddings database
     is_active = Column(Boolean, default=True, nullable=False)
     archived_at = Column(DateTime(timezone=True), nullable=True)  # Soft delete timestamp
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -83,6 +89,7 @@ class SupplierProduct(Base):
     stock = Column(Integer, default=0)
     lead_time_days = Column(Integer, nullable=True)
     shipping_cost = Column(Numeric(10, 2), nullable=True)  # Shipping cost from this supplier
+    embedded = Column(Boolean, default=False, nullable=False)  # Whether this supplier product has been embedded to embeddings database
     is_active = Column(Boolean, default=True)
     notes = Column(Text, nullable=True)
     archived_at = Column(DateTime(timezone=True), nullable=True)  # Soft delete timestamp

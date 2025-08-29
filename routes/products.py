@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Optional, Any
 from pydantic import BaseModel
 from datetime import datetime
 from models import get_db, Product, Supplier, SupplierProduct, ProductUnit
+from services.price_calculator import enrich_products_with_calculated_prices, get_product_display_price
 from auth import verify_google_token
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -98,6 +100,8 @@ def get_products(
     category_id: Optional[int] = Query(None),
     supplier_id: Optional[int] = Query(None),
     is_active: Optional[bool] = Query(None),
+    min_stock: Optional[int] = Query(None, description="Minimum stock level"),
+    max_stock: Optional[int] = Query(None, description="Maximum stock level"),
     include_archived: bool = False,
     skip: int = 0,
     limit: int = 100,
@@ -127,6 +131,10 @@ def get_products(
         query = query.filter(Product.is_active == is_active)
     if supplier_id:
         query = query.join(Product.supplier_products).filter(SupplierProduct.supplier_id == supplier_id)
+    if min_stock is not None:
+        query = query.filter(Product.stock >= min_stock)
+    if max_stock is not None:
+        query = query.filter(Product.stock <= max_stock)
     
     # Add sorting - default sort by name if no sort_by provided
     if not sort_by:
@@ -159,10 +167,13 @@ def get_products(
             "unit": p.unit.value if p.unit else None,
             "package_size": p.package_size,
             "sku": p.sku,
-            "price": float(p.price) if p.price is not None else None,
+            "price": float(p.price) if p.price is not None else (float(p.calculated_price) if p.calculated_price is not None else None),
             "stock": p.stock,
             "specifications": p.specifications,
             "default_margin": float(p.default_margin) if p.default_margin is not None else None,
+            "calculated_price": float(p.calculated_price) if p.calculated_price is not None else None,
+            "is_calculated_price": p.price is None and p.calculated_price is not None,
+            "embedded": p.embedded,
             "is_active": p.is_active,
             "archived_at": p.archived_at,
             "created_at": p.created_at,
@@ -170,6 +181,7 @@ def get_products(
         }
         for p in products
     ]
+    
     return {"success": True, "data": data, "error": None, "message": None}
 
 # GET /products/{product_id} - PUBLIC for quotation web app
@@ -194,15 +206,19 @@ def get_product(product_id: int, include_archived: bool = False, db: Session = D
         "unit": product.unit.value if product.unit else None,
         "package_size": product.package_size,
         "sku": product.sku,
-        "price": float(product.price) if product.price is not None else None,
+        "price": float(product.price) if product.price is not None else (float(product.calculated_price) if product.calculated_price is not None else None),
         "stock": product.stock,
         "specifications": product.specifications,
         "default_margin": float(product.default_margin) if product.default_margin is not None else None,
+        "calculated_price": float(product.calculated_price) if product.calculated_price is not None else None,
+        "is_calculated_price": product.price is None and product.calculated_price is not None,
+        "embedded": product.embedded,
         "is_active": product.is_active,
         "archived_at": product.archived_at,
         "created_at": product.created_at,
         "last_updated": product.last_updated,
     }
+    
     return {"success": True, "data": data, "error": None, "message": None}
 
 # POST /products - REQUIRES AUTHENTICATION for admin operations
@@ -465,3 +481,156 @@ def unarchive_supplier_product(supplier_product_id: int, db: Session = Depends(g
     db.refresh(db_supplier_product)
     
     return {"success": True, "data": {"id": supplier_product_id, "archived_at": None}, "error": None, "message": "Supplier Product restored successfully"}
+
+# Stock Management Endpoints
+
+class StockUpdateItem(BaseModel):
+    product_id: int
+    stock: int
+    price: Optional[float] = None
+
+class BulkStockUpdate(BaseModel):
+    updates: List[StockUpdateItem]
+
+class StockResponse(BaseModel):
+    id: int
+    name: str
+    sku: str
+    unit: str
+    stock: int
+    price: Optional[float]
+    total_value: Optional[float]
+    last_updated: Optional[datetime]
+
+@router.get("/stock")
+def get_products_in_stock(
+    db: Session = Depends(get_db),
+    min_stock: int = Query(default=1, description="Minimum stock level to include"),
+    include_zero_stock: bool = Query(default=False, description="Include products with zero stock"),
+    limit: int = Query(default=100, le=1000),
+    offset: int = Query(default=0, ge=0)
+):
+    """Get products that are currently in stock"""
+    query = db.query(Product).filter(Product.archived_at.is_(None))
+    
+    if include_zero_stock:
+        query = query.filter(Product.stock >= 0)
+    else:
+        query = query.filter(Product.stock >= min_stock)
+    
+    total = query.count()
+    products = query.offset(offset).limit(limit).all()
+    
+    stock_data = []
+    for product in products:
+        total_value = None
+        if product.stock and product.price:
+            total_value = float(product.stock * product.price)
+        
+        stock_data.append({
+            "id": product.id,
+            "name": product.name,
+            "sku": product.sku,
+            "unit": product.unit.value if product.unit else ProductUnit.PIEZA.value,
+            "stock": product.stock,
+            "price": float(product.price) if product.price else None,
+            "total_value": total_value,
+            "last_updated": product.last_updated
+        })
+    
+    return {
+        "success": True,
+        "data": {
+            "products": stock_data,
+            "total": total,
+            "offset": offset,
+            "limit": limit
+        },
+        "error": None,
+        "message": None
+    }
+
+@router.patch("/{product_id}/stock")
+def update_product_stock(
+    product_id: int,
+    stock: int,
+    price: Optional[float] = None,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token)
+):
+    """Update stock level for a single product"""
+    db_product = db.query(Product).filter(Product.id == product_id).first()
+    if db_product is None:
+        return {"success": False, "data": None, "error": "Product not found", "message": None}
+    
+    db_product.stock = stock
+    if price is not None:
+        db_product.price = price
+    db_product.last_updated = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(db_product)
+    
+    total_value = None
+    if db_product.stock and db_product.price:
+        total_value = float(db_product.stock * db_product.price)
+    
+    return {
+        "success": True,
+        "data": {
+            "id": db_product.id,
+            "name": db_product.name,
+            "sku": db_product.sku,
+            "stock": db_product.stock,
+            "price": float(db_product.price) if db_product.price else None,
+            "total_value": total_value,
+            "last_updated": db_product.last_updated
+        },
+        "error": None,
+        "message": "Stock updated successfully"
+    }
+
+@router.post("/stock/bulk-update")
+def bulk_update_stock(
+    bulk_update: BulkStockUpdate,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token)
+):
+    """Update stock levels for multiple products"""
+    updated_products = []
+    errors = []
+    
+    for update_item in bulk_update.updates:
+        try:
+            db_product = db.query(Product).filter(Product.id == update_item.product_id).first()
+            if db_product is None:
+                errors.append(f"Product with ID {update_item.product_id} not found")
+                continue
+            
+            db_product.stock = update_item.stock
+            if update_item.price is not None:
+                db_product.price = update_item.price
+            db_product.last_updated = datetime.utcnow()
+            
+            updated_products.append({
+                "id": db_product.id,
+                "name": db_product.name,
+                "sku": db_product.sku,
+                "stock": db_product.stock,
+                "price": float(db_product.price) if db_product.price else None
+            })
+        except Exception as e:
+            errors.append(f"Error updating product {update_item.product_id}: {str(e)}")
+    
+    db.commit()
+    
+    return {
+        "success": len(errors) == 0,
+        "data": {
+            "updated_products": updated_products,
+            "updated_count": len(updated_products),
+            "errors": errors
+        },
+        "error": None if len(errors) == 0 else "Some updates failed",
+        "message": f"Updated {len(updated_products)} products successfully"
+    }
