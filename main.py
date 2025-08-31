@@ -10,6 +10,8 @@ from routes.products import router as products_router
 from routes.suppliers import router as suppliers_router
 from routes.quotations import router as quotations_router
 from routes.categories import router as categories_router
+from routes.kits import router as kits_router
+from routes.balance import router as balance_router
 from auth import verify_google_token
 
 app = FastAPI()
@@ -32,6 +34,8 @@ app.include_router(products_router)
 app.include_router(suppliers_router)
 app.include_router(quotations_router)
 app.include_router(categories_router)
+app.include_router(kits_router)
+app.include_router(balance_router)
 
 # RAG functionality moved to separate microservice
 # This version focuses only on quotation processing and CRUD operations

@@ -88,7 +88,14 @@ class SupplierProduct(Base):
     cost = Column(Numeric(10, 2), nullable=True)
     stock = Column(Integer, default=0)
     lead_time_days = Column(Integer, nullable=True)
-    shipping_cost = Column(Numeric(10, 2), nullable=True)  # Shipping cost from this supplier
+    shipping_cost = Column(Numeric(10, 2), nullable=True)  # Legacy shipping cost (deprecated)
+    shipping_cost_direct = Column(Numeric(10, 2), default=0.00, nullable=False)  # Direct shipping cost per unit
+    shipping_method = Column(String(20), default='DIRECT', nullable=False)  # DIRECT or OCURRE shipping method
+    shipping_stage1_cost = Column(Numeric(10, 2), default=0.00)  # Stage 1 shipping cost
+    shipping_stage2_cost = Column(Numeric(10, 2), default=0.00)  # Stage 2 shipping cost
+    shipping_stage3_cost = Column(Numeric(10, 2), default=0.00)  # Stage 3 shipping cost
+    shipping_stage4_cost = Column(Numeric(10, 2), default=0.00)  # Stage 4 shipping cost
+    shipping_notes = Column(Text, nullable=True)  # Shipping logistics notes
     embedded = Column(Boolean, default=False, nullable=False)  # Whether this supplier product has been embedded to embeddings database
     is_active = Column(Boolean, default=True)
     notes = Column(Text, nullable=True)
@@ -98,6 +105,74 @@ class SupplierProduct(Base):
 
     supplier = relationship("Supplier", back_populates="products")
     product = relationship("Product", back_populates="supplier_products")
+
+class Kit(Base):
+    __tablename__ = "kit"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    sku = Column(String(100), unique=True, nullable=False)
+    price = Column(Numeric(10, 2), nullable=True)
+    margin = Column(Numeric(5, 4), nullable=True)  # Margin as decimal (0.25 = 25%)
+    is_active = Column(Boolean, default=True, nullable=False)
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationship to kit items
+    items = relationship("KitItem", back_populates="kit", cascade="all, delete-orphan")
+
+class KitItem(Base):
+    __tablename__ = "kit_item"
+
+    id = Column(Integer, primary_key=True, index=True)
+    kit_id = Column(Integer, ForeignKey("kit.id", ondelete="CASCADE"))
+    product_id = Column(Integer, ForeignKey("product.id", ondelete="CASCADE"))
+    quantity = Column(Integer, nullable=False, default=1)
+    unit_price = Column(Numeric(10, 2), nullable=True)  # Optional override price
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    kit = relationship("Kit", back_populates="items")
+    product = relationship("Product")
+
+class Balance(Base):
+    __tablename__ = "balance"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    balance_type = Column(String(20), default='QUOTATION', nullable=False)  # QUOTATION, COMPARISON, ANALYSIS
+    total_amount = Column(Numeric(12, 2), nullable=True)
+    currency = Column(String(3), default='MXN', nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationship to balance items
+    items = relationship("BalanceItem", back_populates="balance", cascade="all, delete-orphan")
+
+class BalanceItem(Base):
+    __tablename__ = "balance_item"
+
+    id = Column(Integer, primary_key=True, index=True)
+    balance_id = Column(Integer, ForeignKey("balance.id", ondelete="CASCADE"))
+    product_id = Column(Integer, ForeignKey("product.id", ondelete="CASCADE"))
+    supplier_id = Column(Integer, ForeignKey("supplier.id", ondelete="CASCADE"))
+    quantity = Column(Integer, nullable=False, default=1)
+    unit_price = Column(Numeric(10, 2), nullable=False)
+    shipping_cost = Column(Numeric(10, 2), default=0.00, nullable=False)
+    total_cost = Column(Numeric(10, 2), nullable=False)  # (unit_price + shipping) * quantity
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    balance = relationship("Balance", back_populates="items")
+    product = relationship("Product")
+    supplier = relationship("Supplier")
 
 # Query model removed - RAG functionality moved to separate microservice
 

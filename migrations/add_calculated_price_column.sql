@@ -26,7 +26,7 @@ BEGIN
         calculated_price = CASE 
             WHEN default_margin IS NOT NULL THEN
                 ROUND(
-                    (SELECT MIN(cost) 
+                    (SELECT MIN(cost + COALESCE(shipping_cost_per_unit, 0)) 
                      FROM supplier_product 
                      WHERE product_id = NEW.product_id 
                        AND is_active = true 
@@ -56,15 +56,15 @@ UPDATE product
 SET 
     calculated_price = CASE 
         WHEN default_margin IS NOT NULL THEN
-            ROUND(
-                (SELECT MIN(sp.cost) 
-                 FROM supplier_product sp 
-                 WHERE sp.product_id = product.id 
-                   AND sp.is_active = true 
-                   AND sp.cost IS NOT NULL 
-                   AND sp.cost > 0
-                ) / (1 - default_margin), 2
-            )
+                                ROUND(
+                        (SELECT MIN(sp.cost + COALESCE(sp.shipping_cost_per_unit, 0)) 
+                         FROM supplier_product sp 
+                         WHERE sp.product_id = product.id 
+                           AND sp.is_active = true 
+                           AND sp.cost IS NOT NULL 
+                           AND sp.cost > 0
+                        ) / (1 - default_margin), 2
+                    )
         ELSE NULL
     END,
     calculated_price_updated_at = NOW()

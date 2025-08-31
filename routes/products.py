@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, case
 from typing import List, Optional, Any
 from pydantic import BaseModel
 from datetime import datetime
@@ -62,7 +62,14 @@ class SupplierProductBase(BaseModel):
     cost: Optional[float] = None
     stock: Optional[int] = 0
     lead_time_days: Optional[int] = None
-    shipping_cost: Optional[float] = None
+    shipping_cost: Optional[float] = None  # Legacy field (deprecated)
+    shipping_cost_direct: Optional[float] = 0.00
+    shipping_method: Optional[str] = 'DIRECT'
+    shipping_stage1_cost: Optional[float] = 0.00
+    shipping_stage2_cost: Optional[float] = 0.00
+    shipping_stage3_cost: Optional[float] = 0.00
+    shipping_stage4_cost: Optional[float] = 0.00
+    shipping_notes: Optional[str] = None
     is_active: Optional[bool] = True
     notes: Optional[str] = None
 
@@ -76,7 +83,14 @@ class SupplierProductUpdate(BaseModel):
     cost: Optional[float] = None
     stock: Optional[int] = None
     lead_time_days: Optional[int] = None
-    shipping_cost: Optional[float] = None
+    shipping_cost: Optional[float] = None  # Legacy field (deprecated)
+    shipping_cost_direct: Optional[float] = None
+    shipping_method: Optional[str] = None
+    shipping_stage1_cost: Optional[float] = None
+    shipping_stage2_cost: Optional[float] = None
+    shipping_stage3_cost: Optional[float] = None
+    shipping_stage4_cost: Optional[float] = None
+    shipping_notes: Optional[str] = None
     is_active: Optional[bool] = None
     notes: Optional[str] = None
     archived_at: Optional[datetime] = None
@@ -89,6 +103,73 @@ class SupplierProductResponse(SupplierProductBase):
 
     class Config:
         from_attributes = True
+
+# GET /supplier-products - List all supplier-product relationships
+@router.get("/supplier-products")
+def get_all_supplier_products(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(1000, le=1000),
+    supplier_id: Optional[int] = Query(None),
+    product_id: Optional[int] = Query(None),
+    is_active: Optional[bool] = Query(None),
+    include_archived: bool = Query(False),
+    db: Session = Depends(get_db)
+):
+    """Get all supplier-product relationships"""
+    query = db.query(SupplierProduct).options(
+        joinedload(SupplierProduct.supplier),
+        joinedload(SupplierProduct.product)
+    )
+    
+    # Filter archived
+    if not include_archived:
+        query = query.filter(SupplierProduct.archived_at.is_(None))
+    
+    # Apply filters
+    if supplier_id:
+        query = query.filter(SupplierProduct.supplier_id == supplier_id)
+    if product_id:
+        query = query.filter(SupplierProduct.product_id == product_id)
+    if is_active is not None:
+        query = query.filter(SupplierProduct.is_active == is_active)
+    
+    # Apply pagination
+    supplier_products = query.offset(skip).limit(limit).all()
+    
+    # Build response
+    result = []
+    for sp in supplier_products:
+        # Calculate total shipping cost
+        if sp.shipping_method == 'DIRECT':
+            total_shipping = float(sp.shipping_cost_direct or 0)
+        else:
+            total_shipping = float(
+                (sp.shipping_stage1_cost or 0) +
+                (sp.shipping_stage2_cost or 0) +
+                (sp.shipping_stage3_cost or 0) +
+                (sp.shipping_stage4_cost or 0)
+            )
+        
+        result.append({
+            "id": sp.id,
+            "supplier_id": sp.supplier_id,
+            "supplier_name": sp.supplier.name,
+            "product_id": sp.product_id,
+            "product_name": sp.product.name,
+            "product_sku": sp.product.sku,
+            "supplier_sku": sp.supplier_sku,
+            "cost": float(sp.cost) if sp.cost else None,
+            "shipping_cost": total_shipping,
+            "total_cost": float(sp.cost or 0) + total_shipping,
+            "shipping_method": sp.shipping_method,
+            "stock": sp.stock,
+            "lead_time_days": sp.lead_time_days,
+            "is_active": sp.is_active,
+            "created_at": sp.created_at,
+            "last_updated": sp.last_updated
+        })
+    
+    return result
 
 # GET /products with advanced filtering and JSON wrapper - PUBLIC for quotation web app
 @router.get("/")
@@ -117,7 +198,31 @@ def get_products(
     if id:
         query = query.filter(Product.id == id)
     if name:
-        query = query.filter(Product.name.ilike(f"%{name}%"))
+        # Normalize spaces for better fuzzy matching
+        normalized_search = func.regexp_replace(func.unaccent(name), r'\s+', '', 'g')  # Remove all spaces
+        normalized_product = func.regexp_replace(func.unaccent(Product.name), r'\s+', '', 'g')
+        
+        # First try exact match with unaccent and space handling
+        exact_match = func.unaccent(Product.name).ilike(func.unaccent(f"%{name}%"))
+        
+        # Fuzzy matching with space normalization and lower threshold
+        fuzzy_match = func.similarity(normalized_product, normalized_search) > 0.2
+        
+        # Also try word similarity (handles "malla sombra" vs "mallasombra")
+        word_match = func.word_similarity(normalized_search, normalized_product) > 0.2
+        
+        query = query.filter(exact_match | fuzzy_match | word_match)
+        
+        # Order by best similarity score
+        similarity_score = func.similarity(normalized_product, normalized_search)
+        word_similarity_score = func.word_similarity(normalized_search, normalized_product)
+        best_score = func.greatest(similarity_score, word_similarity_score)
+        
+        exact_score = case(
+            (exact_match, 1.0),
+            else_=best_score
+        )
+        query = query.order_by(exact_score.desc())
     if sku:
         like_pattern = f"%{sku}%"
         # Filter by either base_sku or sku
@@ -183,6 +288,78 @@ def get_products(
     ]
     
     return {"success": True, "data": data, "error": None, "message": None}
+
+# GET /products/stock - Get products in stock (must be before /{product_id})
+@router.get("/stock")
+def get_products_in_stock(
+    db: Session = Depends(get_db),
+    min_stock: int = Query(default=1, description="Minimum stock level to include"),
+    include_zero_stock: bool = Query(default=False, description="Include products with zero stock"),
+    limit: int = Query(default=100, le=1000),
+    offset: int = Query(default=0, ge=0),
+    sort_by: Optional[str] = Query(default="name", description="Column to sort by: stock, price, total_value, last_updated, name"),
+    sort_order: Optional[str] = Query(default="asc", description="Sort order: asc or desc")
+):
+    """Get products that are currently in stock"""
+    query = db.query(Product).filter(Product.archived_at.is_(None))
+    
+    if include_zero_stock:
+        query = query.filter(Product.stock >= 0)
+    else:
+        query = query.filter(Product.stock >= min_stock)
+    
+    # Add sorting
+    if sort_by == "stock":
+        order_field = Product.stock
+    elif sort_by == "price":
+        order_field = Product.price
+    elif sort_by == "last_updated":
+        order_field = Product.last_updated
+    elif sort_by == "name":
+        order_field = Product.name
+    elif sort_by == "total_value":
+        # For total_value, we need to calculate it in the query
+        order_field = Product.stock * Product.price
+    else:
+        order_field = Product.name  # Default fallback
+    
+    # Apply sort direction
+    if sort_order.lower() == "desc":
+        query = query.order_by(order_field.desc())
+    else:
+        query = query.order_by(order_field.asc())
+    
+    total = query.count()
+    products = query.offset(offset).limit(limit).all()
+    
+    stock_data = []
+    for product in products:
+        total_value = None
+        if product.stock and product.price:
+            total_value = float(product.stock * product.price)
+        
+        stock_data.append({
+            "id": product.id,
+            "name": product.name,
+            "sku": product.sku,
+            "unit": product.unit.value if product.unit else ProductUnit.PIEZA.value,
+            "stock": product.stock,
+            "price": float(product.price) if product.price else None,
+            "total_value": total_value,
+            "last_updated": product.last_updated
+        })
+    
+    return {
+        "success": True,
+        "data": {
+            "products": stock_data,
+            "total": total,
+            "offset": offset,
+            "limit": limit
+        },
+        "error": None,
+        "message": None
+    }
 
 # GET /products/{product_id} - PUBLIC for quotation web app
 @router.get("/{product_id}")
@@ -502,53 +679,6 @@ class StockResponse(BaseModel):
     total_value: Optional[float]
     last_updated: Optional[datetime]
 
-@router.get("/stock")
-def get_products_in_stock(
-    db: Session = Depends(get_db),
-    min_stock: int = Query(default=1, description="Minimum stock level to include"),
-    include_zero_stock: bool = Query(default=False, description="Include products with zero stock"),
-    limit: int = Query(default=100, le=1000),
-    offset: int = Query(default=0, ge=0)
-):
-    """Get products that are currently in stock"""
-    query = db.query(Product).filter(Product.archived_at.is_(None))
-    
-    if include_zero_stock:
-        query = query.filter(Product.stock >= 0)
-    else:
-        query = query.filter(Product.stock >= min_stock)
-    
-    total = query.count()
-    products = query.offset(offset).limit(limit).all()
-    
-    stock_data = []
-    for product in products:
-        total_value = None
-        if product.stock and product.price:
-            total_value = float(product.stock * product.price)
-        
-        stock_data.append({
-            "id": product.id,
-            "name": product.name,
-            "sku": product.sku,
-            "unit": product.unit.value if product.unit else ProductUnit.PIEZA.value,
-            "stock": product.stock,
-            "price": float(product.price) if product.price else None,
-            "total_value": total_value,
-            "last_updated": product.last_updated
-        })
-    
-    return {
-        "success": True,
-        "data": {
-            "products": stock_data,
-            "total": total,
-            "offset": offset,
-            "limit": limit
-        },
-        "error": None,
-        "message": None
-    }
 
 @router.patch("/{product_id}/stock")
 def update_product_stock(

@@ -479,6 +479,17 @@ For Google Sheets/Excel data:
 - If supplier info is not in the table, create a generic supplier entry
 - Handle currency symbols and number formatting (e.g., "$ 86.92", "$3,042.10")
 
+SHIPPING COST EXTRACTION FOR MULTI-STAGE LOGISTICS:
+- Look for shipping cost columns such as:
+  * "Envio Dgo Ocurre-Manzanita Dgo U" (Stage 2 shipping cost)
+  * "Envio Dgo Manzanita Dgo-Manzanita NI U" (Stage 3 shipping cost)  
+  * "EnvioManzanita NI-IMPAG U" (Stage 4 shipping cost)
+  * Any other shipping/freight cost columns with "U" suffix (unit cost)
+- Extract unit shipping costs from columns ending with "U" 
+- Ignore total shipping columns ending with "Total"
+- If ANY shipping stage costs are found, set shipping_method to "OCURRE"
+- If no shipping stage costs found, set shipping_method to "DIRECT"
+
 Please return a JSON object with:
 
 1. `products`: an array of objects, each with:
@@ -487,7 +498,13 @@ Please return a JSON object with:
    - `suggested_base_sku`: a concise, meaningful base SKU (6-12 chars, format examples: "VH-4IN", "PERL-MED", "MESA-25")
    - `unit`: one of "PIEZA", "KG", "ROLLO", "METRO" (convert from Spanish units to these exact uppercase values)
    - `iva`: true if the product includes IVA, otherwise false
-   - `cost`: unit cost as a float
+   - `cost`: unit cost as a float (WITHOUT shipping costs)
+   - `shipping_method`: "DIRECT" or "OCURRE" based on shipping cost extraction
+   - `shipping_stage1_cost`: stage 1 shipping cost as float (default 0.0)
+   - `shipping_stage2_cost`: stage 2 shipping cost as float (default 0.0) 
+   - `shipping_stage3_cost`: stage 3 shipping cost as float (default 0.0)
+   - `shipping_stage4_cost`: stage 4 shipping cost as float (default 0.0)
+   - `shipping_notes`: optional notes about shipping logistics (string)
    - `specifications`: a dictionary of key attributes like size, volume, dimensions, material, etc.
    - `category_id`: the ID of the most appropriate category from the available_categories list
    - `supplier`: an object with the following fields for THIS SPECIFIC PRODUCT:
@@ -893,11 +910,27 @@ Respond only with the JSON object, no extra explanation."""
             print(f"Supplier-product relationship already exists (ID: {existing.id})")
             return existing
         
+        # Extract shipping costs and method from product info
+        shipping_method = product_info.get("shipping_method", "DIRECT")
+        shipping_cost_direct = 0.0
+        
+        # Handle shipping costs based on method
+        if shipping_method == "DIRECT":
+            # For direct shipping, use the old shipping_cost_per_unit field
+            shipping_cost_direct = product_info.get("shipping_cost_per_unit", 0.0)
+        
         new_supplier_product = SupplierProduct(
             supplier_id=supplier.id,
             product_id=product.id,
             supplier_sku=supplier_sku,
             cost=product_info.get("cost"),
+            shipping_method=shipping_method,
+            shipping_cost_direct=shipping_cost_direct,
+            shipping_stage1_cost=product_info.get("shipping_stage1_cost", 0.0),
+            shipping_stage2_cost=product_info.get("shipping_stage2_cost", 0.0),
+            shipping_stage3_cost=product_info.get("shipping_stage3_cost", 0.0),
+            shipping_stage4_cost=product_info.get("shipping_stage4_cost", 0.0),
+            shipping_notes=product_info.get("shipping_notes"),
             lead_time_days=0,  # Default, can be updated later
             is_active=True
         )

@@ -32,25 +32,41 @@ def calculate_price_with_margin(cost: Decimal, margin: Decimal) -> Decimal:
 
 def get_lowest_supplier_cost(product_id: int, db: Session) -> Optional[Decimal]:
     """
-    Get the lowest cost from all active suppliers for a product
+    Get the lowest total cost (base cost + shipping) from all active suppliers for a product
     
     Args:
         product_id: The product ID
         db: Database session
     
     Returns:
-        The lowest supplier cost or None if no suppliers with cost
+        The lowest total supplier cost (including shipping) or None if no suppliers with cost
     """
-    lowest_cost = db.query(SupplierProduct.cost).filter(
+    # Query for cost + total shipping cost based on shipping method
+    from sqlalchemy import func, case
+    
+    # Calculate total shipping cost based on method
+    total_shipping_cost = case(
+        (SupplierProduct.shipping_method == 'DIRECT', func.coalesce(SupplierProduct.shipping_cost_direct, 0)),
+        else_=(
+            func.coalesce(SupplierProduct.shipping_stage1_cost, 0) +
+            func.coalesce(SupplierProduct.shipping_stage2_cost, 0) +
+            func.coalesce(SupplierProduct.shipping_stage3_cost, 0) +
+            func.coalesce(SupplierProduct.shipping_stage4_cost, 0)
+        )
+    )
+    
+    supplier_costs = db.query(
+        (SupplierProduct.cost + total_shipping_cost).label('total_cost')
+    ).filter(
         and_(
             SupplierProduct.product_id == product_id,
             SupplierProduct.is_active == True,
             SupplierProduct.cost.isnot(None),
             SupplierProduct.cost > 0
         )
-    ).order_by(SupplierProduct.cost.asc()).first()
+    ).order_by((SupplierProduct.cost + total_shipping_cost).asc()).first()
     
-    return lowest_cost[0] if lowest_cost else None
+    return supplier_costs[0] if supplier_costs else None
 
 
 def calculate_product_price_with_default_margin(product: Product, db: Session) -> Optional[Decimal]:
@@ -111,11 +127,23 @@ def enrich_products_with_calculated_prices(products: List[Dict[str, Any]], db: S
     # Batch query for supplier costs for all products that need calculation
     product_ids = [p['id'] for p in products_needing_calculation]
     
-    # Get lowest costs for all products in one query
-    from sqlalchemy import and_, func
+    # Get lowest total costs (base cost + shipping) for all products in one query
+    from sqlalchemy import and_, func, case
+    
+    # Calculate total shipping cost based on method
+    total_shipping_cost = case(
+        (SupplierProduct.shipping_method == 'DIRECT', func.coalesce(SupplierProduct.shipping_cost_direct, 0)),
+        else_=(
+            func.coalesce(SupplierProduct.shipping_stage1_cost, 0) +
+            func.coalesce(SupplierProduct.shipping_stage2_cost, 0) +
+            func.coalesce(SupplierProduct.shipping_stage3_cost, 0) +
+            func.coalesce(SupplierProduct.shipping_stage4_cost, 0)
+        )
+    )
+    
     lowest_costs_query = db.query(
         SupplierProduct.product_id,
-        func.min(SupplierProduct.cost).label('lowest_cost')
+        func.min(SupplierProduct.cost + total_shipping_cost).label('lowest_cost')
     ).filter(
         and_(
             SupplierProduct.product_id.in_(product_ids),

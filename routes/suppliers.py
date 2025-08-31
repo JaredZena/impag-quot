@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func, case
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
@@ -95,12 +96,42 @@ def get_suppliers(
         query = query.filter(Supplier.archived_at.is_(None))
     
     if search:
-        like_pattern = f"%{search}%"
+        # Normalize spaces for better fuzzy matching
+        normalized_search = func.regexp_replace(func.unaccent(search), r'\s+', '', 'g')
+        normalized_name = func.regexp_replace(func.unaccent(Supplier.name), r'\s+', '', 'g')
+        normalized_contact = func.regexp_replace(func.unaccent(Supplier.contact_name), r'\s+', '', 'g')
+        
+        # Exact matches
+        name_exact = func.unaccent(Supplier.name).ilike(func.unaccent(f"%{search}%"))
+        contact_exact = func.unaccent(Supplier.contact_name).ilike(func.unaccent(f"%{search}%"))
+        email_exact = Supplier.email.ilike(f"%{search}%")
+        
+        # Fuzzy matches with space normalization
+        name_fuzzy = func.similarity(normalized_name, normalized_search) > 0.2
+        contact_fuzzy = func.similarity(normalized_contact, normalized_search) > 0.2
+        
+        # Word similarity matches
+        name_word = func.word_similarity(normalized_search, normalized_name) > 0.2
+        contact_word = func.word_similarity(normalized_search, normalized_contact) > 0.2
+        
         query = query.filter(
-            (Supplier.name.ilike(like_pattern)) |
-            (Supplier.contact_name.ilike(like_pattern)) |
-            (Supplier.email.ilike(like_pattern))
+            name_exact | contact_exact | email_exact | 
+            name_fuzzy | contact_fuzzy | name_word | contact_word
         )
+        
+        # Order by best similarity score
+        name_similarity = func.similarity(normalized_name, normalized_search)
+        contact_similarity = func.similarity(normalized_contact, normalized_search)
+        name_word_sim = func.word_similarity(normalized_search, normalized_name)
+        contact_word_sim = func.word_similarity(normalized_search, normalized_contact)
+        
+        best_score = func.greatest(name_similarity, contact_similarity, name_word_sim, contact_word_sim)
+        
+        exact_score = case(
+            (name_exact | contact_exact | email_exact, 1.0),
+            else_=best_score
+        )
+        query = query.order_by(exact_score.desc())
     
     # Add sorting - default sort by name if no sort_by provided
     if not sort_by:
