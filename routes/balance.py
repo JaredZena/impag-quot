@@ -71,6 +71,7 @@ class ProductComparisonResponse(BaseModel):
 
 # GET /balance - List all balances
 @router.get("/", response_model=List[BalanceResponse])
+@router.get("", response_model=List[BalanceResponse])  # Handle both /balance and /balance/ explicitly
 def get_balances(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, le=1000),

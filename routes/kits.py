@@ -62,6 +62,7 @@ class KitResponse(BaseModel):
 
 # GET /kits - List all kits
 @router.get("/", response_model=List[KitResponse])
+@router.get("", response_model=List[KitResponse])  # Handle both /kits and /kits/ explicitly
 def get_kits(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, le=1000),
