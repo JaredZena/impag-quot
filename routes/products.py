@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, case
 from typing import List, Optional, Any
 from pydantic import BaseModel
@@ -116,60 +116,76 @@ def get_all_supplier_products(
     db: Session = Depends(get_db)
 ):
     """Get all supplier-product relationships"""
-    query = db.query(SupplierProduct).options(
-        joinedload(SupplierProduct.supplier),
-        joinedload(SupplierProduct.product)
-    )
-    
-    # Filter archived
-    if not include_archived:
-        query = query.filter(SupplierProduct.archived_at.is_(None))
-    
-    # Apply filters
-    if supplier_id:
-        query = query.filter(SupplierProduct.supplier_id == supplier_id)
-    if product_id:
-        query = query.filter(SupplierProduct.product_id == product_id)
-    if is_active is not None:
-        query = query.filter(SupplierProduct.is_active == is_active)
-    
-    # Apply pagination
-    supplier_products = query.offset(skip).limit(limit).all()
-    
-    # Build response
-    result = []
-    for sp in supplier_products:
-        # Calculate total shipping cost
-        if sp.shipping_method == 'DIRECT':
-            total_shipping = float(sp.shipping_cost_direct or 0)
-        else:
-            total_shipping = float(
-                (sp.shipping_stage1_cost or 0) +
-                (sp.shipping_stage2_cost or 0) +
-                (sp.shipping_stage3_cost or 0) +
-                (sp.shipping_stage4_cost or 0)
-            )
+    try:
+        query = db.query(SupplierProduct).options(
+            joinedload(SupplierProduct.supplier),
+            joinedload(SupplierProduct.product)
+        )
         
-        result.append({
-            "id": sp.id,
-            "supplier_id": sp.supplier_id,
-            "supplier_name": sp.supplier.name,
-            "product_id": sp.product_id,
-            "product_name": sp.product.name,
-            "product_sku": sp.product.sku,
-            "supplier_sku": sp.supplier_sku,
-            "cost": float(sp.cost) if sp.cost else None,
-            "shipping_cost": total_shipping,
-            "total_cost": float(sp.cost or 0) + total_shipping,
-            "shipping_method": sp.shipping_method,
-            "stock": sp.stock,
-            "lead_time_days": sp.lead_time_days,
-            "is_active": sp.is_active,
-            "created_at": sp.created_at,
-            "last_updated": sp.last_updated
-        })
-    
-    return result
+        # Filter archived
+        if not include_archived:
+            query = query.filter(SupplierProduct.archived_at.is_(None))
+        
+        # Apply filters
+        if supplier_id:
+            query = query.filter(SupplierProduct.supplier_id == supplier_id)
+        if product_id:
+            query = query.filter(SupplierProduct.product_id == product_id)
+        if is_active is not None:
+            query = query.filter(SupplierProduct.is_active == is_active)
+        
+        # Apply pagination
+        supplier_products = query.offset(skip).limit(limit).all()
+        
+        # Build response
+        result = []
+        for sp in supplier_products:
+            try:
+                # Calculate total shipping cost
+                if hasattr(sp, 'shipping_method') and sp.shipping_method == 'DIRECT':
+                    total_shipping = float(getattr(sp, 'shipping_cost_direct', 0) or 0)
+                else:
+                    total_shipping = float(
+                        (getattr(sp, 'shipping_stage1_cost', 0) or 0) +
+                        (getattr(sp, 'shipping_stage2_cost', 0) or 0) +
+                        (getattr(sp, 'shipping_stage3_cost', 0) or 0) +
+                        (getattr(sp, 'shipping_stage4_cost', 0) or 0)
+                    )
+                
+                item = {
+                    "id": sp.id,
+                    "supplier_id": sp.supplier_id,
+                    "supplier_name": sp.supplier.name if sp.supplier else "Unknown",
+                    "product_id": sp.product_id,
+                    "product_name": sp.product.name if sp.product else "Unknown",
+                    "product_sku": sp.product.sku if sp.product else "Unknown",
+                    "supplier_sku": sp.supplier_sku or "",
+                    "cost": float(sp.cost) if sp.cost else None,
+                    "shipping_cost": total_shipping,
+                    "total_cost": float(sp.cost or 0) + total_shipping,
+                    "shipping_method": getattr(sp, 'shipping_method', 'OCURRE'),
+                    "stock": sp.stock or 0,
+                    "lead_time_days": sp.lead_time_days or 0,
+                    "is_active": sp.is_active,
+                    "created_at": sp.created_at,
+                    "last_updated": sp.last_updated
+                }
+                result.append(item)
+            except Exception as e:
+                # Skip problematic items but log the issue
+                print(f"Error processing supplier product {sp.id}: {str(e)}")
+                continue
+        
+        return {
+            "success": True,
+            "data": {
+                "supplier_products": result,
+                "total": len(result)
+            }
+        }
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"Error fetching supplier products: {str(e)}")
 
 # GET /products with advanced filtering and JSON wrapper - PUBLIC for quotation web app
 @router.get("/")
