@@ -491,6 +491,7 @@ def update_product(product_id: int, product: ProductUpdate, db: Session = Depend
 
 # SupplierProduct endpoints - ALL REQUIRE AUTHENTICATION for admin operations
 @router.post("/supplier-product/", response_model=SupplierProductResponse)
+@router.post("/supplier-products", response_model=SupplierProductResponse)  # Add plural endpoint for frontend compatibility
 def create_supplier_product(supplier_product: SupplierProductCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     # Verify supplier and product exist
     supplier = db.query(Supplier).filter(Supplier.id == supplier_product.supplier_id).first()
