@@ -151,3 +151,4 @@ The main Products page now includes a stock filter with options:
 
 ### Getting Help
 Check the script output for detailed error messages. Each row that fails will show the specific error and line number.
+

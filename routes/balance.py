@@ -70,8 +70,7 @@ class ProductComparisonResponse(BaseModel):
     suppliers: List[dict]  # List of supplier pricing info
 
 # GET /balance - List all balances
-@router.get("/", response_model=List[BalanceResponse])
-@router.get("", response_model=List[BalanceResponse])  # Handle both /balance and /balance/ explicitly
+@router.get("", response_model=List[BalanceResponse])
 def get_balances(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, le=1000),
@@ -191,7 +190,7 @@ def get_balance(balance_id: int, db: Session = Depends(get_db)):
     return balance_dict
 
 # POST /balance - Create new balance
-@router.post("/", response_model=BalanceResponse)
+@router.post("", response_model=BalanceResponse)
 def create_balance(balance_data: BalanceCreate, db: Session = Depends(get_db)):
     """Create a new balance"""
     
