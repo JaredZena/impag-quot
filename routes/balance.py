@@ -4,10 +4,24 @@ from sqlalchemy import func
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
+from decimal import Decimal
 from models import get_db, Balance, BalanceItem, Product, Supplier, SupplierProduct
 from auth import verify_google_token
 
 router = APIRouter(prefix="/balance", tags=["balance"])
+
+# Helper functions
+def calculate_supplier_shipping_cost(supplier_product: SupplierProduct) -> float:
+    """Calculate shipping cost per unit based on supplier's shipping method"""
+    if supplier_product.shipping_method == 'DIRECT':
+        return float(supplier_product.shipping_cost_direct or 0)
+    else:  # OCURRE
+        return float(
+            (supplier_product.shipping_stage1_cost or 0) +
+            (supplier_product.shipping_stage2_cost or 0) +
+            (supplier_product.shipping_stage3_cost or 0) +
+            (supplier_product.shipping_stage4_cost or 0)
+        )
 
 # Pydantic models
 class BalanceItemCreate(BaseModel):
@@ -15,7 +29,6 @@ class BalanceItemCreate(BaseModel):
     supplier_id: int
     quantity: int = 1
     unit_price: float
-    shipping_cost: float = 0.0
     notes: Optional[str] = None
 
 class BalanceItemResponse(BaseModel):
@@ -27,7 +40,8 @@ class BalanceItemResponse(BaseModel):
     supplier_name: str
     quantity: int
     unit_price: float
-    shipping_cost: float
+    shipping_cost: float  # Calculated from SupplierProduct
+    shipping_method: str  # From SupplierProduct
     total_cost: float
     notes: Optional[str]
     
@@ -70,7 +84,7 @@ class ProductComparisonResponse(BaseModel):
     suppliers: List[dict]  # List of supplier pricing info
 
 # GET /balance - List all balances
-@router.get("", response_model=List[BalanceResponse])
+@router.get("/", response_model=List[BalanceResponse])
 def get_balances(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, le=1000),
@@ -123,23 +137,40 @@ def get_balances(
             "is_active": balance.is_active,
             "created_at": balance.created_at,
             "last_updated": balance.last_updated,
-            "items": [
-                {
-                    "id": item.id,
-                    "product_id": item.product_id,
-                    "product_name": item.product.name,
-                    "product_sku": item.product.sku,
-                    "supplier_id": item.supplier_id,
-                    "supplier_name": item.supplier.name,
-                    "quantity": item.quantity,
-                    "unit_price": float(item.unit_price),
-                    "shipping_cost": float(item.shipping_cost),
-                    "total_cost": float(item.total_cost),
-                    "notes": item.notes
-                }
-                for item in balance.items
-            ]
+            "items": []
         }
+        
+        # Build items with dynamic shipping calculation
+        for item in balance.items:
+            # Get supplier product info for shipping calculation
+            supplier_product = db.query(SupplierProduct).filter(
+                SupplierProduct.supplier_id == item.supplier_id,
+                SupplierProduct.product_id == item.product_id,
+                SupplierProduct.is_active == True
+            ).first()
+            
+            if supplier_product:
+                shipping_cost_per_unit = calculate_supplier_shipping_cost(supplier_product)
+                shipping_method = supplier_product.shipping_method
+            else:
+                # Fallback if supplier product not found
+                shipping_cost_per_unit = 0.0
+                shipping_method = "UNKNOWN"
+            
+            balance_dict["items"].append({
+                "id": item.id,
+                "product_id": item.product_id,
+                "product_name": item.product.name,
+                "product_sku": item.product.sku,
+                "supplier_id": item.supplier_id,
+                "supplier_name": item.supplier.name,
+                "quantity": item.quantity,
+                "unit_price": float(item.unit_price),
+                "shipping_cost": shipping_cost_per_unit,
+                "shipping_method": shipping_method,
+                "total_cost": float(item.total_cost),
+                "notes": item.notes
+            })
         result.append(balance_dict)
     
     return result
@@ -169,23 +200,40 @@ def get_balance(balance_id: int, db: Session = Depends(get_db)):
         "is_active": balance.is_active,
         "created_at": balance.created_at,
         "last_updated": balance.last_updated,
-        "items": [
-            {
-                "id": item.id,
-                "product_id": item.product_id,
-                "product_name": item.product.name,
-                "product_sku": item.product.sku,
-                "supplier_id": item.supplier_id,
-                "supplier_name": item.supplier.name,
-                "quantity": item.quantity,
-                "unit_price": float(item.unit_price),
-                "shipping_cost": float(item.shipping_cost),
-                "total_cost": float(item.total_cost),
-                "notes": item.notes
-            }
-            for item in balance.items
-        ]
+        "items": []
     }
+    
+    # Build items with dynamic shipping calculation
+    for item in balance.items:
+        # Get supplier product info for shipping calculation
+        supplier_product = db.query(SupplierProduct).filter(
+            SupplierProduct.supplier_id == item.supplier_id,
+            SupplierProduct.product_id == item.product_id,
+            SupplierProduct.is_active == True
+        ).first()
+        
+        if supplier_product:
+            shipping_cost_per_unit = calculate_supplier_shipping_cost(supplier_product)
+            shipping_method = supplier_product.shipping_method
+        else:
+            # Fallback if supplier product not found
+            shipping_cost_per_unit = 0.0
+            shipping_method = "UNKNOWN"
+        
+        balance_dict["items"].append({
+            "id": item.id,
+            "product_id": item.product_id,
+            "product_name": item.product.name,
+            "product_sku": item.product.sku,
+            "supplier_id": item.supplier_id,
+            "supplier_name": item.supplier.name,
+            "quantity": item.quantity,
+            "unit_price": float(item.unit_price),
+            "shipping_cost": shipping_cost_per_unit,
+            "shipping_method": shipping_method,
+            "total_cost": float(item.total_cost),
+            "notes": item.notes
+        })
     
     return balance_dict
 
@@ -215,14 +263,22 @@ def create_balance(balance_data: BalanceCreate, db: Session = Depends(get_db)):
             db.rollback()
             raise HTTPException(status_code=400, detail=f"Product {item_data.product_id} not found")
         
-        # Verify supplier exists
-        supplier = db.query(Supplier).filter(Supplier.id == item_data.supplier_id).first()
-        if not supplier:
+        # Verify supplier exists and get supplier product info
+        supplier_product = db.query(SupplierProduct).filter(
+            SupplierProduct.supplier_id == item_data.supplier_id,
+            SupplierProduct.product_id == item_data.product_id,
+            SupplierProduct.is_active == True
+        ).first()
+        
+        if not supplier_product:
             db.rollback()
-            raise HTTPException(status_code=400, detail=f"Supplier {item_data.supplier_id} not found")
+            raise HTTPException(status_code=400, detail=f"Supplier {item_data.supplier_id} does not offer product {item_data.product_id}")
+        
+        # Calculate shipping cost from supplier product
+        shipping_cost_per_unit = calculate_supplier_shipping_cost(supplier_product)
         
         # Calculate total cost
-        item_total = (item_data.unit_price + item_data.shipping_cost) * item_data.quantity
+        item_total = (item_data.unit_price + shipping_cost_per_unit) * item_data.quantity
         total_amount += item_total
         
         db_item = BalanceItem(
@@ -231,7 +287,6 @@ def create_balance(balance_data: BalanceCreate, db: Session = Depends(get_db)):
             supplier_id=item_data.supplier_id,
             quantity=item_data.quantity,
             unit_price=item_data.unit_price,
-            shipping_cost=item_data.shipping_cost,
             total_cost=item_total,
             notes=item_data.notes
         )
@@ -279,14 +334,22 @@ def update_balance(balance_id: int, balance_data: BalanceUpdate, db: Session = D
                 db.rollback()
                 raise HTTPException(status_code=400, detail=f"Product {item_data.product_id} not found")
             
-            # Verify supplier exists
-            supplier = db.query(Supplier).filter(Supplier.id == item_data.supplier_id).first()
-            if not supplier:
+            # Verify supplier exists and get supplier product info
+            supplier_product = db.query(SupplierProduct).filter(
+                SupplierProduct.supplier_id == item_data.supplier_id,
+                SupplierProduct.product_id == item_data.product_id,
+                SupplierProduct.is_active == True
+            ).first()
+            
+            if not supplier_product:
                 db.rollback()
-                raise HTTPException(status_code=400, detail=f"Supplier {item_data.supplier_id} not found")
+                raise HTTPException(status_code=400, detail=f"Supplier {item_data.supplier_id} does not offer product {item_data.product_id}")
+            
+            # Calculate shipping cost from supplier product
+            shipping_cost_per_unit = calculate_supplier_shipping_cost(supplier_product)
             
             # Calculate total cost
-            item_total = (item_data.unit_price + item_data.shipping_cost) * item_data.quantity
+            item_total = (item_data.unit_price + shipping_cost_per_unit) * item_data.quantity
             total_amount += item_total
             
             db_item = BalanceItem(
@@ -295,7 +358,6 @@ def update_balance(balance_id: int, balance_data: BalanceUpdate, db: Session = D
                 supplier_id=item_data.supplier_id,
                 quantity=item_data.quantity,
                 unit_price=item_data.unit_price,
-                shipping_cost=item_data.shipping_cost,
                 total_cost=item_total,
                 notes=item_data.notes
             )
