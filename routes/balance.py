@@ -276,8 +276,23 @@ def create_balance(balance_data: BalanceCreate, db: Session = Depends(get_db)):
     
     total_amount = 0
     
+    # Deduplicate items before processing
+    def deduplicate_items(items):
+        """Merge duplicate product-supplier combinations"""
+        item_map = {}
+        for item in items:
+            key = f"{item.product_id}-{item.supplier_id}"
+            if key in item_map:
+                # Merge quantities
+                item_map[key].quantity += item.quantity
+            else:
+                item_map[key] = item
+        return list(item_map.values())
+    
+    deduplicated_items = deduplicate_items(balance_data.items)
+    
     # Add items
-    for item_data in balance_data.items:
+    for item_data in deduplicated_items:
         # Verify product exists
         product = db.query(Product).filter(Product.id == item_data.product_id).first()
         if not product:
@@ -347,8 +362,23 @@ def update_balance(balance_id: int, balance_data: BalanceUpdate, db: Session = D
         
         total_amount = 0
         
+        # Deduplicate items before processing
+        def deduplicate_items(items):
+            """Merge duplicate product-supplier combinations"""
+            item_map = {}
+            for item in items:
+                key = f"{item.product_id}-{item.supplier_id}"
+                if key in item_map:
+                    # Merge quantities
+                    item_map[key].quantity += item.quantity
+                else:
+                    item_map[key] = item
+            return list(item_map.values())
+        
+        deduplicated_items = deduplicate_items(balance_data.items)
+        
         # Add new items
-        for item_data in balance_data.items:
+        for item_data in deduplicated_items:
             # Verify product exists
             product = db.query(Product).filter(Product.id == item_data.product_id).first()
             if not product:
