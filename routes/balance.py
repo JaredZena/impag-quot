@@ -38,10 +38,17 @@ class BalanceItemResponse(BaseModel):
     product_sku: str
     supplier_id: int
     supplier_name: str
+    supplier_product_id: Optional[int] = None
     quantity: int
     unit_price: float
     shipping_cost: float  # Calculated from SupplierProduct
     shipping_method: str  # From SupplierProduct
+    shipping_cost_direct: Optional[float] = 0
+    shipping_stage1_cost: Optional[float] = 0
+    shipping_stage2_cost: Optional[float] = 0
+    shipping_stage3_cost: Optional[float] = 0
+    shipping_stage4_cost: Optional[float] = 0
+    shipping_notes: Optional[str] = None
     total_cost: float
     notes: Optional[str]
     
@@ -164,10 +171,17 @@ def get_balances(
                 "product_sku": item.product.sku,
                 "supplier_id": item.supplier_id,
                 "supplier_name": item.supplier.name,
+                "supplier_product_id": supplier_product.id if supplier_product else None,
                 "quantity": item.quantity,
                 "unit_price": float(item.unit_price),
                 "shipping_cost": shipping_cost_per_unit,
                 "shipping_method": shipping_method,
+                "shipping_cost_direct": supplier_product.shipping_cost_direct if supplier_product else 0,
+                "shipping_stage1_cost": supplier_product.shipping_stage1_cost if supplier_product else 0,
+                "shipping_stage2_cost": supplier_product.shipping_stage2_cost if supplier_product else 0,
+                "shipping_stage3_cost": supplier_product.shipping_stage3_cost if supplier_product else 0,
+                "shipping_stage4_cost": supplier_product.shipping_stage4_cost if supplier_product else 0,
+                "shipping_notes": supplier_product.shipping_notes if supplier_product else None,
                 "total_cost": float(item.total_cost),
                 "notes": item.notes
             })
@@ -227,10 +241,17 @@ def get_balance(balance_id: int, db: Session = Depends(get_db)):
             "product_sku": item.product.sku,
             "supplier_id": item.supplier_id,
             "supplier_name": item.supplier.name,
+            "supplier_product_id": supplier_product.id if supplier_product else None,
             "quantity": item.quantity,
             "unit_price": float(item.unit_price),
             "shipping_cost": shipping_cost_per_unit,
             "shipping_method": shipping_method,
+            "shipping_cost_direct": supplier_product.shipping_cost_direct if supplier_product else 0,
+            "shipping_stage1_cost": supplier_product.shipping_stage1_cost if supplier_product else 0,
+            "shipping_stage2_cost": supplier_product.shipping_stage2_cost if supplier_product else 0,
+            "shipping_stage3_cost": supplier_product.shipping_stage3_cost if supplier_product else 0,
+            "shipping_stage4_cost": supplier_product.shipping_stage4_cost if supplier_product else 0,
+            "shipping_notes": supplier_product.shipping_notes if supplier_product else None,
             "total_cost": float(item.total_cost),
             "notes": item.notes
         })

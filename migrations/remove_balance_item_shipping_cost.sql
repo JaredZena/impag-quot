@@ -7,3 +7,4 @@ DROP COLUMN IF EXISTS shipping_cost;
 
 -- Add comment to clarify the change
 COMMENT ON TABLE balance_item IS 'Balance items - shipping costs calculated dynamically from supplier_product table';
+

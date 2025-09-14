@@ -622,6 +622,73 @@ def update_supplier_product(
     db.refresh(db_supplier_product)
     return db_supplier_product
 
+# Update shipping info for supplier product (from balance page)
+@router.patch("/supplier-product/{supplier_product_id}/shipping", response_model=SupplierProductResponse)
+def update_supplier_product_shipping(
+    supplier_product_id: int,
+    shipping_data: dict,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token)
+):
+    """Update shipping method and costs for a supplier product"""
+    db_supplier_product = db.query(SupplierProduct).filter(SupplierProduct.id == supplier_product_id).first()
+    if db_supplier_product is None:
+        raise HTTPException(status_code=404, detail="Supplier Product not found")
+    
+    # Update shipping method
+    if 'shipping_method' in shipping_data:
+        db_supplier_product.shipping_method = shipping_data['shipping_method']
+    
+    # Update shipping costs based on method
+    if shipping_data.get('shipping_method') == 'DIRECT':
+        if 'shipping_cost_direct' in shipping_data:
+            db_supplier_product.shipping_cost_direct = shipping_data['shipping_cost_direct']
+        # Reset stage costs when switching to DIRECT
+        db_supplier_product.shipping_stage1_cost = 0.0
+        db_supplier_product.shipping_stage2_cost = 0.0
+        db_supplier_product.shipping_stage3_cost = 0.0
+        db_supplier_product.shipping_stage4_cost = 0.0
+    elif shipping_data.get('shipping_method') == 'OCURRE':
+        # Update stage costs
+        if 'shipping_stage1_cost' in shipping_data:
+            db_supplier_product.shipping_stage1_cost = shipping_data['shipping_stage1_cost']
+        if 'shipping_stage2_cost' in shipping_data:
+            db_supplier_product.shipping_stage2_cost = shipping_data['shipping_stage2_cost']
+        if 'shipping_stage3_cost' in shipping_data:
+            db_supplier_product.shipping_stage3_cost = shipping_data['shipping_stage3_cost']
+        if 'shipping_stage4_cost' in shipping_data:
+            db_supplier_product.shipping_stage4_cost = shipping_data['shipping_stage4_cost']
+        # Reset direct cost when switching to OCURRE
+        db_supplier_product.shipping_cost_direct = 0.0
+    
+    # Update shipping notes if provided
+    if 'shipping_notes' in shipping_data:
+        db_supplier_product.shipping_notes = shipping_data['shipping_notes']
+    
+    db.commit()
+    db.refresh(db_supplier_product)
+    return db_supplier_product
+
+# Get supplier product by supplier_id and product_id
+@router.get("/supplier-product/by-relationship/{supplier_id}/{product_id}", response_model=SupplierProductResponse)
+def get_supplier_product_by_relationship(
+    supplier_id: int,
+    product_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token)
+):
+    """Get supplier product by supplier_id and product_id"""
+    supplier_product = db.query(SupplierProduct).filter(
+        SupplierProduct.supplier_id == supplier_id,
+        SupplierProduct.product_id == product_id,
+        SupplierProduct.archived_at.is_(None)
+    ).first()
+    
+    if supplier_product is None:
+        raise HTTPException(status_code=404, detail="Supplier Product relationship not found")
+    
+    return supplier_product
+
 # Archive/Unarchive endpoints for Products
 @router.patch("/{product_id}/archive")
 def archive_product(product_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
