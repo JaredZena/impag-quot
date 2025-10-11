@@ -264,6 +264,8 @@ def get_products(
         
     if sort_by == "name":
         query = query.order_by(Product.name.asc() if sort_order == "asc" else Product.name.desc())
+    elif sort_by == "price":
+        query = query.order_by(Product.price.asc() if sort_order == "asc" else Product.price.desc())
     elif sort_by == "created_at":
         query = query.order_by(Product.created_at.asc() if sort_order == "asc" else Product.created_at.desc())
     elif sort_by == "last_updated":

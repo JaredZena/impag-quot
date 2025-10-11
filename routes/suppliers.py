@@ -294,6 +294,9 @@ def get_supplier_products(supplier_id: int, include_archived: bool = False, db: 
                 "supplier_notes": sp.notes,
                 "supplier_relationship_created_at": sp.created_at,
                 "supplier_relationship_last_updated": sp.last_updated,
+                # Add aliases for frontend compatibility
+                "created_at": sp.created_at,
+                "last_updated": sp.last_updated,
                 
                 # Product information
                 "product_id": product.id,
