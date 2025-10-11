@@ -38,6 +38,7 @@ class QuotationResponse(BaseModel):
     supplier_products_created: int
     skus_generated: list
     supplier_detection: MultiSupplierDetectionInfo
+    currency_info: dict  # Currency detection and conversion info
 
 class BatchQuotationResponse(BaseModel):
     total_files_processed: int
@@ -93,15 +94,23 @@ async def process_quotation(
         temp_file_path = temp_file.name
     
     try:
+        print(f"🔍 API: Starting quotation processing for file: {file.filename}")
         # Initialize the quotation processor
         processor = QuotationProcessor(claude_api_key)
+        print("🔍 API: QuotationProcessor initialized")
         
         # Process the quotation
+        print("🔍 API: Calling process_quotation...")
         results = processor.process_quotation(temp_file_path, category_id)
+        print("🔍 API: process_quotation completed successfully")
         
         return results
         
     except Exception as e:
+        print(f"❌ API: Error in process_quotation endpoint: {str(e)}")
+        print(f"❌ API: Error type: {type(e).__name__}")
+        import traceback
+        print(f"❌ API: Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
         
     finally:

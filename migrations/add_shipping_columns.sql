@@ -32,7 +32,7 @@ BEGIN
         calculated_price = CASE 
             WHEN default_margin IS NOT NULL THEN
                 ROUND(
-                    (SELECT MIN(cost + COALESCE(shipping_cost_per_unit, 0)) 
+                    (SELECT MIN(cost + COALESCE(shipping_cost_direct, 0)) 
                      FROM supplier_product 
                      WHERE product_id = NEW.product_id 
                        AND is_active = true 
@@ -52,7 +52,7 @@ $$ LANGUAGE plpgsql;
 -- Update trigger to fire on shipping cost changes too
 DROP TRIGGER IF EXISTS trigger_update_calculated_price_on_supplier_product ON supplier_product;
 CREATE TRIGGER trigger_update_calculated_price_on_supplier_product
-    AFTER INSERT OR UPDATE OF cost, shipping_cost_per_unit, is_active
+    AFTER INSERT OR UPDATE OF cost, shipping_cost_direct, is_active
     ON supplier_product
     FOR EACH ROW
     EXECUTE FUNCTION update_calculated_price();
@@ -66,7 +66,7 @@ BEGIN
         NEW.calculated_price = CASE 
             WHEN NEW.default_margin IS NOT NULL THEN
                 ROUND(
-                    (SELECT MIN(cost + COALESCE(shipping_cost_per_unit, 0)) 
+                    (SELECT MIN(cost + COALESCE(shipping_cost_direct, 0)) 
                      FROM supplier_product 
                      WHERE product_id = NEW.id 
                        AND is_active = true 
@@ -82,3 +82,11 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Create the missing trigger on product table for default_margin changes
+DROP TRIGGER IF EXISTS trigger_update_calculated_price_on_product ON product;
+CREATE TRIGGER trigger_update_calculated_price_on_product
+    BEFORE UPDATE OF default_margin
+    ON product
+    FOR EACH ROW
+    EXECUTE FUNCTION update_calculated_price_on_product();

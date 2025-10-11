@@ -287,6 +287,7 @@ def get_supplier_products(supplier_id: int, include_archived: bool = False, db: 
                 "supplier_product_id": sp.id,
                 "supplier_sku": sp.supplier_sku,
                 "cost": float(sp.cost) if sp.cost is not None else None,
+                "currency": sp.currency if sp.currency is not None else 'MXN',  # Include currency
                 "stock": sp.stock,
                 "lead_time_days": sp.lead_time_days,
                 "supplier_is_active": sp.is_active,

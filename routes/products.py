@@ -60,6 +60,7 @@ class SupplierProductBase(BaseModel):
     product_id: int
     supplier_sku: Optional[str] = None
     cost: Optional[float] = None
+    currency: Optional[str] = 'MXN'  # Currency of cost (MXN or USD)
     stock: Optional[int] = 0
     lead_time_days: Optional[int] = None
     shipping_cost: Optional[float] = None  # Legacy field (deprecated)

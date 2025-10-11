@@ -20,6 +20,8 @@ from models import (
     Supplier, Product, SupplierProduct, 
     ProductCategory, ProductUnit, SessionLocal
 )
+from utils.currency_utils import CurrencyUtils
+from utils.json_repair import JSONRepair
 
 class HybridSKUGenerator:
     def __init__(self):
@@ -412,8 +414,10 @@ Return only the extracted text, without any additional commentary or analysis.""
         Use Claude to extract structured supplier and product data from PDF text.
         Enhanced to include SKU suggestions and automatic category selection.
         """
+        print("🔍 Preprocessing text...")
         # Preprocess very long text to focus on product information
         processed_text = self.preprocess_long_text(pdf_text)
+        print(f"🔍 Processed text length: {len(processed_text)} characters")
         
         # Create detailed category descriptions with examples
         category_descriptions = {
@@ -443,7 +447,7 @@ Return only the extracted text, without any additional commentary or analysis.""
             for cat in categories
         ])
         
-        prompt = f"""You are an assistant that extracts structured information from supplier quotations and product information for a procurement system.
+        prompt = """You are an assistant that extracts structured information from supplier quotations and product information for a procurement system.
 
 <document_text>
 {processed_text}
@@ -462,13 +466,14 @@ IMPORTANT: This document could be:
 For WhatsApp conversations:
 - Look for messages that mention products, prices, quantities
 - The supplier is typically the person/business sending product information
-- Prices may be mentioned in various formats: "$100", "100 pesos", "cuesta 50", etc.
+- Prices may be mentioned in various formats: "$100", "100 pesos", "cuesta 50", "USD 25", "25 dollars", etc.
 - Products may be described informally: "las mallas", "el tubo de 4 pulgadas", etc.
 - Pay attention to timestamps and sender names to identify the supplier
 - Look for product specifications in casual language
 - For VERY LONG conversations: Focus on messages that contain actual product offers with prices
 - Skip general conversation, greetings, and messages without product information
 - Prioritize clear product descriptions with specifications and pricing
+- CURRENCY DETECTION: Look for USD indicators like "USD", "dollars", "US$", "$" (when context suggests USD), "dólares"
 
 For Google Sheets/Excel data:
 - Look for column headers like "Descripción", "Cantidad", "Precio", "Unidad", "Importe"
@@ -477,7 +482,8 @@ For Google Sheets/Excel data:
 - Parse prices from price/import columns (may include $ symbols and formatting)
 - Convert quantities and units appropriately
 - If supplier info is not in the table, create a generic supplier entry
-- Handle currency symbols and number formatting (e.g., "$ 86.92", "$3,042.10")
+- Handle currency symbols and number formatting (e.g., "$ 86.92", "$3,042.10", "USD 25.50", "US$ 100")
+- CURRENCY DETECTION: Look for USD indicators in headers or data like "USD", "US$", "dollars", "dólares"
 
 SHIPPING COST EXTRACTION FOR MULTI-STAGE LOGISTICS:
 - Look for shipping cost columns such as:
@@ -499,6 +505,7 @@ Please return a JSON object with:
    - `unit`: one of "PIEZA", "KG", "ROLLO", "METRO" (convert from Spanish units to these exact uppercase values)
    - `iva`: true if the product includes IVA, otherwise false
    - `cost`: unit cost as a float (WITHOUT shipping costs)
+   - `currency`: currency of the cost ("MXN" or "USD") - detect from context, symbols, or explicit mentions
    - `shipping_method`: "DIRECT" or "OCURRE" based on shipping cost extraction
    - `shipping_stage1_cost`: stage 1 shipping cost as float (default 0.0)
    - `shipping_stage2_cost`: stage 2 shipping cost as float (default 0.0) 
@@ -570,6 +577,15 @@ IMPORTANT: Avoid defaulting to Category 3 unless the product is specifically for
 
 IMPORTANT: The unit field MUST be one of these exact values: "PIEZA", "KG", "ROLLO", "METRO" (all uppercase)
 
+CURRENCY DETECTION RULES:
+- Look for explicit currency indicators: "USD", "US$", "dollars", "dólares", "USD$"
+- Look for context clues: "US prices", "American prices", "precios en dólares"
+- If document mentions "USD" anywhere or has "US$" symbols, assume USD for all prices
+- If document mentions "pesos", "MXN", "Mexican", assume MXN for all prices
+- If no clear currency indicators, default to MXN
+- When in doubt, look for price patterns: USD prices are typically higher (e.g., $25 vs $500 MXN)
+- Consider document language: English documents more likely to be USD, Spanish documents more likely to be MXN
+
 CRITICAL JSON FORMAT REQUIREMENTS:
 - Return ONLY a valid JSON object, no additional text
 - Ensure all strings are properly quoted and escaped
@@ -577,10 +593,38 @@ CRITICAL JSON FORMAT REQUIREMENTS:
 - If the conversation is very long, focus on the 10-15 most important products with clear pricing
 - Ensure the response is under 4000 tokens to avoid truncation
 - Use proper JSON escaping for special characters (quotes, newlines, etc.)
+- NO trailing commas in JSON objects or arrays
+- NO unescaped quotes in string values
+- NO comments or explanations outside the JSON
 
-Respond only with the JSON object, no extra explanation."""
+EXAMPLE VALID JSON FORMAT:
+{
+  "products": [
+    {
+      "name": "Product Name",
+      "description": "Short description",
+      "cost": 25.50,
+      "currency": "USD",
+      "unit": "PIEZA",
+      "iva": true,
+      "category_id": 1,
+      "supplier": {
+        "name": "Supplier Name",
+        "email": "supplier@example.com"
+      }
+    }
+  ]
+}
+
+Respond only with the JSON object, no extra explanation.""".replace(
+            "{processed_text}", processed_text
+        ).replace(
+            "{categories_text}", categories_text
+        )
 
         try:
+            print("🤖 Calling Claude AI...")
+            # Try with full token limit first
             response = self.client.messages.create(
                 model=self.model,
                 max_tokens=4000,
@@ -588,6 +632,7 @@ Respond only with the JSON object, no extra explanation."""
                 messages=[{"role": "user", "content": prompt}]
             )
             
+            print("🤖 AI response received, processing...")
             content = response.content[0].text.strip()
             # Remove potential markdown formatting
             if content.startswith("```json"):
@@ -596,54 +641,57 @@ Respond only with the JSON object, no extra explanation."""
                 content = content[3:-3]
             
             # Try to parse the JSON, with error handling for malformed responses
+            print("🔍 Attempting JSON parsing...")
             try:
                 data = json.loads(content)
+                print("✅ JSON parsed successfully")
             except json.JSONDecodeError as e:
                 print(f"❌ JSON parsing error: {str(e)}")
                 print(f"Content length: {len(content)} characters")
                 print(f"Content preview: {content[:500]}...")
+                print(f"Content starts with: {repr(content[:50])}")
+                print(f"Content ends with: {repr(content[-50:])}")
                 
-                # Try to extract valid JSON from the response if it's partially malformed
-                try:
-                    # Look for the start and end of JSON object
-                    start_idx = content.find('{')
-                    if start_idx == -1:
-                        raise Exception("No JSON object found in Claude response")
-                    
-                    # Count braces to find the end of the JSON object
-                    brace_count = 0
-                    end_idx = start_idx
-                    
-                    for i, char in enumerate(content[start_idx:], start_idx):
-                        if char == '{':
-                            brace_count += 1
-                        elif char == '}':
-                            brace_count -= 1
-                            if brace_count == 0:
-                                end_idx = i + 1
-                                break
-                    
-                    if brace_count != 0:
-                        # Try to close unclosed braces/quotes
-                        partial_json = content[start_idx:end_idx]
-                        if not partial_json.endswith('}'):
-                            partial_json += '}'
-                        
-                        # Try to fix common JSON issues
-                        partial_json = partial_json.replace('\n', '\\n').replace('\t', '\\t')
-                        data = json.loads(partial_json)
-                        print("✅ Successfully recovered JSON from partial response")
+                # Try JSON repair utility first
+                print("🔧 Attempting JSON repair...")
+                data = JSONRepair.repair_json(content)
+                if data:
+                    print("✅ Successfully repaired JSON")
+                else:
+                    print("❌ JSON repair failed, trying extraction...")
+                    # Try extracting products array
+                    print("🔧 Attempting to extract products array...")
+                    data = JSONRepair.extract_products_array(content)
+                    if data:
+                        print("✅ Successfully extracted products array")
                     else:
-                        data = json.loads(content[start_idx:end_idx])
-                        print("✅ Successfully extracted complete JSON object")
-                        
-                except Exception as recovery_error:
-                    print(f"❌ Could not recover JSON: {str(recovery_error)}")
-                    # Return a minimal valid response to prevent total failure
-                    data = {
-                        "products": [],
-                        "error": f"Failed to parse AI response as JSON: {str(e)}"
-                    }
+                        print("❌ All repair attempts failed, retrying with reduced tokens...")
+                        # If all else fails, try with reduced token limit
+                        print("🔄 Retrying with reduced token limit...")
+                        try:
+                            retry_response = self.client.messages.create(
+                                model=self.model,
+                                max_tokens=2000,  # Reduced token limit
+                                temperature=0,
+                                messages=[{"role": "user", "content": prompt}]
+                            )
+                            
+                            retry_content = retry_response.content[0].text.strip()
+                            if retry_content.startswith("```json"):
+                                retry_content = retry_content[7:-3]
+                            elif retry_content.startswith("```"):
+                                retry_content = retry_content[3:-3]
+                            
+                            data = json.loads(retry_content)
+                            print("✅ Successfully parsed JSON with reduced token limit")
+                            
+                        except Exception as retry_error:
+                            print(f"❌ All repair attempts failed: {str(retry_error)}")
+                            print(f"🔍 Final category verification: Extracted data from Claude: {data}")
+                            data = {
+                                "products": [],
+                                "error": f"Failed to parse AI response as JSON: {str(e)}"
+                            }
             
             # Post-process supplier information for each product to ensure IMPAG is not extracted as supplier
             if 'products' in data:
@@ -759,12 +807,15 @@ Respond only with the JSON object, no extra explanation."""
             # Debug: Print the extracted data
             print("\nExtracted data from Claude:")
             print(json.dumps(data, indent=2))
+            print("✅ Returning structured data successfully")
             
             return data
             
         except json.JSONDecodeError as e:
+            print(f"❌ JSON decode error in extract_structured_data: {str(e)}")
             raise Exception(f"Failed to parse Claude response as JSON: {str(e)}")
         except Exception as e:
+            print(f"❌ General error in extract_structured_data: {str(e)}")
             raise Exception(f"Claude API error: {str(e)}")
 
     def get_or_create_supplier(self, session: Session, supplier_info: Dict) -> tuple[Supplier, Dict]:
@@ -793,11 +844,16 @@ Respond only with the JSON object, no extra explanation."""
             detection_info["warning"] = f"Supplier '{name}' detected but missing RFC"
         
         # Try to find existing supplier by RFC first, then by name
+        # Only match non-archived suppliers
         existing = None
         if rfc:
-            existing = session.query(Supplier).filter_by(rfc=rfc).first()
+            existing = session.query(Supplier).filter_by(rfc=rfc).filter(
+                Supplier.archived_at.is_(None)
+            ).first()
         if not existing:
-            existing = session.query(Supplier).filter_by(name=name).first()
+            existing = session.query(Supplier).filter_by(name=name).filter(
+                Supplier.archived_at.is_(None)
+            ).first()
             
         if existing:
             print(f"Found existing supplier: {existing.name} (ID: {existing.id})")
@@ -889,6 +945,7 @@ Respond only with the JSON object, no extra explanation."""
             price=product_info.get("price"),
             stock=product_info.get("stock", 0),
             specifications=product_info.get("specifications", {}),
+            default_margin=0.25,  # Set 25% default margin for price calculation
             is_active=True
         )
         
@@ -900,10 +957,12 @@ Respond only with the JSON object, no extra explanation."""
     def create_supplier_product(self, session: Session, supplier: Supplier, product: Product, 
                               product_info: Dict, supplier_sku: str = None) -> SupplierProduct:
         """Create supplier-product relationship."""
-        # Check if this supplier-product relationship already exists
+        # Check if this supplier-product relationship already exists (non-archived only)
         existing = session.query(SupplierProduct).filter_by(
             supplier_id=supplier.id,
             product_id=product.id
+        ).filter(
+            SupplierProduct.archived_at.is_(None)
         ).first()
         
         if existing:
@@ -919,11 +978,22 @@ Respond only with the JSON object, no extra explanation."""
             # For direct shipping, use the old shipping_cost_per_unit field
             shipping_cost_direct = product_info.get("shipping_cost_per_unit", 0.0)
         
+        # Store prices in their original currency
+        cost = product_info.get("cost")
+        currency = product_info.get("currency", "MXN")
+        
+        # Log currency information
+        if currency == "USD":
+            print(f"Storing USD price: ${cost} (original currency)")
+        else:
+            print(f"Storing MXN price: ${cost} (original currency)")
+        
         new_supplier_product = SupplierProduct(
             supplier_id=supplier.id,
             product_id=product.id,
             supplier_sku=supplier_sku,
-            cost=product_info.get("cost"),
+            cost=cost,
+            currency=currency,
             shipping_method=shipping_method,
             shipping_cost_direct=shipping_cost_direct,
             shipping_stage1_cost=product_info.get("shipping_stage1_cost", 0.0),
@@ -938,7 +1008,58 @@ Respond only with the JSON object, no extra explanation."""
         session.add(new_supplier_product)
         session.flush()  # Assign ID without committing transaction
         print(f"Created supplier-product relationship (ID: {new_supplier_product.id}) [Cost: ${new_supplier_product.cost}]")
+        
+        # Update product price if not set (for SQLite compatibility - no triggers)
+        self.update_product_price(session, product)
+        
         return new_supplier_product
+    
+    def update_product_price(self, session: Session, product: Product):
+        """Update product price based on supplier costs (for SQLite compatibility)."""
+        # If product already has a price set, don't override it
+        if product.price is not None:
+            return
+        
+        # Get the default margin for this product
+        if product.default_margin is None:
+            # No default margin, can't calculate price
+            return
+        
+        # Get the lowest cost from all active supplier-product relationships
+        from sqlalchemy import func, case
+        from models import SupplierProduct
+        
+        # Calculate total shipping cost based on method
+        total_shipping_cost = case(
+            (SupplierProduct.shipping_method == 'DIRECT', func.coalesce(SupplierProduct.shipping_cost_direct, 0)),
+            else_=(
+                func.coalesce(SupplierProduct.shipping_stage1_cost, 0) +
+                func.coalesce(SupplierProduct.shipping_stage2_cost, 0) +
+                func.coalesce(SupplierProduct.shipping_stage3_cost, 0) +
+                func.coalesce(SupplierProduct.shipping_stage4_cost, 0)
+            )
+        )
+        
+        lowest_cost_result = session.query(
+            func.min(SupplierProduct.cost + total_shipping_cost).label('lowest_cost')
+        ).filter(
+            SupplierProduct.product_id == product.id,
+            SupplierProduct.is_active == True,
+            SupplierProduct.cost.isnot(None),
+            SupplierProduct.cost > 0
+        ).first()
+        
+        if lowest_cost_result and lowest_cost_result.lowest_cost:
+            from decimal import Decimal
+            lowest_cost = Decimal(str(lowest_cost_result.lowest_cost))
+            margin = Decimal(str(product.default_margin))
+            
+            # Calculate price with margin: price = cost / (1 - margin)
+            if margin < 1:  # Margin must be less than 100%
+                calculated_price = lowest_cost / (Decimal('1') - margin)
+                product.calculated_price = float(calculated_price)
+                product.price = float(calculated_price)
+                print(f"   ✓ Calculated product price: ${calculated_price:.2f} (margin: {margin*100}%)")
 
     def process_quotation(self, file_path: str, category_id: Optional[int] = None) -> Dict:
         """
@@ -951,34 +1072,45 @@ Respond only with the JSON object, no extra explanation."""
         Returns:
             Dict with processing results including SKU information
         """
-        print(f"Processing quotation: {file_path}")
+        print(f"🔍 Processing quotation: {file_path}")
         print("=" * 50)
         
-        # Extract text from file (PDF, image, or text)
-        if self.is_pdf_file(file_path):
-            extracted_text = self.extract_text_from_pdf(file_path)
-            print("✓ Text extracted from PDF")
-        elif self.is_image_file(file_path):
-            extracted_text = self.extract_text_from_image(file_path)
-            print("✓ Text extracted from image using OCR")
-        elif self.is_text_file(file_path):
-            extracted_text = self.extract_text_from_txt(file_path)
-            print("✓ Text extracted from TXT file (WhatsApp conversation)")
-        else:
-            supported_formats = "PDF, PNG, JPG, JPEG, GIF, BMP, TIFF, WEBP, TXT"
-            raise ValueError(f"Unsupported file format. Supported formats: {supported_formats}")
+        try:
+            # Extract text from file (PDF, image, or text)
+            print("🔍 Extracting text from file...")
+            if self.is_pdf_file(file_path):
+                extracted_text = self.extract_text_from_pdf(file_path)
+                print("✓ Text extracted from PDF")
+            elif self.is_image_file(file_path):
+                extracted_text = self.extract_text_from_image(file_path)
+                print("✓ Text extracted from image using OCR")
+            elif self.is_text_file(file_path):
+                extracted_text = self.extract_text_from_txt(file_path)
+                print("✓ Text extracted from TXT file (WhatsApp conversation)")
+            else:
+                supported_formats = "PDF, PNG, JPG, JPEG, GIF, BMP, TIFF, WEBP, TXT"
+                raise ValueError(f"Unsupported file format. Supported formats: {supported_formats}")
+            
+            print(f"🔍 Extracted text length: {len(extracted_text)} characters")
+            
+            if not extracted_text.strip():
+                raise ValueError("No text could be extracted from the file")
+        except Exception as e:
+            print(f"❌ Error extracting text: {str(e)}")
+            raise
         
-        if not extracted_text.strip():
-            raise ValueError("No text could be extracted from the file")
-        
+        print("🔍 Creating database session...")
         session = SessionLocal()
         try:
             # Get available categories
+            print("🔍 Getting categories...")
             categories = self.get_categories(session)
+            print(f"🔍 Found {len(categories)} categories")
             if not categories:
                 raise ValueError("No product categories found in the database")
             
             # Use AI to extract structured data (including SKU suggestions and category selection)
+            print("🔍 Starting AI extraction...")
             structured_data = self.extract_structured_data(extracted_text, categories)
             print("✓ Structured data extracted using Claude AI")
             
@@ -991,6 +1123,12 @@ Respond only with the JSON object, no extra explanation."""
                     "suppliers_detected": [],
                     "overall_confidence": "high",
                     "warnings": []
+                },
+                "currency_info": {
+                    "currencies_detected": [],
+                    "usd_products": 0,
+                    "mxn_products": 0,
+                    "multi_currency": False
                 }
             }
             
@@ -1021,8 +1159,14 @@ Respond only with the JSON object, no extra explanation."""
                     # Create a deep copy to prevent modifications
                     product_info_copy = copy.deepcopy(product_info)
                     
+                    # Track currency detection
+                    currency = product_info_copy.get("currency", "MXN")
+                    if currency not in results["currency_info"]["currencies_detected"]:
+                        results["currency_info"]["currencies_detected"].append(currency)
+                    
                     print(f"\n[{i}/{len(structured_data['products'])}] Processing: {product_info_copy['name']}")
                     print(f"Category ID before override: {product_info_copy['category_id']}")
+                    print(f"Currency detected: {currency}")
 
                     # Override category_id if provided
                     if category_id is not None:
@@ -1057,11 +1201,22 @@ Respond only with the JSON object, no extra explanation."""
                     results["suppliers"][supplier_name]["products_count"] += 1
                     
                     # Create supplier-product relationship
-                    self.create_supplier_product(
+                    supplier_product = self.create_supplier_product(
                         session, supplier, product, product_info_copy, 
                         supplier_sku=product_info_copy.get("supplier_sku")
                     )
                     results["supplier_products_created"] += 1
+                    
+                    # Track currency information (no conversion, store original)
+                    if currency == "USD":
+                        results["currency_info"]["usd_products"] = results["currency_info"].get("usd_products", 0) + 1
+                    else:
+                        results["currency_info"]["mxn_products"] = results["currency_info"].get("mxn_products", 0) + 1
+                    
+                    # Check for multi-currency quotation
+                    if (results["currency_info"]["usd_products"] > 0 and 
+                        results["currency_info"]["mxn_products"] > 0):
+                        results["currency_info"]["multi_currency"] = True
                     
                     # Track SKU generation
                     results["skus_generated"].append({
@@ -1070,7 +1225,10 @@ Respond only with the JSON object, no extra explanation."""
                         "base_sku": product.base_sku,
                         "variant_sku": product.sku,
                         "ai_suggested": product_info_copy.get("suggested_base_sku", "N/A"),
-                        "category_id": product_info_copy["category_id"]
+                        "category_id": product_info_copy["category_id"],
+                        "currency": product_info_copy.get("currency", "MXN"),
+                        "cost": product_info_copy.get("cost"),
+                        "cost_currency": product_info_copy.get("currency", "MXN")
                     })
                     
                     results["products_processed"] += 1
@@ -1109,6 +1267,10 @@ Respond only with the JSON object, no extra explanation."""
                     print(f"   • {sku_info['product_name']} ({sku_info['variant_sku']}) - {sku_info['supplier_name']}")
             
         except Exception as e:
+            print(f"❌ Error in process_quotation: {str(e)}")
+            print(f"❌ Error type: {type(e).__name__}")
+            import traceback
+            print(f"❌ Traceback: {traceback.format_exc()}")
             session.rollback()
             raise Exception(f"Database error: {str(e)}")
         finally:

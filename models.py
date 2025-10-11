@@ -86,6 +86,7 @@ class SupplierProduct(Base):
     product_id = Column(Integer, ForeignKey("product.id", ondelete="CASCADE"))
     supplier_sku = Column(String(100), nullable=True)
     cost = Column(Numeric(10, 2), nullable=True)
+    currency = Column(String(3), default='MXN', nullable=False)  # Currency of cost and shipping costs (MXN or USD)
     stock = Column(Integer, default=0)
     lead_time_days = Column(Integer, nullable=True)
     shipping_cost = Column(Numeric(10, 2), nullable=True)  # Legacy shipping cost (deprecated)
