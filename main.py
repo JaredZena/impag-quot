@@ -1,10 +1,10 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-from rag_system import query_rag_system
+from rag_system import query_rag_system_with_history
 from sqlalchemy.orm import Session
-from models import get_db, Query
-from typing import List
+from models import get_db, Query, Conversation, ConversationMessage
+from typing import List, Optional
 from datetime import datetime
 from routes import suppliers, products, quotations
 from routes.products import router as products_router
@@ -34,8 +34,14 @@ app.include_router(suppliers_router)
 app.include_router(quotations_router)
 app.include_router(categories_router)
 
+class Message(BaseModel):
+    role: str  # 'user' or 'assistant'
+    content: str
+
 class QueryRequest(BaseModel):
     query: str
+    messages: Optional[List[Message]] = []  # Optional chat history for conversation context
+    conversation_id: Optional[int] = None  # Optional conversation ID to save messages
 
 class QueryResponse(BaseModel):
     id: int
@@ -46,10 +52,115 @@ class QueryResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class ConversationResponse(BaseModel):
+    id: int
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    is_active: bool
+    message_count: Optional[int] = 0
+
+    class Config:
+        from_attributes = True
+
+class ConversationMessageResponse(BaseModel):
+    id: int
+    role: str
+    content: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class ConversationCreate(BaseModel):
+    title: str
+
+@app.post("/conversations", response_model=ConversationResponse)
+async def create_conversation(conversation: ConversationCreate, db: Session = Depends(get_db)):
+    """Create a new conversation."""
+    db_conversation = Conversation(title=conversation.title)
+    db.add(db_conversation)
+    db.commit()
+    db.refresh(db_conversation)
+    
+    return {
+        **db_conversation.__dict__,
+        "message_count": 0
+    }
+
+@app.get("/conversations", response_model=List[ConversationResponse])
+async def get_conversations(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
+    """Get all conversations, ordered by most recent."""
+    conversations = db.query(Conversation).filter(
+        Conversation.is_active == True
+    ).order_by(Conversation.updated_at.desc()).offset(skip).limit(limit).all()
+    
+    # Add message count to each conversation
+    result = []
+    for conv in conversations:
+        message_count = db.query(ConversationMessage).filter(
+            ConversationMessage.conversation_id == conv.id
+        ).count()
+        result.append({
+            **conv.__dict__,
+            "message_count": message_count
+        })
+    
+    return result
+
+@app.get("/conversations/{conversation_id}", response_model=ConversationResponse)
+async def get_conversation(conversation_id: int, db: Session = Depends(get_db)):
+    """Get a specific conversation."""
+    conversation = db.query(Conversation).filter(
+        Conversation.id == conversation_id
+    ).first()
+    
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    message_count = db.query(ConversationMessage).filter(
+        ConversationMessage.conversation_id == conversation_id
+    ).count()
+    
+    return {
+        **conversation.__dict__,
+        "message_count": message_count
+    }
+
+@app.get("/conversations/{conversation_id}/messages", response_model=List[ConversationMessageResponse])
+async def get_conversation_messages(conversation_id: int, db: Session = Depends(get_db)):
+    """Get all messages in a conversation."""
+    messages = db.query(ConversationMessage).filter(
+        ConversationMessage.conversation_id == conversation_id
+    ).order_by(ConversationMessage.created_at.asc()).all()
+    
+    return messages
+
+@app.delete("/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: int, db: Session = Depends(get_db)):
+    """Delete a conversation (soft delete)."""
+    conversation = db.query(Conversation).filter(
+        Conversation.id == conversation_id
+    ).first()
+    
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    conversation.is_active = False
+    db.commit()
+    
+    return {"message": "Conversation deleted successfully"}
+
 @app.post("/query")
 async def query(request: QueryRequest, db: Session = Depends(get_db)):
-    # Get response from RAG system
-    response = query_rag_system(request.query)
+    # Convert Pydantic models to dicts for RAG system
+    chat_history = [{"role": msg.role, "content": msg.content} for msg in (request.messages or [])]
+    
+    # Get response from RAG system with conversation context
+    response = query_rag_system_with_history(
+        query=request.query,
+        chat_history=chat_history
+    )
     
     # Save query and response to database
     db_query = Query(
@@ -60,7 +171,34 @@ async def query(request: QueryRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_query)
     
-    return {"response": response}
+    # If conversation_id is provided, save messages to conversation
+    if request.conversation_id:
+        conversation = db.query(Conversation).filter(
+            Conversation.id == request.conversation_id
+        ).first()
+        
+        if conversation:
+            # Save user message
+            user_message = ConversationMessage(
+                conversation_id=request.conversation_id,
+                role="user",
+                content=request.query
+            )
+            db.add(user_message)
+            
+            # Save assistant message
+            assistant_message = ConversationMessage(
+                conversation_id=request.conversation_id,
+                role="assistant",
+                content=response
+            )
+            db.add(assistant_message)
+            
+            # Update conversation timestamp
+            conversation.updated_at = datetime.utcnow()
+            db.commit()
+    
+    return {"response": response, "conversation_id": request.conversation_id}
 
 @app.get("/queries", response_model=List[QueryResponse])
 async def get_queries(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):

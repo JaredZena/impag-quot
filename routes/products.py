@@ -56,6 +56,7 @@ class SupplierProductBase(BaseModel):
     product_id: int
     supplier_sku: Optional[str] = None
     cost: Optional[float] = None
+    default_margin: Optional[float] = None  # Margin percentage (e.g., 30.0 = 30%)
     stock: Optional[int] = 0
     lead_time_days: Optional[int] = None
     is_active: Optional[bool] = True
@@ -69,6 +70,7 @@ class SupplierProductUpdate(BaseModel):
     product_id: Optional[int] = None
     supplier_sku: Optional[str] = None
     cost: Optional[float] = None
+    default_margin: Optional[float] = None  # Margin percentage (e.g., 30.0 = 30%)
     stock: Optional[int] = None
     lead_time_days: Optional[int] = None
     is_active: Optional[bool] = None

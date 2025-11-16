@@ -79,6 +79,7 @@ class SupplierProduct(Base):
     product_id = Column(Integer, ForeignKey("product.id", ondelete="CASCADE"))
     supplier_sku = Column(String(100), nullable=True)
     cost = Column(Numeric(10, 2), nullable=True)
+    default_margin = Column(Numeric(5, 2), nullable=True)  # Margin percentage (e.g., 30.00 = 30%)
     stock = Column(Integer, default=0)
     lead_time_days = Column(Integer, nullable=True)
     is_active = Column(Boolean, default=True)
@@ -97,6 +98,29 @@ class Query(Base):
     query_text = Column(Text)
     response_text = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class Conversation(Base):
+    __tablename__ = "conversation"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(200), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    user_id = Column(Integer, nullable=True)  # For future user tracking
+    is_active = Column(Boolean, default=True)
+    
+    messages = relationship("ConversationMessage", back_populates="conversation", cascade="all, delete-orphan")
+
+class ConversationMessage(Base):
+    __tablename__ = "conversation_message"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversation.id", ondelete="CASCADE"))
+    role = Column(String(20), nullable=False)  # 'user' or 'assistant'
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    conversation = relationship("Conversation", back_populates="messages")
 
 # Parse the database URL to get the endpoint ID
 parsed_url = urlparse(database_url)
