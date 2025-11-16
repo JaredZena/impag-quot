@@ -4,6 +4,12 @@ FROM python:3.11-slim
 # Install only essential system dependencies
 RUN apt-get update && apt-get install -y \
     libpq5 \
+    # For Tesseract OCR and image processing
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-spa \
+    libjpeg62-turbo \
+    libfreetype6 \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -12,9 +18,12 @@ RUN useradd --create-home --shell /bin/bash app
 USER app
 WORKDIR /home/app
 
-# Copy and install minimal requirements
-COPY --chown=app:app requirements-slim.txt .
-RUN pip install --no-cache-dir --user -r requirements-slim.txt
+# Copy and install requirements
+COPY --chown=app:app requirements.txt .
+# Force CPU-only installation by setting environment variables
+ENV FORCE_CUDA=0
+ENV TORCH_CUDA_ARCH_LIST=""
+RUN pip install --no-cache-dir --user -r requirements.txt
 
 # Copy application code
 COPY --chown=app:app . .

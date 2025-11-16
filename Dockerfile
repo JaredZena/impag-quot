@@ -6,12 +6,10 @@ RUN apt-get update && apt-get install -y \
     # For PostgreSQL
     libpq5 \
     # For EasyOCR and image processing
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libgomp1 \
-    # For general image processing
     libjpeg62-turbo \
     libfreetype6 \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
     # Cleanup to reduce image size
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
@@ -24,6 +22,9 @@ WORKDIR /home/app
 # Install Python dependencies
 COPY --chown=app:app requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
+
+# Add user's local bin to PATH
+ENV PATH="/home/app/.local/bin:$PATH"
 
 # Copy application code
 COPY --chown=app:app . .

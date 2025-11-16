@@ -14,14 +14,19 @@ google-auth==2.23.3
 google-auth-oauthlib==1.1.0
 google-auth-httplib2==0.1.1
 
-# AI/ML
+# AI/ML - Only for quotation processing
 anthropic>=0.3.0
 
-# PDF Processing
+# PDF Processing - ESSENTIAL
 PyMuPDF>=1.19.0
 
-# OCR - Essential for image processing (using Tesseract - much lighter than EasyOCR)
-pytesseract>=0.3.10
+# OCR - EasyOCR for image processing
+easyocr
+
+# REMOVED RAG-related dependencies (moved to separate microservice):
+# - openai (embeddings/LLM)
+# - pinecone (vector search)  
+# - llama-index packages (RAG framework)
 
 # Image Processing
 pillow==11.1.0
@@ -30,3 +35,4 @@ pillow==11.1.0
 pydantic>=1.8.0
 requests==2.32.3
 python-dateutil==2.9.0.post0
+# tenacity==9.0.0  # Removed - was used for RAG retry logic

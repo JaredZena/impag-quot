@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func, case
 from typing import List, Optional, Any
 from pydantic import BaseModel
 from datetime import datetime
 from models import get_db, Product, Supplier, SupplierProduct, ProductUnit
+from services.price_calculator import enrich_products_with_calculated_prices, get_product_display_price, calculate_product_price_with_currency, get_lowest_supplier_cost_with_currency
 from auth import verify_google_token
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -22,6 +24,7 @@ class ProductBase(BaseModel):
     price: Optional[float] = None
     stock: Optional[int] = 0
     specifications: Optional[Any] = None
+    default_margin: Optional[float] = None
     is_active: Optional[bool] = True
 
 class ProductCreate(ProductBase):
@@ -39,6 +42,7 @@ class ProductUpdate(BaseModel):
     price: Optional[float] = None
     stock: Optional[int] = None
     specifications: Optional[Any] = None
+    default_margin: Optional[float] = None
     is_active: Optional[bool] = None
     archived_at: Optional[datetime] = None
 
@@ -52,13 +56,37 @@ class ProductResponse(ProductBase):
         from_attributes = True
 
 class SupplierProductBase(BaseModel):
+    # Supplier relationship
     supplier_id: int
-    product_id: int
+    product_id: Optional[int] = None  # Keep for now (will be removed in Phase 2)
+    
+    # Product fields (NEW - SupplierProduct is now standalone)
+    name: Optional[str] = None
+    description: Optional[str] = None
+    base_sku: Optional[str] = None
+    sku: Optional[str] = None
+    category_id: Optional[int] = None
+    unit: Optional[str] = None
+    package_size: Optional[int] = None
+    iva: Optional[bool] = True
+    specifications: Optional[dict] = None
+    default_margin: Optional[float] = None
+    
+    # Supplier-specific fields
     supplier_sku: Optional[str] = None
     cost: Optional[float] = None
     default_margin: Optional[float] = None  # Margin percentage (e.g., 30.0 = 30%)
+    currency: Optional[str] = 'MXN'  # Currency of cost (MXN or USD)
     stock: Optional[int] = 0
     lead_time_days: Optional[int] = None
+    shipping_cost: Optional[float] = None  # Legacy field (deprecated)
+    shipping_cost_direct: Optional[float] = 0.00
+    shipping_method: Optional[str] = 'DIRECT'
+    shipping_stage1_cost: Optional[float] = 0.00
+    shipping_stage2_cost: Optional[float] = 0.00
+    shipping_stage3_cost: Optional[float] = 0.00
+    shipping_stage4_cost: Optional[float] = 0.00
+    shipping_notes: Optional[str] = None
     is_active: Optional[bool] = True
     notes: Optional[str] = None
 
@@ -66,16 +94,39 @@ class SupplierProductCreate(SupplierProductBase):
     pass
 
 class SupplierProductUpdate(BaseModel):
+    # Supplier-specific fields
     supplier_id: Optional[int] = None
-    product_id: Optional[int] = None
+    product_id: Optional[int] = None  # Keep for now (will be removed in Phase 2)
     supplier_sku: Optional[str] = None
     cost: Optional[float] = None
     default_margin: Optional[float] = None  # Margin percentage (e.g., 30.0 = 30%)
+    currency: Optional[str] = None  # Currency of cost (MXN or USD)
     stock: Optional[int] = None
     lead_time_days: Optional[int] = None
+    shipping_cost: Optional[float] = None  # Legacy field (deprecated)
+    shipping_cost_direct: Optional[float] = None
+    shipping_method: Optional[str] = None
+    shipping_stage1_cost: Optional[float] = None
+    shipping_stage2_cost: Optional[float] = None
+    shipping_stage3_cost: Optional[float] = None
+    shipping_stage4_cost: Optional[float] = None
+    shipping_notes: Optional[str] = None
     is_active: Optional[bool] = None
     notes: Optional[str] = None
     archived_at: Optional[datetime] = None
+    
+    # Product fields (NEW - now editable in SupplierProduct)
+    name: Optional[str] = None
+    description: Optional[str] = None
+    base_sku: Optional[str] = None
+    sku: Optional[str] = None
+    category_id: Optional[int] = None
+    unit: Optional[str] = None
+    package_size: Optional[int] = None
+    iva: Optional[bool] = None
+    specifications: Optional[dict] = None
+    default_margin: Optional[float] = None
+    currency: Optional[str] = None
 
 class SupplierProductResponse(SupplierProductBase):
     id: int
@@ -86,8 +137,105 @@ class SupplierProductResponse(SupplierProductBase):
     class Config:
         from_attributes = True
 
+# GET /supplier-products - List all supplier-product relationships
+@router.get("/supplier-products")
+def get_all_supplier_products(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(1000, le=1000),
+    supplier_id: Optional[int] = Query(None),
+    product_id: Optional[int] = Query(None),
+    is_active: Optional[bool] = Query(None),
+    include_archived: bool = Query(False),
+    db: Session = Depends(get_db)
+):
+    """Get all supplier-product relationships"""
+    try:
+        query = db.query(SupplierProduct).options(
+            joinedload(SupplierProduct.supplier),
+            joinedload(SupplierProduct.product)
+        )
+        
+        # Filter archived
+        if not include_archived:
+            query = query.filter(SupplierProduct.archived_at.is_(None))
+        
+        # Apply filters
+        if supplier_id:
+            query = query.filter(SupplierProduct.supplier_id == supplier_id)
+        if product_id:
+            query = query.filter(SupplierProduct.product_id == product_id)
+        if is_active is not None:
+            query = query.filter(SupplierProduct.is_active == is_active)
+        
+        # Apply pagination
+        supplier_products = query.offset(skip).limit(limit).all()
+        
+        # Build response
+        result = []
+        for sp in supplier_products:
+            try:
+                # Calculate total shipping cost
+                if hasattr(sp, 'shipping_method') and sp.shipping_method == 'DIRECT':
+                    total_shipping = float(getattr(sp, 'shipping_cost_direct', 0) or 0)
+                else:
+                    total_shipping = float(
+                        (getattr(sp, 'shipping_stage1_cost', 0) or 0) +
+                        (getattr(sp, 'shipping_stage2_cost', 0) or 0) +
+                        (getattr(sp, 'shipping_stage3_cost', 0) or 0) +
+                        (getattr(sp, 'shipping_stage4_cost', 0) or 0)
+                    )
+                
+                item = {
+                    "id": sp.id,
+                    "supplier_id": sp.supplier_id,
+                    "supplier_name": sp.supplier.name if sp.supplier else "Unknown",
+                    "product_id": sp.product_id,
+                    # Use SupplierProduct fields directly (new standalone structure)
+                    "product_name": sp.name or (sp.product.name if sp.product else "Unknown"),
+                    "product_sku": sp.sku or (sp.product.sku if sp.product else "Unknown"),
+                    "name": sp.name,  # Add direct name field
+                    "sku": sp.sku,  # Add direct sku field
+                    "description": sp.description,
+                    "category_id": sp.category_id,
+                    "unit": sp.unit,
+                    "package_size": sp.package_size,
+                    "iva": sp.iva,
+                    "specifications": sp.specifications,
+                    "default_margin": float(sp.default_margin) if sp.default_margin else None,
+                    "supplier_sku": sp.supplier_sku or "",
+                    "cost": float(sp.cost) if sp.cost else None,
+                    "currency": sp.currency or 'MXN',  # Include currency information
+                    "shipping_cost": total_shipping,
+                    "total_cost": float(sp.cost or 0) + total_shipping,
+                    "shipping_method": getattr(sp, 'shipping_method', 'OCURRE'),
+                    "stock": sp.stock or 0,
+                    "lead_time_days": sp.lead_time_days or 0,
+                    "is_active": sp.is_active,
+                    "created_at": sp.created_at,
+                    "last_updated": sp.last_updated
+                }
+                result.append(item)
+            except Exception as e:
+                # Skip problematic items but log the issue
+                print(f"Error processing supplier product {sp.id}: {str(e)}")
+                continue
+        
+        return {
+            "success": True,
+            "data": {
+                "supplier_products": result,
+                "total": len(result)
+            }
+        }
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"Error fetching supplier products: {str(e)}")
+
 # GET /products with advanced filtering and JSON wrapper - PUBLIC for quotation web app
+# DEPRECATED: This endpoint queries the old Product table. New implementations should use /supplier-products
+# Kept for backward compatibility with existing production app
 @router.get("/")
+@router.get("")  # Handle both /products and /products/ explicitly
 def get_products(
     id: Optional[int] = Query(None),
     name: Optional[str] = Query(None),
@@ -95,6 +243,9 @@ def get_products(
     category_id: Optional[int] = Query(None),
     supplier_id: Optional[int] = Query(None),
     is_active: Optional[bool] = Query(None),
+    min_stock: Optional[int] = Query(None, description="Minimum stock level"),
+    max_stock: Optional[int] = Query(None, description="Maximum stock level"),
+    currency: Optional[str] = Query(None, description="Filter by currency (MXN, USD, EUR)"),
     include_archived: bool = False,
     skip: int = 0,
     limit: int = 100,
@@ -110,7 +261,31 @@ def get_products(
     if id:
         query = query.filter(Product.id == id)
     if name:
-        query = query.filter(Product.name.ilike(f"%{name}%"))
+        # Normalize spaces for better fuzzy matching
+        normalized_search = func.regexp_replace(func.unaccent(name), r'\s+', '', 'g')  # Remove all spaces
+        normalized_product = func.regexp_replace(func.unaccent(Product.name), r'\s+', '', 'g')
+        
+        # First try exact match with unaccent and space handling
+        exact_match = func.unaccent(Product.name).ilike(func.unaccent(f"%{name}%"))
+        
+        # Fuzzy matching with space normalization and lower threshold
+        fuzzy_match = func.similarity(normalized_product, normalized_search) > 0.2
+        
+        # Also try word similarity (handles "malla sombra" vs "mallasombra")
+        word_match = func.word_similarity(normalized_search, normalized_product) > 0.2
+        
+        query = query.filter(exact_match | fuzzy_match | word_match)
+        
+        # Order by best similarity score
+        similarity_score = func.similarity(normalized_product, normalized_search)
+        word_similarity_score = func.word_similarity(normalized_search, normalized_product)
+        best_score = func.greatest(similarity_score, word_similarity_score)
+        
+        exact_score = case(
+            (exact_match, 1.0),
+            else_=best_score
+        )
+        query = query.order_by(exact_score.desc())
     if sku:
         like_pattern = f"%{sku}%"
         # Filter by either base_sku or sku
@@ -124,16 +299,61 @@ def get_products(
         query = query.filter(Product.is_active == is_active)
     if supplier_id:
         query = query.join(Product.supplier_products).filter(SupplierProduct.supplier_id == supplier_id)
+    if min_stock is not None:
+        query = query.filter(Product.stock >= min_stock)
+    if max_stock is not None:
+        query = query.filter(Product.stock <= max_stock)
     
-    # Add sorting
-    if sort_by == "name" and sort_order == "asc":
+    # Currency filter - temporarily disabled due to complex subquery issues
+    # TODO: Implement simpler currency filtering logic
+    if currency:
+        # For now, just log that currency filtering was requested
+        print(f"Currency filter requested: {currency} (not implemented yet)")
+        # TODO: Implement proper currency filtering
+    
+    # Add sorting - default sort by name if no sort_by provided
+    if not sort_by:
+        sort_by = "name"
+        
+    if sort_by == "name":
+        query = query.order_by(Product.name.asc() if sort_order == "asc" else Product.name.desc())
+    elif sort_by == "price":
+        query = query.order_by(Product.price.asc() if sort_order == "asc" else Product.price.desc())
+    elif sort_by == "created_at":
+        query = query.order_by(Product.created_at.asc() if sort_order == "asc" else Product.created_at.desc())
+    elif sort_by == "last_updated":
+        query = query.order_by(Product.last_updated.asc() if sort_order == "asc" else Product.last_updated.desc())
+    elif sort_by == "category_name":
+        # Join with ProductCategory to sort by category name
+        from models import ProductCategory
+        query = query.join(ProductCategory, Product.category_id == ProductCategory.id, isouter=True)
+        query = query.order_by(ProductCategory.name.asc() if sort_order == "asc" else ProductCategory.name.desc())
+    else:
+        # Default fallback to name sorting
         query = query.order_by(Product.name.asc())
-    elif sort_by == "name" and sort_order == "desc":
-        query = query.order_by(Product.name.desc())
     
     products = query.offset(skip).limit(limit).all()
-    data = [
-        {
+    data = []
+    
+    for p in products:
+        # Get currency for calculated prices or check supplier currencies for manual prices
+        calculated_currency = None
+        if p.price is None and p.calculated_price is not None:
+            # Try to get currency for calculated price
+            price_currency = calculate_product_price_with_currency(p, db)
+            if price_currency:
+                _, calculated_currency = price_currency
+        elif p.price is not None:
+            # For manual prices, check if there are suppliers with different currencies
+            # Get the currency of the lowest-cost supplier
+            lowest_cost_currency = get_lowest_supplier_cost_with_currency(p.id, db)
+            if lowest_cost_currency:
+                _, calculated_currency = lowest_cost_currency
+            else:
+                # If no suppliers, default to MXN
+                calculated_currency = 'MXN'
+        
+        product_data = {
             "id": p.id,
             "name": p.name,
             "description": p.description,
@@ -143,17 +363,103 @@ def get_products(
             "unit": p.unit.value if p.unit else None,
             "package_size": p.package_size,
             "sku": p.sku,
-            "price": float(p.price) if p.price is not None else None,
+            "price": float(p.price) if p.price is not None else (float(p.calculated_price) if p.calculated_price is not None else None),
             "stock": p.stock,
             "specifications": p.specifications,
+            "default_margin": float(p.default_margin) if p.default_margin is not None else None,
+            "calculated_price": float(p.calculated_price) if p.calculated_price is not None else None,
+            "is_calculated_price": p.price is None and p.calculated_price is not None,
+            "currency": calculated_currency,  # Currency of the calculated price
+            "embedded": p.embedded,
             "is_active": p.is_active,
             "archived_at": p.archived_at,
             "created_at": p.created_at,
             "last_updated": p.last_updated,
         }
-        for p in products
-    ]
+        data.append(product_data)
+    
     return {"success": True, "data": data, "error": None, "message": None}
+
+# GET /products/stock - Get supplier products in stock (must be before /{product_id})
+@router.get("/stock")
+def get_products_in_stock(
+    db: Session = Depends(get_db),
+    min_stock: int = Query(default=1, description="Minimum stock level to include"),
+    include_zero_stock: bool = Query(default=False, description="Include products with zero stock"),
+    limit: int = Query(default=100, le=1000),
+    offset: int = Query(default=0, ge=0),
+    sort_by: Optional[str] = Query(default="name", description="Column to sort by: stock, cost, total_value, last_updated, name, supplier"),
+    sort_order: Optional[str] = Query(default="asc", description="Sort order: asc or desc")
+):
+    """Get supplier products that are currently in stock (now using SupplierProduct table)"""
+    # Query SupplierProduct directly with supplier relationship
+    query = db.query(SupplierProduct).join(Supplier).filter(
+        SupplierProduct.archived_at.is_(None),
+        SupplierProduct.name.isnot(None)  # Only include products with populated name
+    )
+    
+    if include_zero_stock:
+        query = query.filter(SupplierProduct.stock >= 0)
+    else:
+        query = query.filter(SupplierProduct.stock >= min_stock)
+    
+    # Add sorting
+    if sort_by == "stock":
+        order_field = SupplierProduct.stock
+    elif sort_by == "cost":
+        order_field = SupplierProduct.cost
+    elif sort_by == "last_updated":
+        order_field = SupplierProduct.last_updated
+    elif sort_by == "name":
+        order_field = SupplierProduct.name
+    elif sort_by == "supplier":
+        order_field = Supplier.name
+    elif sort_by == "total_value":
+        # For total_value, calculate stock * cost
+        order_field = SupplierProduct.stock * SupplierProduct.cost
+    else:
+        order_field = SupplierProduct.name  # Default fallback
+    
+    # Apply sort direction
+    if sort_order.lower() == "desc":
+        query = query.order_by(order_field.desc())
+    else:
+        query = query.order_by(order_field.asc())
+    
+    total = query.count()
+    supplier_products = query.offset(offset).limit(limit).all()
+    
+    stock_data = []
+    for sp in supplier_products:
+        total_value = None
+        if sp.stock and sp.cost:
+            total_value = float(sp.stock * sp.cost)
+        
+        stock_data.append({
+            "id": sp.id,  # supplier_product id (for updates)
+            "name": sp.name,
+            "sku": sp.sku,
+            "supplier_id": sp.supplier_id,
+            "supplier_name": sp.supplier.name if sp.supplier else "Unknown",
+            "unit": sp.unit or "PIEZA",
+            "stock": sp.stock,
+            "price": float(sp.cost) if sp.cost else None,  # Using cost as price for now
+            "currency": sp.currency or "MXN",
+            "total_value": total_value,
+            "last_updated": sp.last_updated
+        })
+    
+    return {
+        "success": True,
+        "data": {
+            "products": stock_data,
+            "total": total,
+            "offset": offset,
+            "limit": limit
+        },
+        "error": None,
+        "message": None
+    }
 
 # GET /products/{product_id} - PUBLIC for quotation web app
 @router.get("/{product_id}")
@@ -167,6 +473,24 @@ def get_product(product_id: int, include_archived: bool = False, db: Session = D
     product = query.first()
     if product is None:
         return {"success": False, "data": None, "error": "Product not found", "message": None}
+    
+    # Get currency for calculated prices or check supplier currencies for manual prices
+    calculated_currency = None
+    if product.price is None and product.calculated_price is not None:
+        # Try to get currency for calculated price
+        price_currency = calculate_product_price_with_currency(product, db)
+        if price_currency:
+            _, calculated_currency = price_currency
+    elif product.price is not None:
+        # For manual prices, check if there are suppliers with different currencies
+        # Get the currency of the lowest-cost supplier
+        lowest_cost_currency = get_lowest_supplier_cost_with_currency(product.id, db)
+        if lowest_cost_currency:
+            _, calculated_currency = lowest_cost_currency
+        else:
+            # If no suppliers, default to MXN
+            calculated_currency = 'MXN'
+    
     data = {
         "id": product.id,
         "name": product.name,
@@ -177,18 +501,27 @@ def get_product(product_id: int, include_archived: bool = False, db: Session = D
         "unit": product.unit.value if product.unit else None,
         "package_size": product.package_size,
         "sku": product.sku,
-        "price": float(product.price) if product.price is not None else None,
+        "price": float(product.price) if product.price is not None else (float(product.calculated_price) if product.calculated_price is not None else None),
         "stock": product.stock,
         "specifications": product.specifications,
+        "default_margin": float(product.default_margin) if product.default_margin is not None else None,
+        "calculated_price": float(product.calculated_price) if product.calculated_price is not None else None,
+        "is_calculated_price": product.price is None and product.calculated_price is not None,
+        "currency": calculated_currency,  # Currency of the calculated price
+        "embedded": product.embedded,
         "is_active": product.is_active,
         "archived_at": product.archived_at,
         "created_at": product.created_at,
         "last_updated": product.last_updated,
     }
+    
     return {"success": True, "data": data, "error": None, "message": None}
 
 # POST /products - REQUIRES AUTHENTICATION for admin operations
+# DEPRECATED: This endpoint creates records in the old Product table. New implementations should use POST /supplier-products
+# Kept for backward compatibility with existing production app
 @router.post("/")
+@router.post("")  # Handle both /products and /products/ explicitly
 def create_product(product: ProductCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     # Check for duplicate SKU
     existing = db.query(Product).filter(Product.sku == product.sku).first()
@@ -213,6 +546,7 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db), user: 
         "price": float(db_product.price) if db_product.price is not None else None,
         "stock": db_product.stock,
         "specifications": db_product.specifications,
+        "default_margin": float(db_product.default_margin) if db_product.default_margin is not None else None,
         "is_active": db_product.is_active,
         "archived_at": db_product.archived_at,
         "created_at": db_product.created_at,
@@ -221,6 +555,8 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db), user: 
     return {"success": True, "data": data, "error": None, "message": None}
 
 # PUT /products/{product_id} - REQUIRES AUTHENTICATION for admin operations
+# DEPRECATED: This endpoint updates records in the old Product table. New implementations should use PUT /supplier-products/{id}
+# Kept for backward compatibility with existing production app
 @router.put("/{product_id}")
 def update_product(product_id: int, product: ProductUpdate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     db_product = db.query(Product).filter(Product.id == product_id).first()
@@ -252,6 +588,7 @@ def update_product(product_id: int, product: ProductUpdate, db: Session = Depend
         "price": float(db_product.price) if db_product.price is not None else None,
         "stock": db_product.stock,
         "specifications": db_product.specifications,
+        "default_margin": float(db_product.default_margin) if db_product.default_margin is not None else None,
         "is_active": db_product.is_active,
         "archived_at": db_product.archived_at,
         "created_at": db_product.created_at,
@@ -261,6 +598,7 @@ def update_product(product_id: int, product: ProductUpdate, db: Session = Depend
 
 # SupplierProduct endpoints - ALL REQUIRE AUTHENTICATION for admin operations
 @router.post("/supplier-product/", response_model=SupplierProductResponse)
+@router.post("/supplier-products", response_model=SupplierProductResponse)  # Add plural endpoint for frontend compatibility
 def create_supplier_product(supplier_product: SupplierProductCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     # Verify supplier and product exist
     supplier = db.query(Supplier).filter(Supplier.id == supplier_product.supplier_id).first()
@@ -313,7 +651,7 @@ def debug_supplier_products(db: Session = Depends(get_db)):
         ]
     }
 
-@router.get("/supplier-product/", response_model=List[SupplierProductResponse])
+@router.get("/supplier-product/")
 def get_supplier_products(include_archived: bool = False, skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     query = db.query(SupplierProduct)
     
@@ -322,7 +660,26 @@ def get_supplier_products(include_archived: bool = False, skip: int = 0, limit: 
         query = query.filter(SupplierProduct.archived_at.is_(None))
         
     supplier_products = query.offset(skip).limit(limit).all()
-    return supplier_products
+    
+    # Convert to the same format as other endpoints
+    data = [
+        {
+            "id": sp.id,
+            "supplier_id": sp.supplier_id,
+            "product_id": sp.product_id,
+            "supplier_sku": sp.supplier_sku,
+            "cost": float(sp.cost) if sp.cost is not None else None,
+            "stock": sp.stock,
+            "lead_time_days": sp.lead_time_days,
+            "is_active": sp.is_active,
+            "notes": sp.notes,
+            "archived_at": sp.archived_at,
+            "created_at": sp.created_at,
+            "last_updated": sp.last_updated,
+        }
+        for sp in supplier_products
+    ]
+    return data
 
 @router.get("/{product_id}/supplier-products", response_model=List[SupplierProductResponse])
 def get_supplier_products_by_product(product_id: int, include_archived: bool = False, db: Session = Depends(get_db)):
@@ -372,10 +729,79 @@ def update_supplier_product(
     db.refresh(db_supplier_product)
     return db_supplier_product
 
+# Update shipping info for supplier product (from balance page)
+@router.patch("/supplier-product/{supplier_product_id}/shipping", response_model=SupplierProductResponse)
+def update_supplier_product_shipping(
+    supplier_product_id: int,
+    shipping_data: dict,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token)
+):
+    """Update shipping method and costs for a supplier product"""
+    db_supplier_product = db.query(SupplierProduct).filter(SupplierProduct.id == supplier_product_id).first()
+    if db_supplier_product is None:
+        raise HTTPException(status_code=404, detail="Supplier Product not found")
+    
+    # Update shipping method
+    if 'shipping_method' in shipping_data:
+        db_supplier_product.shipping_method = shipping_data['shipping_method']
+    
+    # Update shipping costs based on method
+    if shipping_data.get('shipping_method') == 'DIRECT':
+        if 'shipping_cost_direct' in shipping_data:
+            db_supplier_product.shipping_cost_direct = shipping_data['shipping_cost_direct']
+        # Reset stage costs when switching to DIRECT
+        db_supplier_product.shipping_stage1_cost = 0.0
+        db_supplier_product.shipping_stage2_cost = 0.0
+        db_supplier_product.shipping_stage3_cost = 0.0
+        db_supplier_product.shipping_stage4_cost = 0.0
+    elif shipping_data.get('shipping_method') == 'OCURRE':
+        # Update stage costs
+        if 'shipping_stage1_cost' in shipping_data:
+            db_supplier_product.shipping_stage1_cost = shipping_data['shipping_stage1_cost']
+        if 'shipping_stage2_cost' in shipping_data:
+            db_supplier_product.shipping_stage2_cost = shipping_data['shipping_stage2_cost']
+        if 'shipping_stage3_cost' in shipping_data:
+            db_supplier_product.shipping_stage3_cost = shipping_data['shipping_stage3_cost']
+        if 'shipping_stage4_cost' in shipping_data:
+            db_supplier_product.shipping_stage4_cost = shipping_data['shipping_stage4_cost']
+        # Reset direct cost when switching to OCURRE
+        db_supplier_product.shipping_cost_direct = 0.0
+    
+    # Update shipping notes if provided
+    if 'shipping_notes' in shipping_data:
+        db_supplier_product.shipping_notes = shipping_data['shipping_notes']
+    
+    db.commit()
+    db.refresh(db_supplier_product)
+    return db_supplier_product
+
+# Get supplier product by supplier_id and product_id
+@router.get("/supplier-product/by-relationship/{supplier_id}/{product_id}", response_model=SupplierProductResponse)
+def get_supplier_product_by_relationship(
+    supplier_id: int,
+    product_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token)
+):
+    """Get supplier product by supplier_id and product_id"""
+    supplier_product = db.query(SupplierProduct).filter(
+        SupplierProduct.supplier_id == supplier_id,
+        SupplierProduct.product_id == product_id,
+        SupplierProduct.archived_at.is_(None)
+    ).first()
+    
+    if supplier_product is None:
+        raise HTTPException(status_code=404, detail="Supplier Product relationship not found")
+    
+    return supplier_product
+
 # Archive/Unarchive endpoints for Products
+# DEPRECATED: This endpoint archives records in the old Product table. New implementations should use PATCH /supplier-products/{id}/archive
+# Kept for backward compatibility with existing production app
 @router.patch("/{product_id}/archive")
 def archive_product(product_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
-    """Archive a product (soft delete)"""
+    """Archive a product (soft delete) - DEPRECATED"""
     db_product = db.query(Product).filter(Product.id == product_id).first()
     if db_product is None:
         return {"success": False, "data": None, "error": "Product not found", "message": None}
@@ -386,9 +812,11 @@ def archive_product(product_id: int, db: Session = Depends(get_db), user: dict =
     
     return {"success": True, "data": {"id": product_id, "archived_at": db_product.archived_at}, "error": None, "message": "Product archived successfully"}
 
+# DEPRECATED: This endpoint unarchives records in the old Product table. New implementations should use PATCH /supplier-products/{id}/unarchive
+# Kept for backward compatibility with existing production app
 @router.patch("/{product_id}/unarchive")
 def unarchive_product(product_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
-    """Unarchive a product (restore from soft delete)"""
+    """Unarchive a product (restore from soft delete) - DEPRECATED"""
     db_product = db.query(Product).filter(Product.id == product_id).first()
     if db_product is None:
         return {"success": False, "data": None, "error": "Product not found", "message": None}
@@ -425,3 +853,111 @@ def unarchive_supplier_product(supplier_product_id: int, db: Session = Depends(g
     db.refresh(db_supplier_product)
     
     return {"success": True, "data": {"id": supplier_product_id, "archived_at": None}, "error": None, "message": "Supplier Product restored successfully"}
+
+# Stock Management Endpoints
+
+class StockUpdateItem(BaseModel):
+    product_id: int
+    stock: int
+    price: Optional[float] = None
+
+class BulkStockUpdate(BaseModel):
+    updates: List[StockUpdateItem]
+
+class StockResponse(BaseModel):
+    id: int
+    name: str
+    sku: str
+    unit: str
+    stock: int
+    price: Optional[float]
+    total_value: Optional[float]
+    last_updated: Optional[datetime]
+
+
+@router.patch("/{product_id}/stock")
+def update_product_stock(
+    product_id: int,
+    stock: int,
+    price: Optional[float] = None,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token)
+):
+    """Update stock level for a supplier product (product_id is now supplier_product.id)"""
+    # Query SupplierProduct instead of Product
+    db_supplier_product = db.query(SupplierProduct).filter(SupplierProduct.id == product_id).first()
+    if db_supplier_product is None:
+        return {"success": False, "data": None, "error": "Supplier product not found", "message": None}
+    
+    db_supplier_product.stock = stock
+    if price is not None:
+        db_supplier_product.cost = price  # Update cost instead of price
+    db_supplier_product.last_updated = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(db_supplier_product)
+    
+    total_value = None
+    if db_supplier_product.stock and db_supplier_product.cost:
+        total_value = float(db_supplier_product.stock * db_supplier_product.cost)
+    
+    return {
+        "success": True,
+        "data": {
+            "id": db_supplier_product.id,
+            "name": db_supplier_product.name,
+            "sku": db_supplier_product.sku,
+            "stock": db_supplier_product.stock,
+            "price": float(db_supplier_product.cost) if db_supplier_product.cost else None,
+            "total_value": total_value,
+            "last_updated": db_supplier_product.last_updated
+        },
+        "error": None,
+        "message": "Stock updated successfully"
+    }
+
+@router.post("/stock/bulk-update")
+def bulk_update_stock(
+    bulk_update: BulkStockUpdate,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token)
+):
+    """Update stock levels for multiple supplier products"""
+    updated_products = []
+    errors = []
+    
+    for update_item in bulk_update.updates:
+        try:
+            # Query SupplierProduct instead of Product
+            db_supplier_product = db.query(SupplierProduct).filter(SupplierProduct.id == update_item.product_id).first()
+            if db_supplier_product is None:
+                errors.append(f"Supplier product with ID {update_item.product_id} not found")
+                continue
+            
+            db_supplier_product.stock = update_item.stock
+            if update_item.price is not None:
+                db_supplier_product.cost = update_item.price  # Update cost instead of price
+            db_supplier_product.last_updated = datetime.utcnow()
+            
+            updated_products.append({
+                "id": db_supplier_product.id,
+                "name": db_supplier_product.name,
+                "sku": db_supplier_product.sku,
+                "stock": db_supplier_product.stock,
+                "price": float(db_supplier_product.cost) if db_supplier_product.cost else None
+            })
+        except Exception as e:
+            errors.append(f"Error updating supplier product {update_item.product_id}: {str(e)}")
+    
+    db.commit()
+    
+    return {
+        "success": len(errors) == 0,
+        "data": {
+            "updated_products": updated_products,
+            "updated_count": len(updated_products),
+            "errors": errors
+        },
+        "error": None if len(errors) == 0 else "Some updates failed",
+        "message": f"Updated {len(updated_products)} supplier products successfully"
+    }

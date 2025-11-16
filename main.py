@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-from rag_system import query_rag_system_with_history
+from rag_system_moved.rag_system import query_rag_system_with_history
 from sqlalchemy.orm import Session
 from models import get_db, Query, Conversation, ConversationMessage
 from typing import List, Optional
@@ -11,6 +11,8 @@ from routes.products import router as products_router
 from routes.suppliers import router as suppliers_router
 from routes.quotations import router as quotations_router
 from routes.categories import router as categories_router
+from routes.kits import router as kits_router
+from routes.balance import router as balance_router
 from auth import verify_google_token
 
 app = FastAPI()
@@ -24,7 +26,7 @@ app.add_middleware(
         "http://localhost:3000"               # Alternative local port
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["*"],
 )
 
@@ -33,6 +35,8 @@ app.include_router(products_router)
 app.include_router(suppliers_router)
 app.include_router(quotations_router)
 app.include_router(categories_router)
+app.include_router(kits_router)
+app.include_router(balance_router)
 
 class Message(BaseModel):
     role: str  # 'user' or 'assistant'

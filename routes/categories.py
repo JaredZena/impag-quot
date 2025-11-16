@@ -8,6 +8,7 @@ router = APIRouter(prefix="/categories", tags=["categories"])
 
 # GET /categories - PUBLIC for quotation web app
 @router.get("/")
+@router.get("")  # Handle both /categories and /categories/ explicitly
 def get_categories(db: Session = Depends(get_db)):
     categories = db.query(ProductCategory).all()
     data = [

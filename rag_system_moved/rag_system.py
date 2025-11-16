@@ -1,6 +1,6 @@
-from embeddings import generate_embeddings
-from pinecone_setup import index
-from claude_llm_setup import llm
+from .embeddings import generate_embeddings
+from .pinecone_setup import index
+from .claude_llm_setup import llm
 from models import Product, Supplier, SupplierProduct, SessionLocal
 
 def get_products_from_db(fallback_margin=30.0):
