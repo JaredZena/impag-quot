@@ -883,46 +883,53 @@ Respond only with the JSON object, no extra explanation.""".replace(
         
         return new_supplier, detection_info
 
-    def get_or_create_product(self, session: Session, product_info: Dict) -> Product:
+    def get_or_create_supplier_product(self, session: Session, supplier: Supplier, product_info: Dict, supplier_sku: str = None) -> SupplierProduct:
+        """
+        Create or get SupplierProduct directly (no Product table involved).
+        This is the NEW architecture - SupplierProduct is the source of truth.
+        """
         
-        print(f'Getting or creating product: {product_info}')
-        print(f'Category ID at start of get_or_create_product: {product_info.get("category_id")}')
+        print(f'Getting or creating supplier product: {product_info}')
+        print(f'Category ID at start: {product_info.get("category_id")}')
+        print(f'Supplier: {supplier.name} (ID: {supplier.id})')
         
         # Get base SKU first
         base_sku = self.sku_generator.get_base_sku(product_info)
         print(f"Base SKU: {base_sku}")
         
         # Get SKU using hybrid approach (AI suggestion + code fallback)
-        # For flattened model, we use the main SKU directly
         sku = self.sku_generator.get_variant_sku(
             base_sku, 
             product_info.get("specifications", {})
         )
         print(f"Generated SKU: {sku}")
 
-        existing = session.query(Product).filter_by(sku=sku).first()
+        # Check if this supplier already has this SKU (non-archived only)
+        existing = session.query(SupplierProduct).filter(
+            SupplierProduct.supplier_id == supplier.id,
+            SupplierProduct.sku == sku,
+            SupplierProduct.archived_at.is_(None)
+        ).first()
+        
         if existing:
-            print(f"Found existing product: {existing.name} (ID: {existing.id}) [SKU: {existing.sku}]")
+            print(f"Found existing supplier product: {existing.name} (ID: {existing.id}) [SKU: {existing.sku}]")
             return existing
         
         # Debug: Print the unit value we received
         print(f"\nReceived unit value: {product_info.get('unit')}")
         
-        # Get the unit value and convert to enum member
+        # Get the unit value (now stored as string, not enum)
         unit_value = product_info.get("unit")
         if unit_value is None:
             unit_str = "PIEZA"
         else:
-            unit_str = str(unit_value).upper()
-
-        try:
-            unit = ProductUnit[unit_str]
-        except KeyError:
-            print(f"Invalid unit value '{unit_str}', defaulting to PIEZA")
-            unit = ProductUnit.PIEZA
+            # If it's a ProductUnit enum, get its value
+            if hasattr(unit_value, 'value'):
+                unit_str = unit_value.value
+            else:
+                unit_str = str(unit_value).upper()
         
-        # Debug: Print the mapped unit value
-        print(f"Mapped unit value: {unit}")
+        print(f"Unit string for storage: {unit_str}")
         
         # Verify category exists
         category_id = product_info.get("category_id")
@@ -933,49 +940,12 @@ Respond only with the JSON object, no extra explanation.""".replace(
         if not category:
             raise ValueError(f"Category with ID {category_id} not found")
         
-        new_product = Product(
-            name=product_info["name"],
-            description=product_info["description"],
-            base_sku=base_sku,
-            category_id=category_id,
-            unit=unit,  # Use the enum member directly
-            iva=product_info.get("iva", True),
-            # New flattened fields
-            sku=sku,
-            price=product_info.get("price"),
-            stock=product_info.get("stock", 0),
-            specifications=product_info.get("specifications", {}),
-            default_margin=0.25,  # Set 25% default margin for price calculation
-            is_active=True
-        )
-        
-        session.add(new_product)
-        session.flush()  # Assign ID without committing transaction
-        print(f"Created new product: {new_product.name} (ID: {new_product.id}) [SKU: {new_product.sku}]")
-        return new_product
-
-    def create_supplier_product(self, session: Session, supplier: Supplier, product: Product, 
-                              product_info: Dict, supplier_sku: str = None) -> SupplierProduct:
-        """Create supplier-product relationship."""
-        # Check if this supplier-product relationship already exists (non-archived only)
-        existing = session.query(SupplierProduct).filter_by(
-            supplier_id=supplier.id,
-            product_id=product.id
-        ).filter(
-            SupplierProduct.archived_at.is_(None)
-        ).first()
-        
-        if existing:
-            print(f"Supplier-product relationship already exists (ID: {existing.id})")
-            return existing
-        
         # Extract shipping costs and method from product info
         shipping_method = product_info.get("shipping_method", "DIRECT")
         shipping_cost_direct = 0.0
         
         # Handle shipping costs based on method
         if shipping_method == "DIRECT":
-            # For direct shipping, use the old shipping_cost_per_unit field
             shipping_cost_direct = product_info.get("shipping_cost_per_unit", 0.0)
         
         # Store prices in their original currency
@@ -988,12 +958,29 @@ Respond only with the JSON object, no extra explanation.""".replace(
         else:
             print(f"Storing MXN price: ${cost} (original currency)")
         
+        # Create SupplierProduct with ALL product fields directly
         new_supplier_product = SupplierProduct(
             supplier_id=supplier.id,
-            product_id=product.id,
+            product_id=None,  # No longer linked to Product table
+            
+            # Product fields (NEW - SupplierProduct is now standalone)
+            name=product_info["name"],
+            description=product_info["description"],
+            base_sku=base_sku,
+            sku=sku,
+            category_id=category_id,
+            unit=unit_str,  # Store as string
+            package_size=product_info.get("package_size"),
+            iva=product_info.get("iva", True),
+            specifications=product_info.get("specifications", {}),
+            default_margin=0.25,  # Set 25% default margin
+            
+            # Supplier-specific fields
             supplier_sku=supplier_sku,
             cost=cost,
             currency=currency,
+            stock=product_info.get("stock", 0),
+            lead_time_days=0,  # Default, can be updated later
             shipping_method=shipping_method,
             shipping_cost_direct=shipping_cost_direct,
             shipping_stage1_cost=product_info.get("shipping_stage1_cost", 0.0),
@@ -1001,65 +988,18 @@ Respond only with the JSON object, no extra explanation.""".replace(
             shipping_stage3_cost=product_info.get("shipping_stage3_cost", 0.0),
             shipping_stage4_cost=product_info.get("shipping_stage4_cost", 0.0),
             shipping_notes=product_info.get("shipping_notes"),
-            lead_time_days=0,  # Default, can be updated later
             is_active=True
         )
         
         session.add(new_supplier_product)
         session.flush()  # Assign ID without committing transaction
-        print(f"Created supplier-product relationship (ID: {new_supplier_product.id}) [Cost: ${new_supplier_product.cost}]")
-        
-        # Update product price if not set (for SQLite compatibility - no triggers)
-        self.update_product_price(session, product)
+        print(f"✅ Created new supplier product: {new_supplier_product.name} (ID: {new_supplier_product.id}) [SKU: {new_supplier_product.sku}, Cost: ${new_supplier_product.cost} {new_supplier_product.currency}]")
         
         return new_supplier_product
-    
-    def update_product_price(self, session: Session, product: Product):
-        """Update product price based on supplier costs (for SQLite compatibility)."""
-        # If product already has a price set, don't override it
-        if product.price is not None:
-            return
-        
-        # Get the default margin for this product
-        if product.default_margin is None:
-            # No default margin, can't calculate price
-            return
-        
-        # Get the lowest cost from all active supplier-product relationships
-        from sqlalchemy import func, case
-        from models import SupplierProduct
-        
-        # Calculate total shipping cost based on method
-        total_shipping_cost = case(
-            (SupplierProduct.shipping_method == 'DIRECT', func.coalesce(SupplierProduct.shipping_cost_direct, 0)),
-            else_=(
-                func.coalesce(SupplierProduct.shipping_stage1_cost, 0) +
-                func.coalesce(SupplierProduct.shipping_stage2_cost, 0) +
-                func.coalesce(SupplierProduct.shipping_stage3_cost, 0) +
-                func.coalesce(SupplierProduct.shipping_stage4_cost, 0)
-            )
-        )
-        
-        lowest_cost_result = session.query(
-            func.min(SupplierProduct.cost + total_shipping_cost).label('lowest_cost')
-        ).filter(
-            SupplierProduct.product_id == product.id,
-            SupplierProduct.is_active == True,
-            SupplierProduct.cost.isnot(None),
-            SupplierProduct.cost > 0
-        ).first()
-        
-        if lowest_cost_result and lowest_cost_result.lowest_cost:
-            from decimal import Decimal
-            lowest_cost = Decimal(str(lowest_cost_result.lowest_cost))
-            margin = Decimal(str(product.default_margin))
-            
-            # Calculate price with margin: price = cost / (1 - margin)
-            if margin < 1:  # Margin must be less than 100%
-                calculated_price = lowest_cost / (Decimal('1') - margin)
-                product.calculated_price = float(calculated_price)
-                product.price = float(calculated_price)
-                print(f"   ✓ Calculated product price: ${calculated_price:.2f} (margin: {margin*100}%)")
+
+    # OLD METHODS REMOVED - No longer needed as SupplierProduct is now the source of truth
+    # - create_supplier_product() - merged into get_or_create_supplier_product()
+    # - update_product_price() - no longer needed as we don't use Product table
 
     def process_quotation(self, file_path: str, category_id: Optional[int] = None) -> Dict:
         """
@@ -1118,6 +1058,7 @@ Respond only with the JSON object, no extra explanation.""".replace(
                 "suppliers": {},  # Track multiple suppliers by name
                 "products_processed": 0,
                 "supplier_products_created": 0,
+                "supplier_product_ids": [],  # Track created supplier product IDs for reassignment
                 "skus_generated": [],
                 "supplier_detection": {
                     "suppliers_detected": [],
@@ -1173,10 +1114,7 @@ Respond only with the JSON object, no extra explanation.""".replace(
                         product_info_copy["category_id"] = category_id
                         print(f"Category ID after override: {product_info_copy['category_id']}")
                     
-                    print(f"Category ID before get_or_create_product: {product_info_copy['category_id']}")
-                    
-                    # Create/get product
-                    product = self.get_or_create_product(session, product_info_copy)
+                    print(f"Category ID before creating supplier product: {product_info_copy['category_id']}")
                     
                     # Process supplier for this specific product
                     supplier_info = product_info_copy.get("supplier", {})
@@ -1200,12 +1138,13 @@ Respond only with the JSON object, no extra explanation.""".replace(
                     
                     results["suppliers"][supplier_name]["products_count"] += 1
                     
-                    # Create supplier-product relationship
-                    supplier_product = self.create_supplier_product(
-                        session, supplier, product, product_info_copy, 
+                    # Create/get SupplierProduct directly (NEW ARCHITECTURE - no Product table)
+                    supplier_product = self.get_or_create_supplier_product(
+                        session, supplier, product_info_copy, 
                         supplier_sku=product_info_copy.get("supplier_sku")
                     )
                     results["supplier_products_created"] += 1
+                    results["supplier_product_ids"].append(supplier_product.id)  # Track ID for reassignment
                     
                     # Track currency information (no conversion, store original)
                     if currency == "USD":
@@ -1222,8 +1161,8 @@ Respond only with the JSON object, no extra explanation.""".replace(
                     results["skus_generated"].append({
                         "product_name": product_info_copy["name"],
                         "supplier_name": supplier_name,
-                        "base_sku": product.base_sku,
-                        "variant_sku": product.sku,
+                        "base_sku": supplier_product.base_sku,
+                        "variant_sku": supplier_product.sku,
                         "ai_suggested": product_info_copy.get("suggested_base_sku", "N/A"),
                         "category_id": product_info_copy["category_id"],
                         "currency": product_info_copy.get("currency", "MXN"),

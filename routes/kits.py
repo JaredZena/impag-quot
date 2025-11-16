@@ -4,23 +4,26 @@ from sqlalchemy import func
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
-from models import get_db, Kit, KitItem, Product
+from models import get_db, Kit, KitItem, Product, SupplierProduct
 from auth import verify_google_token
 
 router = APIRouter(prefix="/kits", tags=["kits"])
 
 # Pydantic models
 class KitItemCreate(BaseModel):
-    product_id: int
+    supplier_product_id: int  # NEW - primary field
+    product_id: Optional[int] = None  # Keep for backward compatibility
     quantity: int = 1
     unit_price: Optional[float] = None
     notes: Optional[str] = None
 
 class KitItemResponse(BaseModel):
     id: int
-    product_id: int
+    supplier_product_id: Optional[int]  # NEW - primary field
+    product_id: Optional[int]  # Keep for backward compatibility
     product_name: str
     product_sku: str
+    supplier_name: Optional[str] = None  # NEW - include supplier info
     quantity: int
     unit_price: Optional[float]
     notes: Optional[str]
@@ -72,7 +75,10 @@ def get_kits(
     db: Session = Depends(get_db)
 ):
     """Get all kits with optional filtering"""
-    query = db.query(Kit).options(joinedload(Kit.items).joinedload(KitItem.product))
+    query = db.query(Kit).options(
+        joinedload(Kit.items).joinedload(KitItem.supplier_product).joinedload(SupplierProduct.supplier),
+        joinedload(Kit.items).joinedload(KitItem.product)  # Keep for backward compatibility
+    )
     
     # Filter archived
     if not include_archived:
@@ -109,11 +115,13 @@ def get_kits(
             "items": [
                 {
                     "id": item.id,
-                    "product_id": item.product_id,
-                    "product_name": item.product.name,
-                    "product_sku": item.product.sku,
+                    "supplier_product_id": item.supplier_product_id,
+                    "product_id": item.product_id,  # Keep for backward compatibility
+                    "product_name": item.supplier_product.name if item.supplier_product else (item.product.name if item.product else "Unknown"),
+                    "product_sku": item.supplier_product.sku if item.supplier_product else (item.product.sku if item.product else "N/A"),
+                    "supplier_name": item.supplier_product.supplier.name if item.supplier_product and item.supplier_product.supplier else None,
                     "quantity": item.quantity,
-                    "unit_price": float(item.unit_price) if item.unit_price else (float(item.product.price) if item.product.price else None),
+                    "unit_price": float(item.unit_price) if item.unit_price else (float(item.supplier_product.cost) if item.supplier_product and item.supplier_product.cost else (float(item.product.price) if item.product and item.product.price else None)),
                     "notes": item.notes
                 }
                 for item in kit.items
@@ -123,7 +131,7 @@ def get_kits(
         # Calculate total cost
         calculated_cost = 0
         for item in kit.items:
-            item_price = item.unit_price or (item.product.price if item.product.price else 0)
+            item_price = item.unit_price or (item.supplier_product.cost if item.supplier_product and item.supplier_product.cost else (item.product.price if item.product and item.product.price else 0))
             calculated_cost += float(item_price) * item.quantity
         
         kit_dict["calculated_cost"] = calculated_cost if calculated_cost > 0 else None
@@ -135,7 +143,10 @@ def get_kits(
 @router.get("/{kit_id}", response_model=KitResponse)
 def get_kit(kit_id: int, db: Session = Depends(get_db)):
     """Get a single kit by ID"""
-    kit = db.query(Kit).options(joinedload(Kit.items).joinedload(KitItem.product)).filter(Kit.id == kit_id).first()
+    kit = db.query(Kit).options(
+        joinedload(Kit.items).joinedload(KitItem.supplier_product).joinedload(SupplierProduct.supplier),
+        joinedload(Kit.items).joinedload(KitItem.product)  # Keep for backward compatibility
+    ).filter(Kit.id == kit_id).first()
     
     if not kit:
         raise HTTPException(status_code=404, detail="Kit not found")
@@ -154,11 +165,13 @@ def get_kit(kit_id: int, db: Session = Depends(get_db)):
         "items": [
             {
                 "id": item.id,
-                "product_id": item.product_id,
-                "product_name": item.product.name,
-                "product_sku": item.product.sku,
+                "supplier_product_id": item.supplier_product_id,
+                "product_id": item.product_id,  # Keep for backward compatibility
+                "product_name": item.supplier_product.name if item.supplier_product else (item.product.name if item.product else "Unknown"),
+                "product_sku": item.supplier_product.sku if item.supplier_product else (item.product.sku if item.product else "N/A"),
+                "supplier_name": item.supplier_product.supplier.name if item.supplier_product and item.supplier_product.supplier else None,
                 "quantity": item.quantity,
-                "unit_price": float(item.unit_price) if item.unit_price else (float(item.product.price) if item.product.price else None),
+                "unit_price": float(item.unit_price) if item.unit_price else (float(item.supplier_product.cost) if item.supplier_product and item.supplier_product.cost else (float(item.product.price) if item.product and item.product.price else None)),
                 "notes": item.notes
             }
             for item in kit.items
@@ -168,7 +181,7 @@ def get_kit(kit_id: int, db: Session = Depends(get_db)):
     # Calculate total cost
     calculated_cost = 0
     for item in kit.items:
-        item_price = item.unit_price or (item.product.price if item.product.price else 0)
+        item_price = item.unit_price or (item.supplier_product.cost if item.supplier_product and item.supplier_product.cost else (item.product.price if item.product and item.product.price else 0))
         calculated_cost += float(item_price) * item.quantity
     
     kit_dict["calculated_cost"] = calculated_cost if calculated_cost > 0 else None
@@ -199,15 +212,16 @@ def create_kit(kit_data: KitCreate, db: Session = Depends(get_db)):
     
     # Add items
     for item_data in kit_data.items:
-        # Verify product exists
-        product = db.query(Product).filter(Product.id == item_data.product_id).first()
-        if not product:
+        # Verify supplier product exists
+        supplier_product = db.query(SupplierProduct).filter(SupplierProduct.id == item_data.supplier_product_id).first()
+        if not supplier_product:
             db.rollback()
-            raise HTTPException(status_code=400, detail=f"Product {item_data.product_id} not found")
+            raise HTTPException(status_code=400, detail=f"Supplier product {item_data.supplier_product_id} not found")
         
         db_item = KitItem(
             kit_id=db_kit.id,
-            product_id=item_data.product_id,
+            supplier_product_id=item_data.supplier_product_id,
+            product_id=item_data.product_id,  # Keep for backward compatibility
             quantity=item_data.quantity,
             unit_price=item_data.unit_price,
             notes=item_data.notes
@@ -247,15 +261,16 @@ def update_kit(kit_id: int, kit_data: KitUpdate, db: Session = Depends(get_db)):
         
         # Add new items
         for item_data in kit_data.items:
-            # Verify product exists
-            product = db.query(Product).filter(Product.id == item_data.product_id).first()
-            if not product:
+            # Verify supplier product exists
+            supplier_product = db.query(SupplierProduct).filter(SupplierProduct.id == item_data.supplier_product_id).first()
+            if not supplier_product:
                 db.rollback()
-                raise HTTPException(status_code=400, detail=f"Product {item_data.product_id} not found")
+                raise HTTPException(status_code=400, detail=f"Supplier product {item_data.supplier_product_id} not found")
             
             db_item = KitItem(
                 kit_id=kit_id,
-                product_id=item_data.product_id,
+                supplier_product_id=item_data.supplier_product_id,
+                product_id=item_data.product_id,  # Keep for backward compatibility
                 quantity=item_data.quantity,
                 unit_price=item_data.unit_price,
                 notes=item_data.notes

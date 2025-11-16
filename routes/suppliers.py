@@ -98,37 +98,54 @@ def get_suppliers(
     if search:
         # Normalize spaces for better fuzzy matching
         normalized_search = func.regexp_replace(func.unaccent(search), r'\s+', '', 'g')
-        normalized_name = func.regexp_replace(func.unaccent(Supplier.name), r'\s+', '', 'g')
-        normalized_contact = func.regexp_replace(func.unaccent(Supplier.contact_name), r'\s+', '', 'g')
+        # Use COALESCE to handle NULL values (default to empty string for normalization)
+        normalized_name = func.regexp_replace(func.unaccent(func.coalesce(Supplier.name, '')), r'\s+', '', 'g')
+        normalized_common_name = func.regexp_replace(func.unaccent(func.coalesce(Supplier.common_name, '')), r'\s+', '', 'g')
+        normalized_legal_name = func.regexp_replace(func.unaccent(func.coalesce(Supplier.legal_name, '')), r'\s+', '', 'g')
+        normalized_contact = func.regexp_replace(func.unaccent(func.coalesce(Supplier.contact_name, '')), r'\s+', '', 'g')
         
-        # Exact matches
-        name_exact = func.unaccent(Supplier.name).ilike(func.unaccent(f"%{search}%"))
-        contact_exact = func.unaccent(Supplier.contact_name).ilike(func.unaccent(f"%{search}%"))
-        email_exact = Supplier.email.ilike(f"%{search}%")
+        # Exact matches (handle NULL with COALESCE)
+        name_exact = func.unaccent(func.coalesce(Supplier.name, '')).ilike(func.unaccent(f"%{search}%"))
+        common_name_exact = func.unaccent(func.coalesce(Supplier.common_name, '')).ilike(func.unaccent(f"%{search}%"))
+        legal_name_exact = func.unaccent(func.coalesce(Supplier.legal_name, '')).ilike(func.unaccent(f"%{search}%"))
+        contact_exact = func.unaccent(func.coalesce(Supplier.contact_name, '')).ilike(func.unaccent(f"%{search}%"))
+        email_exact = func.coalesce(Supplier.email, '').ilike(f"%{search}%")
         
         # Fuzzy matches with space normalization
         name_fuzzy = func.similarity(normalized_name, normalized_search) > 0.2
+        common_name_fuzzy = func.similarity(normalized_common_name, normalized_search) > 0.2
+        legal_name_fuzzy = func.similarity(normalized_legal_name, normalized_search) > 0.2
         contact_fuzzy = func.similarity(normalized_contact, normalized_search) > 0.2
         
         # Word similarity matches
         name_word = func.word_similarity(normalized_search, normalized_name) > 0.2
+        common_name_word = func.word_similarity(normalized_search, normalized_common_name) > 0.2
+        legal_name_word = func.word_similarity(normalized_search, normalized_legal_name) > 0.2
         contact_word = func.word_similarity(normalized_search, normalized_contact) > 0.2
         
         query = query.filter(
-            name_exact | contact_exact | email_exact | 
-            name_fuzzy | contact_fuzzy | name_word | contact_word
+            name_exact | common_name_exact | legal_name_exact | contact_exact | email_exact | 
+            name_fuzzy | common_name_fuzzy | legal_name_fuzzy | contact_fuzzy | 
+            name_word | common_name_word | legal_name_word | contact_word
         )
         
         # Order by best similarity score
         name_similarity = func.similarity(normalized_name, normalized_search)
+        common_name_similarity = func.similarity(normalized_common_name, normalized_search)
+        legal_name_similarity = func.similarity(normalized_legal_name, normalized_search)
         contact_similarity = func.similarity(normalized_contact, normalized_search)
         name_word_sim = func.word_similarity(normalized_search, normalized_name)
+        common_name_word_sim = func.word_similarity(normalized_search, normalized_common_name)
+        legal_name_word_sim = func.word_similarity(normalized_search, normalized_legal_name)
         contact_word_sim = func.word_similarity(normalized_search, normalized_contact)
         
-        best_score = func.greatest(name_similarity, contact_similarity, name_word_sim, contact_word_sim)
+        best_score = func.greatest(
+            name_similarity, common_name_similarity, legal_name_similarity, contact_similarity,
+            name_word_sim, common_name_word_sim, legal_name_word_sim, contact_word_sim
+        )
         
         exact_score = case(
-            (name_exact | contact_exact | email_exact, 1.0),
+            (name_exact | common_name_exact | legal_name_exact | contact_exact | email_exact, 1.0),
             else_=best_score
         )
         query = query.order_by(exact_score.desc())
@@ -276,18 +293,17 @@ def get_supplier_products(supplier_id: int, include_archived: bool = False, db: 
     if not supplier_products:
         return {"success": True, "data": [], "error": None, "message": None}
     
-    # Get product details and combine with supplier-specific info
+    # Get product details directly from supplier_product (no Product table query needed)
     products_with_supplier_info = []
     for sp in supplier_products:
-        # Get the product details
-        product = db.query(Product).filter(Product.id == sp.product_id).first()
-        if product and (include_archived or product.archived_at is None):
+        # Check if archived (using supplier_product archived_at)
+        if include_archived or sp.archived_at is None:
             product_data = {
                 # Supplier-specific information
                 "supplier_product_id": sp.id,
                 "supplier_sku": sp.supplier_sku,
                 "cost": float(sp.cost) if sp.cost is not None else None,
-                "currency": sp.currency if sp.currency is not None else 'MXN',  # Include currency
+                "currency": sp.currency if sp.currency is not None else 'MXN',
                 "stock": sp.stock,
                 "lead_time_days": sp.lead_time_days,
                 "supplier_is_active": sp.is_active,
@@ -298,22 +314,22 @@ def get_supplier_products(supplier_id: int, include_archived: bool = False, db: 
                 "created_at": sp.created_at,
                 "last_updated": sp.last_updated,
                 
-                # Product information
-                "product_id": product.id,
-                "product_name": product.name,
-                "product_description": product.description,
-                "category_id": product.category_id,
-                "base_sku": product.base_sku,
-                "sku": product.sku,
-                "iva": product.iva,
-                "unit": product.unit.value if product.unit else None,
-                "package_size": product.package_size,
-                "base_price": float(product.price) if product.price is not None else None,
-                "base_stock": product.stock,
-                "specifications": product.specifications,
-                "product_is_active": product.is_active,
-                "product_created_at": product.created_at,
-                "product_last_updated": product.last_updated,
+                # Product information (now from SupplierProduct directly)
+                "product_id": sp.product_id,  # Keep for backward compatibility
+                "product_name": sp.name,
+                "product_description": sp.description,
+                "category_id": sp.category_id,
+                "base_sku": sp.base_sku,
+                "sku": sp.sku,
+                "iva": sp.iva,
+                "unit": sp.unit,  # Already a string in SupplierProduct
+                "package_size": sp.package_size,
+                "base_price": float(sp.cost) if sp.cost is not None else None,  # Use cost as base_price
+                "base_stock": sp.stock,  # Use supplier_product stock
+                "specifications": sp.specifications,
+                "product_is_active": sp.is_active,  # Use supplier_product is_active
+                "product_created_at": sp.created_at,
+                "product_last_updated": sp.last_updated,
             }
             products_with_supplier_info.append(product_data)
     

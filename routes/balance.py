@@ -25,8 +25,9 @@ def calculate_supplier_shipping_cost(supplier_product: SupplierProduct) -> float
 
 # Pydantic models
 class BalanceItemCreate(BaseModel):
-    product_id: int
-    supplier_id: int
+    supplier_product_id: int  # NEW - primary field
+    product_id: Optional[int] = None  # Keep for backward compatibility
+    supplier_id: Optional[int] = None  # Keep for backward compatibility
     quantity: int = 1
     unit_price: float
     notes: Optional[str] = None
@@ -293,22 +294,15 @@ def create_balance(balance_data: BalanceCreate, db: Session = Depends(get_db)):
     
     # Add items
     for item_data in deduplicated_items:
-        # Verify product exists
-        product = db.query(Product).filter(Product.id == item_data.product_id).first()
-        if not product:
-            db.rollback()
-            raise HTTPException(status_code=400, detail=f"Product {item_data.product_id} not found")
-        
-        # Verify supplier exists and get supplier product info
+        # Verify supplier product exists
         supplier_product = db.query(SupplierProduct).filter(
-            SupplierProduct.supplier_id == item_data.supplier_id,
-            SupplierProduct.product_id == item_data.product_id,
+            SupplierProduct.id == item_data.supplier_product_id,
             SupplierProduct.is_active == True
         ).first()
         
         if not supplier_product:
             db.rollback()
-            raise HTTPException(status_code=400, detail=f"Supplier {item_data.supplier_id} does not offer product {item_data.product_id}")
+            raise HTTPException(status_code=400, detail=f"Supplier product {item_data.supplier_product_id} not found")
         
         # Calculate shipping cost from supplier product
         shipping_cost_per_unit = calculate_supplier_shipping_cost(supplier_product)
@@ -319,8 +313,9 @@ def create_balance(balance_data: BalanceCreate, db: Session = Depends(get_db)):
         
         db_item = BalanceItem(
             balance_id=db_balance.id,
-            product_id=item_data.product_id,
-            supplier_id=item_data.supplier_id,
+            supplier_product_id=item_data.supplier_product_id,
+            product_id=item_data.product_id,  # Keep for backward compatibility
+            supplier_id=item_data.supplier_id or supplier_product.supplier_id,  # Keep for backward compatibility
             quantity=item_data.quantity,
             unit_price=item_data.unit_price,
             total_cost=item_total,
@@ -379,22 +374,15 @@ def update_balance(balance_id: int, balance_data: BalanceUpdate, db: Session = D
         
         # Add new items
         for item_data in deduplicated_items:
-            # Verify product exists
-            product = db.query(Product).filter(Product.id == item_data.product_id).first()
-            if not product:
-                db.rollback()
-                raise HTTPException(status_code=400, detail=f"Product {item_data.product_id} not found")
-            
-            # Verify supplier exists and get supplier product info
+            # Verify supplier product exists
             supplier_product = db.query(SupplierProduct).filter(
-                SupplierProduct.supplier_id == item_data.supplier_id,
-                SupplierProduct.product_id == item_data.product_id,
+                SupplierProduct.id == item_data.supplier_product_id,
                 SupplierProduct.is_active == True
             ).first()
             
             if not supplier_product:
                 db.rollback()
-                raise HTTPException(status_code=400, detail=f"Supplier {item_data.supplier_id} does not offer product {item_data.product_id}")
+                raise HTTPException(status_code=400, detail=f"Supplier product {item_data.supplier_product_id} not found")
             
             # Calculate shipping cost from supplier product
             shipping_cost_per_unit = calculate_supplier_shipping_cost(supplier_product)
@@ -405,8 +393,9 @@ def update_balance(balance_id: int, balance_data: BalanceUpdate, db: Session = D
             
             db_item = BalanceItem(
                 balance_id=balance_id,
-                product_id=item_data.product_id,
-                supplier_id=item_data.supplier_id,
+                supplier_product_id=item_data.supplier_product_id,
+                product_id=item_data.product_id,  # Keep for backward compatibility
+                supplier_id=item_data.supplier_id or supplier_product.supplier_id,  # Keep for backward compatibility
                 quantity=item_data.quantity,
                 unit_price=item_data.unit_price,
                 total_cost=item_total,
@@ -438,22 +427,21 @@ def archive_balance(balance_id: int, db: Session = Depends(get_db)):
     return {"message": "Balance archived successfully"}
 
 # GET /balance/compare/{product_id} - Compare suppliers for a product
+# DEPRECATED: Use supplier_product_id instead for new implementations
 @router.get("/compare/{product_id}", response_model=ProductComparisonResponse)
 def compare_product_suppliers(product_id: int, db: Session = Depends(get_db)):
-    """Compare all suppliers that offer a specific product"""
+    """Compare all suppliers that offer a specific product (DEPRECATED - kept for backward compatibility)"""
     
-    # Verify product exists
-    product = db.query(Product).filter(Product.id == product_id).first()
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-    
-    # Get all supplier products for this product
+    # Get all supplier products for this product (no Product validation needed)
     supplier_products = db.query(SupplierProduct).options(
         joinedload(SupplierProduct.supplier)
     ).filter(
         SupplierProduct.product_id == product_id,
         SupplierProduct.is_active == True
     ).all()
+    
+    if not supplier_products:
+        raise HTTPException(status_code=404, detail="No supplier products found for this product")
     
     # Build supplier comparison
     suppliers_info = []
@@ -486,10 +474,13 @@ def compare_product_suppliers(product_id: int, db: Session = Depends(get_db)):
     # Sort by total cost
     suppliers_info.sort(key=lambda x: x["total_unit_cost"])
     
+    # Get product info from first supplier product
+    first_sp = supplier_products[0] if supplier_products else None
+    
     return {
-        "product_id": product.id,
-        "product_name": product.name,
-        "product_sku": product.sku,
+        "product_id": product_id,
+        "product_name": first_sp.name if first_sp else "Unknown",
+        "product_sku": first_sp.sku if first_sp else "N/A",
         "suppliers": suppliers_info
     }
 

@@ -83,7 +83,22 @@ class SupplierProduct(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     supplier_id = Column(Integer, ForeignKey("supplier.id"))
-    product_id = Column(Integer, ForeignKey("product.id", ondelete="CASCADE"))
+    product_id = Column(Integer, ForeignKey("product.id", ondelete="CASCADE"))  # Keep for now, will be removed later
+    
+    # ===== Product columns (NEW - copied from Product table) =====
+    name = Column(String, index=True, nullable=True)
+    description = Column(Text, nullable=True)
+    base_sku = Column(String(50), nullable=True)
+    sku = Column(String(100), nullable=True)
+    category_id = Column(Integer, ForeignKey("product_category.id"), nullable=True)
+    unit = Column(String(50), nullable=True)  # Store as string for flexibility
+    package_size = Column(Integer, nullable=True)
+    iva = Column(Boolean, default=True, nullable=True)
+    specifications = Column(JSON, nullable=True)
+    default_margin = Column(Numeric(5, 4), nullable=True)
+    # Note: No calculated_price columns - we'll calculate dynamically
+    
+    # ===== Supplier-specific columns (existing) =====
     supplier_sku = Column(String(100), nullable=True)
     cost = Column(Numeric(10, 2), nullable=True)
     currency = Column(String(3), default='MXN', nullable=False)  # Currency of cost and shipping costs (MXN or USD)
@@ -129,7 +144,8 @@ class KitItem(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     kit_id = Column(Integer, ForeignKey("kit.id", ondelete="CASCADE"))
-    product_id = Column(Integer, ForeignKey("product.id", ondelete="CASCADE"))
+    product_id = Column(Integer, ForeignKey("product.id", ondelete="CASCADE"))  # Keep for backward compatibility
+    supplier_product_id = Column(Integer, ForeignKey("supplier_product.id", ondelete="CASCADE"))  # NEW - primary reference
     quantity = Column(Integer, nullable=False, default=1)
     unit_price = Column(Numeric(10, 2), nullable=True)  # Optional override price
     notes = Column(Text, nullable=True)
@@ -137,7 +153,8 @@ class KitItem(Base):
 
     # Relationships
     kit = relationship("Kit", back_populates="items")
-    product = relationship("Product")
+    product = relationship("Product")  # Keep for backward compatibility
+    supplier_product = relationship("SupplierProduct")  # NEW - primary relationship
 
 class Balance(Base):
     __tablename__ = "balance"
@@ -161,8 +178,9 @@ class BalanceItem(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     balance_id = Column(Integer, ForeignKey("balance.id", ondelete="CASCADE"))
-    product_id = Column(Integer, ForeignKey("product.id", ondelete="CASCADE"))
-    supplier_id = Column(Integer, ForeignKey("supplier.id", ondelete="CASCADE"))
+    product_id = Column(Integer, ForeignKey("product.id", ondelete="CASCADE"))  # Keep for backward compatibility
+    supplier_id = Column(Integer, ForeignKey("supplier.id", ondelete="CASCADE"))  # Keep for backward compatibility
+    supplier_product_id = Column(Integer, ForeignKey("supplier_product.id", ondelete="CASCADE"))  # NEW - primary reference
     quantity = Column(Integer, nullable=False, default=1)
     unit_price = Column(Numeric(10, 2), nullable=False)
     total_cost = Column(Numeric(10, 2), nullable=False)  # (unit_price + calculated_shipping) * quantity
@@ -171,8 +189,9 @@ class BalanceItem(Base):
 
     # Relationships
     balance = relationship("Balance", back_populates="items")
-    product = relationship("Product")
-    supplier = relationship("Supplier")
+    product = relationship("Product")  # Keep for backward compatibility
+    supplier = relationship("Supplier")  # Keep for backward compatibility
+    supplier_product = relationship("SupplierProduct")  # NEW - primary relationship
 
 # Query model removed - RAG functionality moved to separate microservice
 

@@ -69,6 +69,47 @@ def get_lowest_supplier_cost(product_id: int, db: Session) -> Optional[Decimal]:
     return supplier_costs[0] if supplier_costs else None
 
 
+def get_lowest_supplier_cost_with_currency(product_id: int, db: Session) -> Optional[tuple[Decimal, str]]:
+    """
+    Get the lowest total cost (base cost + shipping) and currency from all active suppliers for a product
+    
+    Args:
+        product_id: The product ID
+        db: Database session
+    
+    Returns:
+        Tuple of (lowest_cost, currency) or None if no suppliers with cost
+    """
+    from sqlalchemy import func, case
+    
+    # Calculate total shipping cost based on method
+    total_shipping_cost = case(
+        (SupplierProduct.shipping_method == 'DIRECT', func.coalesce(SupplierProduct.shipping_cost_direct, 0)),
+        else_=(
+            func.coalesce(SupplierProduct.shipping_stage1_cost, 0) +
+            func.coalesce(SupplierProduct.shipping_stage2_cost, 0) +
+            func.coalesce(SupplierProduct.shipping_stage3_cost, 0) +
+            func.coalesce(SupplierProduct.shipping_stage4_cost, 0)
+        )
+    )
+    
+    supplier_costs = db.query(
+        (SupplierProduct.cost + total_shipping_cost).label('total_cost'),
+        SupplierProduct.currency
+    ).filter(
+        and_(
+            SupplierProduct.product_id == product_id,
+            SupplierProduct.is_active == True,
+            SupplierProduct.cost.isnot(None),
+            SupplierProduct.cost > 0
+        )
+    ).order_by((SupplierProduct.cost + total_shipping_cost).asc()).first()
+    
+    if supplier_costs:
+        return supplier_costs[0], supplier_costs[1]
+    return None
+
+
 def calculate_product_price_with_default_margin(product: Product, db: Session) -> Optional[Decimal]:
     """
     Calculate product price using default margin if price is null
@@ -95,6 +136,41 @@ def calculate_product_price_with_default_margin(product: Product, db: Session) -
     
     # Calculate price with margin
     return calculate_price_with_margin(lowest_cost, product.default_margin)
+
+
+def calculate_product_price_with_currency(product: Product, db: Session) -> Optional[tuple[Decimal, str]]:
+    """
+    Calculate product price with currency using default margin if price is null
+    
+    Args:
+        product: The Product object
+        db: Database session
+    
+    Returns:
+        Tuple of (calculated_price, currency) or None if calculation not possible
+    """
+    # If product already has a price, return it
+    if product.price is not None:
+        return None  # Don't override existing price
+    
+    # If no default margin, can't calculate
+    if product.default_margin is None:
+        return None
+    
+    # Get lowest supplier cost with currency
+    cost_currency = get_lowest_supplier_cost_with_currency(product.id, db)
+    if cost_currency is None:
+        return None
+    
+    lowest_cost, currency = cost_currency
+    
+    # Calculate price with margin
+    calculated_price = calculate_price_with_margin(lowest_cost, product.default_margin)
+    
+    if calculated_price is not None:
+        return calculated_price, currency
+    
+    return None
 
 
 def enrich_products_with_calculated_prices(products: List[Dict[str, Any]], db: Session) -> List[Dict[str, Any]]:

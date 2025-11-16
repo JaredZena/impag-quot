@@ -36,6 +36,7 @@ class QuotationResponse(BaseModel):
     suppliers: dict  # Dict[str, SupplierInfo] but Pydantic prefers dict
     products_processed: int
     supplier_products_created: int
+    supplier_product_ids: list  # List of created supplier product IDs for reassignment
     skus_generated: list
     supplier_detection: MultiSupplierDetectionInfo
     currency_info: dict  # Currency detection and conversion info
