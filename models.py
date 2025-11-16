@@ -194,7 +194,14 @@ class BalanceItem(Base):
     supplier = relationship("Supplier")  # Keep for backward compatibility
     supplier_product = relationship("SupplierProduct")  # NEW - primary relationship
 
-# Query model removed - RAG functionality moved to separate microservice
+# RAG Query tracking model
+class Query(Base):
+    __tablename__ = "query"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    query_text = Column(Text, nullable=False)
+    response_text = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class Conversation(Base):
     __tablename__ = "conversation"
