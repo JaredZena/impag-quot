@@ -219,6 +219,9 @@ def get_all_supplier_products(
             )
             query = query.order_by(similarity_score.desc())
         
+        # Calculate total count BEFORE pagination
+        total_count = query.count()
+        
         # Apply pagination
         supplier_products = query.offset(skip).limit(limit).all()
         
@@ -276,7 +279,7 @@ def get_all_supplier_products(
             "success": True,
             "data": {
                 "supplier_products": result,
-                "total": len(result)
+                "total": total_count
             }
         }
     except Exception as e:
