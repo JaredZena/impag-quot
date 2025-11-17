@@ -146,6 +146,7 @@ def get_all_supplier_products(
     product_id: Optional[int] = Query(None),
     is_active: Optional[bool] = Query(None),
     include_archived: bool = Query(False),
+    search: Optional[str] = Query(None, description="Search across product name, description, SKU, supplier SKU, and supplier name"),
     db: Session = Depends(get_db)
 ):
     """Get all supplier-product relationships"""
@@ -166,6 +167,57 @@ def get_all_supplier_products(
             query = query.filter(SupplierProduct.product_id == product_id)
         if is_active is not None:
             query = query.filter(SupplierProduct.is_active == is_active)
+        
+        # Apply search filter
+        if search:
+            # Normalize spaces for better fuzzy matching
+            normalized_search = func.regexp_replace(func.unaccent(search), r'\s+', '', 'g')
+            
+            # Normalize fields (handle NULL with COALESCE)
+            normalized_name = func.regexp_replace(func.unaccent(func.coalesce(SupplierProduct.name, '')), r'\s+', '', 'g')
+            normalized_description = func.regexp_replace(func.unaccent(func.coalesce(SupplierProduct.description, '')), r'\s+', '', 'g')
+            normalized_sku = func.regexp_replace(func.unaccent(func.coalesce(SupplierProduct.sku, '')), r'\s+', '', 'g')
+            normalized_supplier_sku = func.regexp_replace(func.unaccent(func.coalesce(SupplierProduct.supplier_sku, '')), r'\s+', '', 'g')
+            normalized_supplier_name = func.regexp_replace(func.unaccent(func.coalesce(Supplier.name, '')), r'\s+', '', 'g')
+            
+            # Exact matches (handle NULL with COALESCE)
+            name_exact = func.unaccent(func.coalesce(SupplierProduct.name, '')).ilike(func.unaccent(f"%{search}%"))
+            description_exact = func.unaccent(func.coalesce(SupplierProduct.description, '')).ilike(func.unaccent(f"%{search}%"))
+            sku_exact = func.unaccent(func.coalesce(SupplierProduct.sku, '')).ilike(func.unaccent(f"%{search}%"))
+            supplier_sku_exact = func.unaccent(func.coalesce(SupplierProduct.supplier_sku, '')).ilike(func.unaccent(f"%{search}%"))
+            supplier_name_exact = func.unaccent(func.coalesce(Supplier.name, '')).ilike(func.unaccent(f"%{search}%"))
+            
+            # Fuzzy matches with space normalization
+            name_fuzzy = func.similarity(normalized_name, normalized_search) > 0.2
+            description_fuzzy = func.similarity(normalized_description, normalized_search) > 0.2
+            sku_fuzzy = func.similarity(normalized_sku, normalized_search) > 0.2
+            supplier_sku_fuzzy = func.similarity(normalized_supplier_sku, normalized_search) > 0.2
+            supplier_name_fuzzy = func.similarity(normalized_supplier_name, normalized_search) > 0.2
+            
+            # Word similarity matches
+            name_word = func.word_similarity(normalized_search, normalized_name) > 0.2
+            description_word = func.word_similarity(normalized_search, normalized_description) > 0.2
+            sku_word = func.word_similarity(normalized_search, normalized_sku) > 0.2
+            supplier_sku_word = func.word_similarity(normalized_search, normalized_supplier_sku) > 0.2
+            supplier_name_word = func.word_similarity(normalized_search, normalized_supplier_name) > 0.2
+            
+            # Combine all search conditions
+            # Join Supplier using the relationship (SQLAlchemy will handle duplicate joins)
+            query = query.join(SupplierProduct.supplier).filter(
+                name_exact | description_exact | sku_exact | supplier_sku_exact | supplier_name_exact |
+                name_fuzzy | description_fuzzy | sku_fuzzy | supplier_sku_fuzzy | supplier_name_fuzzy |
+                name_word | description_word | sku_word | supplier_sku_word | supplier_name_word
+            )
+            
+            # Order by best similarity score (prioritize exact matches)
+            similarity_score = func.greatest(
+                case((name_exact, 1.0), else_=func.similarity(normalized_name, normalized_search)),
+                case((description_exact, 1.0), else_=func.similarity(normalized_description, normalized_search)),
+                case((sku_exact, 1.0), else_=func.similarity(normalized_sku, normalized_search)),
+                case((supplier_sku_exact, 1.0), else_=func.similarity(normalized_supplier_sku, normalized_search)),
+                case((supplier_name_exact, 1.0), else_=func.similarity(normalized_supplier_name, normalized_search))
+            )
+            query = query.order_by(similarity_score.desc())
         
         # Apply pagination
         supplier_products = query.offset(skip).limit(limit).all()
