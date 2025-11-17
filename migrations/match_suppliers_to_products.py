@@ -144,7 +144,7 @@ Do not include any explanation or additional text."""
             try:
                 response = client.messages.create(
                     model="claude-3-5-haiku-20241022",  # Using Haiku for speed and cost efficiency
-                    max_tokens=50,
+                    max_tokens=5000,
                     temperature=0,
                     messages=[{"role": "user", "content": prompt}]
                 )

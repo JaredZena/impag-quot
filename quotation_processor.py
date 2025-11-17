@@ -191,7 +191,7 @@ class QuotationProcessor:
             # Create the message for Claude
             message = self.client.messages.create(
                 model=self.model,
-                max_tokens=4000,
+                max_tokens=20000,
                 temperature=0,
                 messages=[
                     {
@@ -627,7 +627,7 @@ Respond only with the JSON object, no extra explanation.""".replace(
             # Try with full token limit first
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=4000,
+                max_tokens=20000,
                 temperature=0,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -671,7 +671,7 @@ Respond only with the JSON object, no extra explanation.""".replace(
                         try:
                             retry_response = self.client.messages.create(
                                 model=self.model,
-                                max_tokens=2000,  # Reduced token limit
+                                max_tokens=5000,  # Reduced token limit
                                 temperature=0,
                                 messages=[{"role": "user", "content": prompt}]
                             )
