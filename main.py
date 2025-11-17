@@ -1,7 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-from rag_system_moved.rag_system import query_rag_system_with_history
 from sqlalchemy.orm import Session
 from models import get_db, Query, Conversation, ConversationMessage
 from typing import List, Optional
@@ -14,6 +13,18 @@ from routes.categories import router as categories_router
 from routes.kits import router as kits_router
 from routes.balance import router as balance_router
 from auth import verify_google_token
+
+# Lazy import for RAG system to ensure route registration even if import fails
+def get_rag_query_function():
+    """Lazy import of RAG system to handle import errors gracefully."""
+    try:
+        from rag_system_moved.rag_system import query_rag_system_with_history
+        return query_rag_system_with_history
+    except ImportError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"RAG system not available: {str(e)}. Please check that all dependencies are installed."
+        )
 
 app = FastAPI()
 
@@ -157,6 +168,9 @@ async def delete_conversation(conversation_id: int, db: Session = Depends(get_db
 
 @app.post("/query")
 async def query(request: QueryRequest, db: Session = Depends(get_db)):
+    # Lazy import to ensure route is always registered
+    query_rag_system_with_history = get_rag_query_function()
+    
     # Convert Pydantic models to dicts for RAG system
     chat_history = [{"role": msg.role, "content": msg.content} for msg in (request.messages or [])]
     

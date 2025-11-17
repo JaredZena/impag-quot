@@ -97,9 +97,6 @@ uploads/
 .tox/
 .pytest_cache/
 
-# RAG system moved to separate microservice
-rag_system_moved/
-
 # Optimization files (not needed in deployment)
 requirements-*.txt
 Dockerfile.*
