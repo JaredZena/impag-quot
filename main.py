@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from models import get_db, Query, Conversation, ConversationMessage
+from models import get_db, Query, Conversation, ConversationMessage, Quotation
 from typing import List, Optional
 from datetime import datetime
 from routes import suppliers, products, quotations
@@ -12,6 +12,7 @@ from routes.quotations import router as quotations_router
 from routes.categories import router as categories_router
 from routes.kits import router as kits_router
 from routes.balance import router as balance_router
+from routes.quotation_history import router as quotation_history_router
 from auth import verify_google_token
 
 # Lazy import for RAG system to ensure route registration even if import fails
@@ -48,6 +49,7 @@ app.include_router(quotations_router)
 app.include_router(categories_router)
 app.include_router(kits_router)
 app.include_router(balance_router)
+app.include_router(quotation_history_router)
 
 class Message(BaseModel):
     role: str  # 'user' or 'assistant'
@@ -57,6 +59,8 @@ class QueryRequest(BaseModel):
     query: str
     messages: Optional[List[Message]] = []  # Optional chat history for conversation context
     conversation_id: Optional[int] = None  # Optional conversation ID to save messages
+    customer_name: Optional[str] = None  # Customer name for quotation
+    customer_location: Optional[str] = None  # Customer location for quotation
 
 class QueryResponse(BaseModel):
     id: int
@@ -177,7 +181,9 @@ async def query(request: QueryRequest, db: Session = Depends(get_db)):
     # Get response from RAG system with conversation context
     response = query_rag_system_with_history(
         query=request.query,
-        chat_history=chat_history
+        chat_history=chat_history,
+        customer_name=request.customer_name,
+        customer_location=request.customer_location
     )
     
     # Save query and response to database

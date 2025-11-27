@@ -3,7 +3,7 @@ from .pinecone_setup import index
 from .claude_llm_setup import llm
 from models import Product, Supplier, SupplierProduct, SessionLocal
 
-def get_products_from_db(fallback_margin=30.0):
+def get_products_from_db(fallback_margin=30.0, include_internal_details=False):
     """
     Fetch products from supplier-product table and calculate prices with margin.
     Uses SupplierProduct.cost + SupplierProduct.default_margin to calculate final prices.
@@ -11,6 +11,7 @@ def get_products_from_db(fallback_margin=30.0):
     
     Args:
         fallback_margin: Default margin percentage if default_margin is not set (default: 30%)
+        include_internal_details: If True, includes supplier cost and margin in the output
     """
     db = SessionLocal()
     try:
@@ -39,12 +40,22 @@ def get_products_from_db(fallback_margin=30.0):
                 final_price = float(sp.cost) * margin_multiplier
                 
                 price_str = f"${final_price:,.2f} MXN"
+                
+                # Include internal details if requested
+                if include_internal_details:
+                    cost_str = f"${float(sp.cost):,.2f} {sp.currency or 'MXN'}"
+                    margin_str = f"{margin_percentage:.1f}%"
+                    line = f"{product.name} | {supplier.name} | Costo: {cost_str} | Margen: {margin_str} | Precio Final: {price_str} | {product.unit.value} | SKU: {product.sku}"
+                else:
+                    # Format: Product | Supplier | Price (with margin applied) | Unit | SKU
+                    line = f"{product.name} | {supplier.name} | {price_str} | {product.unit.value} | SKU: {product.sku}"
             else:
                 # No cost available - can't calculate price
                 price_str = "Consultar"
-            
-            # Format: Product | Supplier | Price (with margin applied) | Unit | SKU
-            line = f"{product.name} | {supplier.name} | {price_str} | {product.unit.value} | SKU: {product.sku}"
+                if include_internal_details:
+                    line = f"{product.name} | {supplier.name} | Costo: Consultar | Margen: N/A | Precio Final: {price_str} | {product.unit.value} | SKU: {product.sku}"
+                else:
+                    line = f"{product.name} | {supplier.name} | {price_str} | {product.unit.value} | SKU: {product.sku}"
             
             # Add specifications if available
             if product.specifications:
@@ -54,6 +65,91 @@ def get_products_from_db(fallback_margin=30.0):
             product_lines.append(line)
         
         return "\n".join(product_lines)
+    finally:
+        db.close()
+
+def get_relevant_products(query_embedding, limit=30, include_internal_details=False, fallback_margin=30.0):
+    """
+    Fetch relevant products using vector similarity search.
+    Prioritizes database pricing (SupplierProduct). 
+    """
+    db = SessionLocal()
+    try:
+        # Semantic search using cosine distance
+        supplier_products = db.query(SupplierProduct).join(Product).join(Supplier).filter(
+            SupplierProduct.is_active == True,
+            SupplierProduct.embedding != None
+        ).order_by(
+            SupplierProduct.embedding.cosine_distance(query_embedding)
+        ).limit(limit).all()
+        
+        # Create compact product list
+        product_lines = []
+        for sp in supplier_products:
+            product = sp.product
+            supplier = sp.supplier
+            
+            # Calculate final price from supplier cost + margin
+            if sp.cost:
+                # Use product's default_margin, or fallback if not set
+                # NOTE: default_margin is stored as DECIMAL (0.20 = 20%, not as percentage 20.00)
+                margin_decimal = float(sp.default_margin) if sp.default_margin else (fallback_margin / 100)
+                
+                # Convert to percentage for display
+                margin_percentage = margin_decimal * 100
+                
+                # IMPORTANT: Enforce minimum margin of 15% to prevent selling at cost
+                MIN_MARGIN = 15.0
+                margin_source = "DB"
+                if margin_percentage < MIN_MARGIN:
+                    margin_decimal = fallback_margin / 100
+                    margin_percentage = fallback_margin
+                    margin_source = f"FALLBACK (DB margin {float(sp.default_margin) * 100:.1f}% too low)"
+                
+                # Calculate: cost * (1 + margin_decimal)
+                # Example: $100 * (1 + 0.20) = $120
+                final_price = float(sp.cost) * (1 + margin_decimal)
+                
+                price_str = f"${final_price:,.2f} MXN"
+                
+                # Include internal details if requested
+                if include_internal_details:
+                    cost_str = f"${float(sp.cost):,.2f} {sp.currency or 'MXN'}"
+                    margin_str = f"{margin_percentage:.1f}% ({margin_source})"
+                    # Internal view: Detailed specs + commercial info + SOURCE
+                    specs_str = ""
+                    if product.specifications:
+                        specs_str = ", ".join([f"{k}: {v}" for k, v in product.specifications.items()])
+                    
+                    # Explicitly state source is DATABASE
+                    line = f"SOURCE: DATABASE (SupplierProduct ID: {sp.id}) | {product.name} | {supplier.name} | Costo: {cost_str} | Margen: {margin_str} | Precio Final: {price_str} | {product.unit.value} | SKU: {product.sku} | Specs: {specs_str}"
+                else:
+                    # Customer view: Simplified for quotation generation
+                    # We still provide specs to the AI so it can describe the product, 
+                    # but we'll instruct the AI to be concise in the prompt.
+                    line = f"PRODUCT: {product.name} | Precio: {price_str} | Unidad: {product.unit.value} | SKU: {product.sku}"
+                    if product.specifications:
+                        # Filter for key specs only for customer context if needed, 
+                        # but usually better to give AI context and tell it to summarize.
+                        specs = ", ".join([f"{k}: {v}" for k, v in product.specifications.items()])
+                        line += f" | Specs: {specs}"
+            else:
+                # No cost available - fallback to "Consultar"
+                price_str = "Consultar"
+                if include_internal_details:
+                    line = f"SOURCE: DATABASE (SupplierProduct ID: {sp.id}) | {product.name} | {supplier.name} | Costo: Consultar | Margen: N/A | Precio Final: {price_str} | {product.unit.value} | SKU: {product.sku}"
+                else:
+                    line = f"PRODUCT: {product.name} | Precio: {price_str} | Unidad: {product.unit.value} | SKU: {product.sku}"
+            
+            product_lines.append(line)
+        
+        if not product_lines:
+            return "No matching products found in catalog."
+            
+        return "\n".join(product_lines)
+    except Exception as e:
+        print(f"Error in vector search: {e}")
+        return "" # Return empty if fails, so we rely on Pinecone history
     finally:
         db.close()
 
@@ -71,12 +167,12 @@ def get_category(product_name):
 
 
 def query_rag_system(query):
-    """Generate a response using Shopify product search and historical context."""
+    """Generate a response using database product search and historical context."""
     return query_rag_system_with_history(query, chat_history=None)
 
 
-def query_rag_system_with_history(query, chat_history=None):
-    """Generate a response using Shopify product search, historical context, and conversation history."""
+def query_rag_system_with_history(query, chat_history=None, customer_name=None, customer_location=None):
+    """Generate a response using database product search, historical context, and conversation history."""
     print(f'🔹 Query Received: {query}')
     
     if chat_history is None:
@@ -89,8 +185,9 @@ def query_rag_system_with_history(query, chat_history=None):
     results = index.query(vector=query_embedding, top_k=7, include_metadata=True)
     context = " ".join([match["metadata"]["text"] for match in results["matches"]])
 
-    # Step 1: Get products from database (replaces Shopify API)
-    matched_products = get_products_from_db()
+    # Step 1: Get products from database using semantic search
+    matched_products = get_relevant_products(query_embedding)
+    matched_products_internal = get_relevant_products(query_embedding, include_internal_details=True)
     
     # Step 2: Format chat history for prompt (last 4 messages)
     chat_history_text = ""
@@ -104,10 +201,9 @@ def query_rag_system_with_history(query, chat_history=None):
         chat_history_text += "\n"
 
     # Step 3: Construct the final prompt with conversation awareness
-    prompt = (f"Genera una cotización detallada en formato markdown basada en el catálogo de productos, cotizaciones previas, "
-      f"y características y precios de productos disponibles en el contexto. "
+    prompt = (f"Genera DOS cotizaciones en formato markdown basada en los productos de la base de datos y cotizaciones previas. "
       f"Incluye especificaciones completas de los productos y precios disponibles, "
-      f"considerando tanto los productos listados en la tienda online como aquellos que han sido cotizados previamente. "
+      f"utilizando EXCLUSIVAMENTE información de la base de datos o de cotizaciones históricas. "
       
       f"{chat_history_text}"
       
@@ -186,8 +282,87 @@ def query_rag_system_with_history(query, chat_history=None):
 
       f"📌 **Nota:** Los productos agrícolas, insumos agrícolas y equipo técnico agrícola están exentos de IVA en México.\n\n"
       
+      f"**📋 FORMATO DE RESPUESTA - DEBES GENERAR DOS COTIZACIONES:**\n\n"
+      f"Tu respuesta DEBE contener DOS cotizaciones separadas con el siguiente formato:\n\n"
+      f"```\n"
+      f"<!-- INTERNAL_QUOTATION_START -->\n"
+      f"[COTIZACIÓN INTERNA DETALLADA AQUÍ]\n"
+      f"<!-- INTERNAL_QUOTATION_END -->\n\n"
+      f"<!-- CUSTOMER_QUOTATION_START -->\n"
+      f"[COTIZACIÓN PARA CLIENTE AQUÍ]\n"
+      f"<!-- CUSTOMER_QUOTATION_END -->\n"
+      f"```\n\n"
+      
+      f"**COTIZACIÓN INTERNA (para uso interno de IMPAG):**\n"
+      f"- Incluye TODOS los detalles: proveedor, costo unitario, margen aplicado, precio final\n"
+      f"- **FUENTE DE DATOS:** Debes indicar explícitamente de dónde obtuviste la información de cada producto.\n"
+      f"  * Si viene del catálogo actual, indica: 'Fuente: Base de Datos (ID: X)'\n"
+      f"  * Si viene de una cotización histórica, indica: 'Fuente: Histórico (Cotización previa)'\n"
+      f"- Incluye costos de instalación si aplican\n"
+      f"- Incluye notas internas (ej: 'Contactar proveedor para precio actualizado', 'Verificar disponibilidad', etc.)\n"
+      f"- Incluye información de envío y logística detallada\n"
+      f"- Tabla con columnas: Descripción | Fuente | Proveedor | Costo Unitario | Margen | Precio Unitario | Cantidad | Importe\n"
+      f"- Formato de tabla interna:\n"
+      f"| Descripción | Fuente | Proveedor | Costo Unitario | Margen | Precio Unitario | Cantidad | Importe |\n"
+      f"|:---|:---|:---|:---:|:---:|:---:|:---:|:---:|\n"
+      f"| Producto | Base de Datos | Proveedor ABC | $1,000.00 MXN | 30% | $1,300.00 MXN | 28 | $36,400.00 MXN |\n\n"
+      
+      f"**COTIZACIÓN PARA CLIENTE (lista para compartir):**\n"
+      f"- Formato limpio y profesional, sin información interna\n"
+      f"- NO incluir proveedor, costo unitario, ni margen\n"
+      f"- Solo incluir: Descripción, Unidad, Cantidad, Precio Unitario, Importe\n"
+      f"- En la columna CONCEPTO, incluir el nombre del producto en la primera línea.\n"
+      f"- **IMPORTANTE:** NO incluir especificaciones técnicas detalladas en la cotización al cliente a menos que sean críticas para distinguir el producto (ej. dimensiones básicas). El cliente final no necesita saber detalles técnicos complejos.\n"
+      f"- Formato de tabla cliente (5 columnas con encabezado azul):\n"
+      f"| CONCEPTO | UNIDAD | CANTIDAD | P. UNITARIO | IMPORTE |\n"
+      f"|:---|:---:|:---:|:---:|:---:|\n"
+      f"| Nombre del producto (Dimensiones básicas) | ROLLO | 10 | $63,500.00 MXN | $635,000.00 MXN |\n"
+      f"- Incluir fila de TOTAL con fondo azul al final de la tabla\n"
+      f"\n"
+      f"**ESTRUCTURA DESPUÉS DE LA TABLA:**\n"
+      f"1. **Monto en palabras** (en una sola línea, sin viñetas):\n"
+      f"   (SEISCIENTOS TREINTA Y CINCO MIL PESOS 00/100 MXN)\n"
+      f"\n"
+      f"2. **Sección de Notas** (usar ## Nota: como encabezado):\n"
+      f"   - Cotización vigente durante 3 días hábiles\n"
+      f"   - Condiciones de pago: 100% anticipo\n"
+      f"   - Tiempos de entrega: 3-5 días hábiles una vez confirmado el pago\n"
+      f"   - Ubicación de entrega: {customer_location if customer_location else 'A convenir'}\n"
+      f"   - Requisitos de descarga: Cliente proporciona montacargas y personal\n"
+      f"   - Incluye envío a ocurre o domicilio según cobertura\n"
+      f"   - Maniobras de descarga por cuenta del cliente\n"
+      f"   - Uso del CFDI: Insumos agrícolas (exento de IVA)\n"
+      f"\n"
+      f"3. **Sección de Datos Bancarios** (usar ## DATOS BANCARIOS como encabezado):\n"
+      f"   DATOS BANCARIOS IMPAG TECH SAPI DE C V\n"
+      f"   BBVA BANCOMER\n"
+      f"   CUENTA CLABE: 012 180 001193473561\n"
+      f"   NUMERO DE CUENTA: 011 934 7356\n"
+      f"\n"
+      f"4. **Firma** (sin encabezado, solo el texto):\n"
+      f"   Atentamente\n"
+      f"   Juan Daniel Betancourt González\n"
+      f"   Director de proyectos\n"
+      f"\n"
+      f"**REGLAS CRÍTICAS PARA EVITAR DUPLICACIÓN:**\n"
+      f"- NO repetir el monto en palabras en la sección de Notas\n"
+      f"- NO repetir los datos bancarios en la sección de Notas\n"
+      f"- NO incluir la firma en la sección de Notas\n"
+      f"- Cada sección debe aparecer UNA SOLA VEZ en el orden especificado\n"
+      f"- Las notas deben ser SOLO las 8 viñetas listadas arriba, nada más\n"
+      f"\n"
+      f"**FORMATO PARA PDF:**\n"
+      f"- La tabla debe caber en una página A4 (210mm de ancho)\n"
+      f"- Usar nombres de productos concisos en la columna CONCEPTO\n"
+      f"- Si el nombre es muy largo, abreviarlo manteniendo claridad\n"
+      
       f"**📄 Contexto adicional (productos previamente cotizados):**\n{context}\n\n"
-      f"**📦 Catálogo de productos disponibles:**\n{matched_products}\n\n"
+      f"**📦 Catálogo de productos disponibles (para cliente):**\n{matched_products}\n\n"
+      f"**📦 Catálogo de productos con detalles internos (para uso interno):**\n{matched_products_internal}\n\n"
+      
+      f"**👤 Información del Cliente:**\n"
+      f"- Nombre: {customer_name if customer_name else 'A quien corresponda'}\n"
+      f"- Ubicación: {customer_location if customer_location else 'No especificada'}\n\n"
       
       f"**🔍 Consulta actual:** {query}")
 

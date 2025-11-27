@@ -5,6 +5,7 @@ from datetime import datetime
 from config import database_url
 from urllib.parse import urlparse, parse_qs, urlencode
 from sqlalchemy.sql import func
+from pgvector.sqlalchemy import Vector
 import enum
 
 Base = declarative_base()
@@ -33,6 +34,7 @@ class Supplier(Base):
     address = Column(String, nullable=True)
     website_url = Column(String, nullable=True)  # Website URL of the supplier
     embedded = Column(Boolean, default=False, nullable=False)  # Whether this supplier has been embedded to embeddings database
+    embedding = Column(Vector(1536)) # Embedding vector for semantic search
     archived_at = Column(DateTime(timezone=True), nullable=True)  # Soft delete timestamp
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_updated = Column(DateTime(timezone=True), onupdate=func.now())
@@ -114,6 +116,7 @@ class SupplierProduct(Base):
     shipping_stage4_cost = Column(Numeric(10, 2), default=0.00)  # Stage 4 shipping cost
     shipping_notes = Column(Text, nullable=True)  # Shipping logistics notes
     embedded = Column(Boolean, default=False, nullable=False)  # Whether this supplier product has been embedded to embeddings database
+    embedding = Column(Vector(1536)) # Embedding vector for semantic search
     is_active = Column(Boolean, default=True)
     notes = Column(Text, nullable=True)
     archived_at = Column(DateTime(timezone=True), nullable=True)  # Soft delete timestamp
@@ -225,6 +228,23 @@ class ConversationMessage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     conversation = relationship("Conversation", back_populates="messages")
+
+class Quotation(Base):
+    __tablename__ = "quotation"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, nullable=False, index=True)  # Google user ID (sub)
+    user_email = Column(String, nullable=False, index=True)  # User email for easier querying
+    user_query = Column(Text, nullable=False)  # Original query that generated the quotation
+    title = Column(String(500), nullable=True)  # Optional title (can be auto-generated)
+    customer_name = Column(String(200), nullable=True)  # Customer name
+    customer_location = Column(String(200), nullable=True)  # Customer location
+    quotation_id = Column(String(50), nullable=True)  # Generated quotation ID
+    internal_quotation = Column(Text, nullable=False)  # Internal quotation markdown
+    customer_quotation = Column(Text, nullable=False)  # Customer-facing quotation markdown
+    raw_response = Column(Text, nullable=True)  # Full raw response from AI
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 # Parse the database URL to get the endpoint ID
 parsed_url = urlparse(database_url)
