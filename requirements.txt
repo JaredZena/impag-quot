@@ -16,6 +16,12 @@ google-auth-httplib2==0.1.1
 
 # AI/ML
 anthropic>=0.3.0
+openai>=1.0.0
+
+# RAG System Dependencies
+pinecone>=5.0.0
+llama-index-core>=0.12.0
+llama-index-llms-anthropic>=0.3.0
 
 # PDF Processing
 PyMuPDF>=1.19.0
