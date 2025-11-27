@@ -243,6 +243,7 @@ class Quotation(Base):
     internal_quotation = Column(Text, nullable=False)  # Internal quotation markdown
     customer_quotation = Column(Text, nullable=False)  # Customer-facing quotation markdown
     raw_response = Column(Text, nullable=True)  # Full raw response from AI
+    archived_at = Column(DateTime(timezone=True), nullable=True)  # Soft delete timestamp
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

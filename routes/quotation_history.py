@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
@@ -78,10 +79,10 @@ async def get_quotations(
     user: dict = Depends(verify_google_token)
 ):
     """
-    Get all quotations for the authenticated user, ordered by most recent.
+    Get all non-archived quotations from all users, ordered by most recent.
     """
     quotations = db.query(Quotation).filter(
-        Quotation.user_id == user["user_id"]
+        Quotation.archived_at == None
     ).order_by(Quotation.created_at.desc()).offset(skip).limit(limit).all()
     
     return quotations
@@ -93,11 +94,12 @@ async def get_quotation(
     user: dict = Depends(verify_google_token)
 ):
     """
-    Get a specific quotation by ID (only if it belongs to the authenticated user).
+    Get a specific quotation by ID (accessible by all authenticated users).
+    Excludes archived quotations.
     """
     quotation = db.query(Quotation).filter(
         Quotation.id == quotation_id,
-        Quotation.user_id == user["user_id"]
+        Quotation.archived_at == None
     ).first()
     
     if not quotation:
@@ -112,18 +114,20 @@ async def delete_quotation(
     user: dict = Depends(verify_google_token)
 ):
     """
-    Delete a quotation (only if it belongs to the authenticated user).
+    Archive a quotation (soft delete) - accessible by all authenticated users.
     """
     quotation = db.query(Quotation).filter(
         Quotation.id == quotation_id,
-        Quotation.user_id == user["user_id"]
+        Quotation.archived_at == None
     ).first()
     
     if not quotation:
         raise HTTPException(status_code=404, detail="Quotation not found")
     
-    db.delete(quotation)
+    # Soft delete: set archived_at timestamp
+    quotation.archived_at = func.now()
     db.commit()
+    db.refresh(quotation)
     
-    return {"message": "Quotation deleted successfully"}
+    return {"message": "Quotation archived successfully"}
 
