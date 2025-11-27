@@ -39,3 +39,4 @@ WHERE table_name = 'quotation'
   AND column_name IN ('customer_name', 'customer_location', 'quotation_id');
 
 
+
