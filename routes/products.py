@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, case
+from sqlalchemy import func, case, false, literal
 from typing import List, Optional, Any
 from pydantic import BaseModel
 from datetime import datetime
@@ -187,26 +187,41 @@ def get_all_supplier_products(
             supplier_sku_exact = func.unaccent(func.coalesce(SupplierProduct.supplier_sku, '')).ilike(func.unaccent(f"%{search}%"))
             supplier_name_exact = func.unaccent(func.coalesce(Supplier.name, '')).ilike(func.unaccent(f"%{search}%"))
             
-            # Fuzzy matches with space normalization
-            name_fuzzy = func.similarity(normalized_name, normalized_search) > 0.2
-            description_fuzzy = func.similarity(normalized_description, normalized_search) > 0.2
-            sku_fuzzy = func.similarity(normalized_sku, normalized_search) > 0.2
-            supplier_sku_fuzzy = func.similarity(normalized_supplier_sku, normalized_search) > 0.2
-            supplier_name_fuzzy = func.similarity(normalized_supplier_name, normalized_search) > 0.2
+            # Fuzzy matches with space normalization - Increased threshold for stricter matching
+            name_fuzzy = func.similarity(normalized_name, normalized_search) > 0.5
+            description_fuzzy = func.similarity(normalized_description, normalized_search) > 0.5
+            sku_fuzzy = func.similarity(normalized_sku, normalized_search) > 0.5
+            supplier_sku_fuzzy = func.similarity(normalized_supplier_sku, normalized_search) > 0.5
+            supplier_name_fuzzy = func.similarity(normalized_supplier_name, normalized_search) > 0.5
             
-            # Word similarity matches
-            name_word = func.word_similarity(normalized_search, normalized_name) > 0.2
-            description_word = func.word_similarity(normalized_search, normalized_description) > 0.2
-            sku_word = func.word_similarity(normalized_search, normalized_sku) > 0.2
-            supplier_sku_word = func.word_similarity(normalized_search, normalized_supplier_sku) > 0.2
-            supplier_name_word = func.word_similarity(normalized_search, normalized_supplier_name) > 0.2
+            # Word similarity matches - Increased threshold for stricter matching
+            name_word = func.word_similarity(normalized_search, normalized_name) > 0.5
+            description_word = func.word_similarity(normalized_search, normalized_description) > 0.5
+            sku_word = func.word_similarity(normalized_search, normalized_sku) > 0.5
+            supplier_sku_word = func.word_similarity(normalized_search, normalized_supplier_sku) > 0.5
+            supplier_name_word = func.word_similarity(normalized_search, normalized_supplier_name) > 0.5
             
             # Combine all search conditions
             # Join Supplier using the relationship (SQLAlchemy will handle duplicate joins)
+            
+            # Semantic search with embeddings
+            try:
+                from rag_system_moved.embeddings import generate_embeddings
+                query_embedding = generate_embeddings([search])[0]
+                # Cosine distance is 0 for identical, 1 for opposite. We want similarity (1 for identical).
+                # 1 - distance = similarity
+                vector_similarity = 1 - SupplierProduct.embedding.cosine_distance(query_embedding)
+                vector_match = vector_similarity > 0.90   # Threshold for semantic match
+            except Exception as e:
+                print(f"Embedding generation failed: {e}")
+                vector_similarity = literal(0)
+                vector_match = false()
+
             query = query.join(SupplierProduct.supplier).filter(
                 name_exact | description_exact | sku_exact | supplier_sku_exact | supplier_name_exact |
                 name_fuzzy | description_fuzzy | sku_fuzzy | supplier_sku_fuzzy | supplier_name_fuzzy |
-                name_word | description_word | sku_word | supplier_sku_word | supplier_name_word
+                name_word | description_word | sku_word | supplier_sku_word | supplier_name_word |
+                vector_match
             )
             
             # Order by best similarity score (prioritize exact matches)
@@ -215,7 +230,8 @@ def get_all_supplier_products(
                 case((description_exact, 1.0), else_=func.similarity(normalized_description, normalized_search)),
                 case((sku_exact, 1.0), else_=func.similarity(normalized_sku, normalized_search)),
                 case((supplier_sku_exact, 1.0), else_=func.similarity(normalized_supplier_sku, normalized_search)),
-                case((supplier_name_exact, 1.0), else_=func.similarity(normalized_supplier_name, normalized_search))
+                case((supplier_name_exact, 1.0), else_=func.similarity(normalized_supplier_name, normalized_search)),
+                vector_similarity
             )
             query = query.order_by(similarity_score.desc())
         
