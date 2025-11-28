@@ -6,7 +6,7 @@ from models import Product, Supplier, SupplierProduct, SessionLocal
 def get_products_from_db(fallback_margin=30.0, include_internal_details=False):
     """
     Fetch products from supplier-product table and calculate prices with margin.
-    Uses SupplierProduct.cost + SupplierProduct.default_margin to calculate final prices.
+    Uses (SupplierProduct.cost + Shipping) + SupplierProduct.default_margin to calculate final prices.
     Product table is deprecated - all pricing comes from SupplierProduct.
     
     Args:
@@ -29,23 +29,40 @@ def get_products_from_db(fallback_margin=30.0, include_internal_details=False):
             product = sp.product
             supplier = sp.supplier
             
-            # Calculate final price from supplier cost + margin
+            # Calculate final price from supplier cost + shipping + margin
             if sp.cost:
+                # Calculate shipping (Direct + Stages 1-4)
+                shipping_total = (
+                    float(sp.shipping_cost_direct or 0) + 
+                    float(sp.shipping_stage1_cost or 0) + 
+                    float(sp.shipping_stage2_cost or 0) + 
+                    float(sp.shipping_stage3_cost or 0) + 
+                    float(sp.shipping_stage4_cost or 0)
+                )
+
                 # Use product's default_margin, or fallback if not set
                 margin_percentage = float(sp.default_margin) if sp.default_margin else fallback_margin
                 
-                # Calculate: cost * (1 + margin/100)
-                # Example: $1000 * (1 + 30/100) = $1000 * 1.30 = $1300
+                # Calculate Basis: Cost + Shipping
+                cost_basis = float(sp.cost) + shipping_total
+
+                # Calculate: cost_basis * (1 + margin/100)
                 margin_multiplier = 1 + (margin_percentage / 100)
-                final_price = float(sp.cost) * margin_multiplier
+                final_price = cost_basis * margin_multiplier
                 
                 price_str = f"${final_price:,.2f} MXN"
                 
                 # Include internal details if requested
                 if include_internal_details:
                     cost_str = f"${float(sp.cost):,.2f} {sp.currency or 'MXN'}"
+                    shipping_str = f"${shipping_total:,.2f}"
+                    
+                    shipping_warning = ""
+                    if shipping_total == 0:
+                        shipping_warning = " ⚠️ VERIFICAR ENVÍO (Costo $0.00)"
+                    
                     margin_str = f"{margin_percentage:.1f}%"
-                    line = f"{product.name} | {supplier.name} | Costo: {cost_str} | Margen: {margin_str} | Precio Final: {price_str} | {product.unit.value} | SKU: {product.sku}"
+                    line = f"{product.name} | {supplier.name} | Costo Base: {cost_str} | Envío: {shipping_str}{shipping_warning} | Costo Total: ${cost_basis:,.2f} | Margen: {margin_str} | Precio Final: {price_str} | {product.unit.value} | SKU: {product.sku}"
                 else:
                     # Format: Product | Supplier | Price (with margin applied) | Unit | SKU
                     line = f"{product.name} | {supplier.name} | {price_str} | {product.unit.value} | SKU: {product.sku}"
@@ -89,8 +106,17 @@ def get_relevant_products(query_embedding, limit=30, include_internal_details=Fa
             product = sp.product
             supplier = sp.supplier
             
-            # Calculate final price from supplier cost + margin
+            # Calculate final price from supplier cost + shipping + margin
             if sp.cost:
+                # Calculate shipping (Direct + Stages 1-4)
+                shipping_total = (
+                    float(sp.shipping_cost_direct or 0) + 
+                    float(sp.shipping_stage1_cost or 0) + 
+                    float(sp.shipping_stage2_cost or 0) + 
+                    float(sp.shipping_stage3_cost or 0) + 
+                    float(sp.shipping_stage4_cost or 0)
+                )
+
                 # Use product's default_margin, or fallback if not set
                 # NOTE: default_margin is stored as DECIMAL (0.20 = 20%, not as percentage 20.00)
                 margin_decimal = float(sp.default_margin) if sp.default_margin else (fallback_margin / 100)
@@ -106,15 +132,23 @@ def get_relevant_products(query_embedding, limit=30, include_internal_details=Fa
                     margin_percentage = fallback_margin
                     margin_source = f"FALLBACK (DB margin {float(sp.default_margin) * 100:.1f}% too low)"
                 
-                # Calculate: cost * (1 + margin_decimal)
-                # Example: $100 * (1 + 0.20) = $120
-                final_price = float(sp.cost) * (1 + margin_decimal)
+                # Calculate Basis: Cost + Shipping
+                cost_basis = float(sp.cost) + shipping_total
+
+                # Calculate: cost_basis * (1 + margin_decimal)
+                final_price = cost_basis * (1 + margin_decimal)
                 
                 price_str = f"${final_price:,.2f} MXN"
                 
                 # Include internal details if requested
                 if include_internal_details:
                     cost_str = f"${float(sp.cost):,.2f} {sp.currency or 'MXN'}"
+                    shipping_str = f"${shipping_total:,.2f}"
+                    
+                    shipping_warning = ""
+                    if shipping_total == 0:
+                        shipping_warning = " ⚠️ VERIFICAR ENVÍO (Costo $0.00)"
+
                     margin_str = f"{margin_percentage:.1f}% ({margin_source})"
                     # Internal view: Detailed specs + commercial info + SOURCE
                     specs_str = ""
@@ -122,7 +156,7 @@ def get_relevant_products(query_embedding, limit=30, include_internal_details=Fa
                         specs_str = ", ".join([f"{k}: {v}" for k, v in product.specifications.items()])
                     
                     # Explicitly state source is DATABASE
-                    line = f"SOURCE: DATABASE (SupplierProduct ID: {sp.id}) | {product.name} | {supplier.name} | Costo: {cost_str} | Margen: {margin_str} | Precio Final: {price_str} | {product.unit.value} | SKU: {product.sku} | Specs: {specs_str}"
+                    line = f"SOURCE: DATABASE (SupplierProduct ID: {sp.id}) | {product.name} | {supplier.name} | Costo Base: {cost_str} | Envío: {shipping_str}{shipping_warning} | Costo Total: ${cost_basis:,.2f} | Margen: {margin_str} | Precio Final: {price_str} | {product.unit.value} | SKU: {product.sku} | Specs: {specs_str}"
                 else:
                     # Customer view: Simplified for quotation generation
                     # We still provide specs to the AI so it can describe the product, 
@@ -171,6 +205,42 @@ def query_rag_system(query):
     return query_rag_system_with_history(query, chat_history=None)
 
 
+def analyze_request_and_calculate(query, context):
+    """
+    Analyzes the user request to determine if a calculation is needed.
+    If so, performs the calculation using the provided context (historical quotations).
+    Also extracts relevant commercial conditions (notes) from historical context.
+    """
+    print(f'🔹 Analyzing Request & Calculating: {query}')
+    
+    analysis_prompt = (
+        f"Actúa como un experto ingeniero agrónomo y matemático. Analiza la siguiente solicitud de cotización y el contexto histórico.\n\n"
+        f"SOLICITUD DEL USUARIO: '{query}'\n\n"
+        f"CONTEXTO HISTÓRICO (Cotizaciones previas y fórmulas):\n{context}\n\n"
+        f"TU TAREA:\n"
+        f"1. Determina si la solicitud requiere un CÁLCULO basado en dimensiones, área o uso.\n"
+        f"2. Realiza los cálculos necesarios si aplican.\n"
+        f"3. ANALIZA LAS NOTAS Y CONDICIONES de las cotizaciones históricas en el contexto. Identifica patrones para este tipo de producto (ej. tiempos de entrega específicos, condiciones de pago, maniobras).\n"
+        f"4. Genera un set de 'NOTAS SUGERIDAS' dinámicas. No uses siempre las mismas. Adáptalas al producto. Por ejemplo, si es maquinaria, el tiempo de entrega suele ser mayor. Si son insumos, es menor.\n\n"
+        
+        f"FORMATO DE RESPUESTA:\n"
+        f"--- REPORTE DE CÁLCULO ---\n"
+        f"TIPO DE SOLICITUD: [CÁLCULO REQUERIDO / SOLICITUD DIRECTA]\n"
+        f"ANÁLISIS: [Explica el análisis]\n"
+        f"CÁLCULOS PASO A PASO:\n"
+        f"[Matemáticas...]\n"
+        f"RECOMENDACIÓN DE CANTIDADES:\n"
+        f"- [Producto]: [Cantidad]\n"
+        f"\n"
+        f"--- CONDICIONES COMERCIALES SUGERIDAS ---\n"
+        f"[Lista aquí las notas exactas que deben ir en la cotización. Incluye vigencia, pago, entrega, descarga, etc. Basado en lo que veas en el historial para productos similares.]\n"
+        f"--------------------------\n"
+    )
+    
+    response = llm.complete(analysis_prompt)
+    return response.text
+
+
 def query_rag_system_with_history(query, chat_history=None, customer_name=None, customer_location=None):
     """Generate a response using database product search, historical context, and conversation history."""
     print(f'🔹 Query Received: {query}')
@@ -184,6 +254,11 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
     # Fetch relevant text context from Pinecone (historical quotations and catalog data)
     results = index.query(vector=query_embedding, top_k=7, include_metadata=True)
     context = " ".join([match["metadata"]["text"] for match in results["matches"]])
+
+    # PHASE 1: Analyze and Calculate
+    # We use the Pinecone context to help with the math/logic AND to extract dynamic notes
+    calculation_report = analyze_request_and_calculate(query, context)
+    print(f"🔹 Calculation & Analysis Report:\n{calculation_report}")
 
     # Step 1: Get products from database using semantic search
     matched_products = get_relevant_products(query_embedding)
@@ -201,9 +276,13 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
         chat_history_text += "\n"
 
     # Step 3: Construct the final prompt with conversation awareness
-    prompt = (f"Genera DOS cotizaciones en formato markdown basada en los productos de la base de datos y cotizaciones previas. "
-      f"Incluye especificaciones completas de los productos y precios disponibles, "
-      f"utilizando EXCLUSIVAMENTE información de la base de datos o de cotizaciones históricas. "
+    prompt = (f"Genera DOS cotizaciones en formato markdown basada en el REPORTE DE ANÁLISIS, los productos de la base de datos y cotizaciones previas. "
+      f"Incluye especificaciones completas de los productos y precios disponibles.\n\n"
+      
+      f"🔥🔥 **INFORMACIÓN CRÍTICA - REPORTE DE ANÁLISIS Y CÁLCULO:** 🔥🔥\n"
+      f"{calculation_report}\n"
+      f"⚠️ **INSTRUCCIÓN 1 (CANTIDADES):** Usa las cantidades del reporte como la VERDAD TÉCNICA.\n"
+      f"⚠️ **INSTRUCCIÓN 2 (NOTAS):** Usa las 'CONDICIONES COMERCIALES SUGERIDAS' del reporte para la sección de Notas. NO uses notas genéricas si el reporte sugiere otras específicas.\n\n"
       
       f"{chat_history_text}"
       
@@ -235,9 +314,9 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
       
       f"4️⃣ **Usa tanto el catálogo de productos como las cotizaciones previas.** "
       f"Si un producto no aparece en el catálogo actual, pero ha sido cotizado previamente, usa esos datos históricos.\n"
-
+      
       f"5️⃣ **Si el usuario proporciona datos técnicos para calcular un producto** (ej. acolchado agrícola para dos hectáreas), "
-      f"usa las metodologías de cálculo y cotizaciones previas del contexto para estimar los productos y costos.\n"
+      f"usa el REPORTE DE CÁLCULO para determinar las cantidades y luego las metodologías de cálculo y cotizaciones previas del contexto para estimar los productos y costos.\n"
 
       f"6️⃣ **Usa los precios más actualizados disponibles.** "
       f"Prioriza los precios del catálogo actual. Si no hay precio disponible, usa referencias de cotizaciones previas. "
@@ -248,7 +327,7 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
       f"- **Cálculos completos** (si aplica).\n"
       f"- **Especificaciones técnicas** detalladas de cada producto.\n"
       f"- **Tabla de precios** con cantidad, unidad y total, mostrando múltiples opciones (si aplica).\n"
-      f"- **Notas importantes** sobre impuestos y recomendaciones.\n"
+      f"- **Notas importantes** (Dinámicas según el reporte).\n"
       f"- Usa saltos de línea simples entre elementos relacionados y dobles entre secciones principales.\n"
 
       f"📌 **FORMATO ESTRICTO DE TABLA:**\n"
@@ -324,14 +403,8 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
       f"   (SEISCIENTOS TREINTA Y CINCO MIL PESOS 00/100 MXN)\n"
       f"\n"
       f"2. **Sección de Notas** (usar ## Nota: como encabezado):\n"
-      f"   - Cotización vigente durante 3 días hábiles\n"
-      f"   - Condiciones de pago: 100% anticipo\n"
-      f"   - Tiempos de entrega: 3-5 días hábiles una vez confirmado el pago\n"
-      f"   - Ubicación de entrega: {customer_location if customer_location else 'A convenir'}\n"
-      f"   - Requisitos de descarga: Cliente proporciona montacargas y personal\n"
-      f"   - Incluye envío a ocurre o domicilio según cobertura\n"
-      f"   - Maniobras de descarga por cuenta del cliente\n"
-      f"   - Uso del CFDI: Insumos agrícolas (exento de IVA)\n"
+      f"   - **IMPORTANTE:** Copia aquí las 'CONDICIONES COMERCIALES SUGERIDAS' del reporte de análisis.\n"
+      f"   - Asegúrate de incluir la ubicación de entrega: {customer_location if customer_location else 'A convenir'}\n"
       f"\n"
       f"3. **Sección de Datos Bancarios** (usar ## DATOS BANCARIOS como encabezado):\n"
       f"   DATOS BANCARIOS IMPAG TECH SAPI DE C V\n"
@@ -349,7 +422,7 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
       f"- NO repetir los datos bancarios en la sección de Notas\n"
       f"- NO incluir la firma en la sección de Notas\n"
       f"- Cada sección debe aparecer UNA SOLA VEZ en el orden especificado\n"
-      f"- Las notas deben ser SOLO las 8 viñetas listadas arriba, nada más\n"
+      f"- Las notas deben ser SOLO las sugeridas en el reporte, nada más\n"
       f"\n"
       f"**FORMATO PARA PDF:**\n"
       f"- La tabla debe caber en una página A4 (210mm de ancho)\n"
