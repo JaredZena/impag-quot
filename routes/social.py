@@ -308,13 +308,98 @@ class SocialPostSaveRequest(BaseModel):
     selected_product_id: Optional[str] = None
     formatted_content: Optional[Dict[str, Any]] = None
 
+@router.get("/posts")
+async def get_social_posts(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token) # Optional auth
+):
+    """
+    Get all social posts (shared across all users).
+    Can filter by date range and status.
+    """
+    try:
+        query = db.query(SocialPost)
+        
+        # Filter by date range if provided
+        if start_date:
+            query = query.filter(SocialPost.date_for >= start_date)
+        if end_date:
+            query = query.filter(SocialPost.date_for <= end_date)
+        
+        # Filter by status if provided
+        if status:
+            query = query.filter(SocialPost.status == status)
+        
+        # Order by date_for (target date) and creation time
+        posts = query.order_by(SocialPost.date_for.desc(), SocialPost.created_at.desc()).all()
+        
+        return {
+            "status": "success",
+            "count": len(posts),
+            "posts": [
+                {
+                    "id": p.id,
+                    "date_for": p.date_for,
+                    "caption": p.caption,
+                    "image_prompt": p.image_prompt,
+                    "post_type": p.post_type,
+                    "status": p.status,
+                    "selected_product_id": p.selected_product_id,
+                    "formatted_content": p.formatted_content,
+                    "created_at": p.created_at.isoformat() if p.created_at else None
+                }
+                for p in posts
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/posts/by-date/{date}")
+async def get_social_posts_by_date(
+    date: str,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token) # Optional auth
+):
+    """
+    Get all posts for a specific date (YYYY-MM-DD).
+    """
+    try:
+        posts = db.query(SocialPost).filter(
+            SocialPost.date_for == date
+        ).order_by(SocialPost.created_at.desc()).all()
+        
+        return {
+            "status": "success",
+            "date": date,
+            "count": len(posts),
+            "posts": [
+                {
+                    "id": p.id,
+                    "date_for": p.date_for,
+                    "caption": p.caption,
+                    "image_prompt": p.image_prompt,
+                    "post_type": p.post_type,
+                    "status": p.status,
+                    "selected_product_id": p.selected_product_id,
+                    "formatted_content": p.formatted_content,
+                    "created_at": p.created_at.isoformat() if p.created_at else None
+                }
+                for p in posts
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/save")
 async def save_social_post(
     payload: SocialPostSaveRequest,
     db: Session = Depends(get_db),
     user: dict = Depends(verify_google_token) # Optional auth
 ):
-    """Save a generated/approved post to the backend history."""
+    """Save a generated/approved post to the backend history (shared across all users)."""
     try:
         new_post = SocialPost(
             date_for=payload.date_for,
