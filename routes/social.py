@@ -75,6 +75,9 @@ class SocialGenRequest(BaseModel):
     date: str # YYYY-MM-DD
     # Optional overrides allow testing specific scenarios, but defaults are autonomous
     category: Optional[str] = None
+    recentPostHistory: Optional[List[str]] = None
+    dedupContext: Optional[Dict[str, Any]] = None
+    used_in_batch: Optional[Dict[str, Any]] = None
 
 class SocialGenResponse(BaseModel):
     caption: str
@@ -431,18 +434,52 @@ async def generate_social_copy(
 
     client = anthropic.Client(api_key=claude_api_key)
 
-    # --- 0. FETCH HISTORY (BACKEND) ---
-    # Fetch last 15 posts to avoid repetition
-    recent_posts = db.query(SocialPost).order_by(SocialPost.created_at.desc()).limit(15).all()
-    history_items = [f"{p.caption[:60]}... (Type: {p.post_type})" for p in recent_posts]
-    recent_history = "\n- ".join(history_items)
-
-    # --- 1. CONTEXT INIT ---
+    # --- 0. CONTEXT INIT (needed for history query) ---
     try:
         dt = datetime.strptime(payload.date, "%Y-%m-%d")
     except ValueError:
         dt = datetime.now()
+    
+    # --- 0. FETCH HISTORY (BACKEND) ---
+    # Fetch last 20 posts from last 10 days to avoid repetition
+    from datetime import timedelta
+    ten_days_ago = dt - timedelta(days=10)
+    recent_posts = db.query(SocialPost).filter(
+        SocialPost.date_for >= ten_days_ago.strftime("%Y-%m-%d"),
+        SocialPost.date_for <= payload.date
+    ).order_by(SocialPost.created_at.desc()).limit(20).all()
+    
+    history_items = [f"{p.caption[:60]}... (Type: {p.post_type})" for p in recent_posts]
+    recent_history = "\n- ".join(history_items)
+    
+    # Extract deduplication info from recent posts
+    recent_product_ids = set()
+    recent_categories = set()
+    for p in recent_posts:
+        if p.selected_product_id:
+            recent_product_ids.add(str(p.selected_product_id))
+        if p.formatted_content and isinstance(p.formatted_content, dict):
+            products = p.formatted_content.get('products', [])
+            for prod in products:
+                if isinstance(prod, dict):
+                    if prod.get('id'):
+                        recent_product_ids.add(str(prod['id']))
+                    if prod.get('category'):
+                        recent_categories.add(prod['category'])
+    
+    # Also use dedup context from frontend if provided (more comprehensive)
+    if payload.dedupContext:
+        recent_product_ids.update(str(pid) for pid in payload.dedupContext.get('recent_product_ids', []))
+        recent_categories.update(payload.dedupContext.get('recent_categories', []))
+    
+    # Check for products used in current batch (to avoid duplicates in same generation)
+    used_in_batch_ids = set()
+    used_in_batch_categories = set()
+    if payload.used_in_batch:
+        used_in_batch_ids.update(str(pid) for pid in payload.used_in_batch.get('product_ids', []))
+        used_in_batch_categories.update(payload.used_in_batch.get('categories', []))
 
+    # --- 1. SEASON CONTEXT ---
     sales_context = get_season_context(dt)
     important_dates = str([d["name"] for d in get_nearby_dates(dt)])
     
@@ -496,11 +533,39 @@ async def generate_social_copy(
     if strat_data.get("search_needed"):
         keywords = strat_data.get("search_keywords", "")
         # If user overrode category, prioritize that in search? No, rely on keywords.
-        found_products = search_products(db, keywords, limit=15)
+        found_products = search_products(db, keywords, limit=20)  # Get more to filter
         
-        # If search yielded nothing, fallback to random active products
+        # Filter out recently used products (last 10 days)
+        # Allow same topic but different products
+        filtered_products = []
+        for p in found_products:
+            # Skip if product was used in last 10 days (unless it's been 7+ days)
+            if p['id'] in recent_product_ids or p['id'] in used_in_batch_ids:
+                continue
+            # Skip if category was heavily used (more than 3 times in last 10 days)
+            category_count = sum(1 for cat in recent_categories if cat.lower() == p['category'].lower())
+            if category_count >= 3:
+                continue
+            filtered_products.append(p)
+        
+        # If filtering removed everything, allow some repeats but prefer different products
+        if not filtered_products:
+            # Allow products from different categories than heavily used ones
+            for p in found_products:
+                if p['category'].lower() not in [c.lower() for c in used_in_batch_categories]:
+                    filtered_products.append(p)
+                    break
+        
+        found_products = filtered_products[:15]  # Limit to 15 after filtering
+        
+        # If search yielded nothing, fallback to random active products (avoiding recent)
         if not found_products:
-            found_products = fetch_db_products(db, limit=10)
+            all_products = fetch_db_products(db, limit=30)
+            for p in all_products:
+                if p['id'] not in recent_product_ids and p['id'] not in used_in_batch_ids:
+                    found_products.append(p)
+                    if len(found_products) >= 10:
+                        break
     
     catalog_str = "\n".join([
         f"- {p['name']} (Cat: {p['category']}, Stock: {'✅' if p['inStock'] else '⚠️'}, ID: {p['id']})"
@@ -520,10 +585,44 @@ async def generate_social_copy(
         first_product = found_products[0]
         selected_product_info = f"\nProducto seleccionado: {first_product['name']} (Categoría: {first_product['category']}, SKU: {first_product['sku']})"
 
+    # Build deduplication context for AI
+    dedup_info = ""
+    if recent_product_ids or recent_categories:
+        dedup_info = "\n\n⚠️ IMPORTANTE - EVITA REPETIR:\n"
+        if recent_product_ids:
+            dedup_info += f"- Productos usados recientemente (últimos 10 días): {len(recent_product_ids)} productos\n"
+        if recent_categories:
+            dedup_info += f"- Categorías usadas recientemente: {', '.join(list(recent_categories)[:5])}\n"
+        if used_in_batch_ids:
+            dedup_info += f"- Productos ya usados en esta generación: {len(used_in_batch_ids)} productos\n"
+        dedup_info += "- Puedes repetir el TEMA (ej. heladas) pero usa DIFERENTES productos o soluciones.\n"
+        dedup_info += "- Si el tema es urgente (heladas, siembra), está bien repetirlo por 1 semana pero variando productos.\n"
+    
+    # Add Durango crop cycle context (including forestal and ganadero)
+    try:
+        month = dt.month
+        durango_crops = ""
+        if month in [1, 2]:
+            durango_crops = "Ciclos Durango: Preparación siembra maíz/frijol (feb-mar), mantenimiento avena/alfalfa/trigo (cultivos de frío otoño-invierno). Forestal: Protección árboles jóvenes contra heladas, mantenimiento viveros forestales. Ganadero: Alimentación suplementaria, protección ganado contra frío, mantenimiento cercas y corrales."
+        elif month in [3, 4]:
+            durango_crops = "Ciclos Durango: Siembra maíz/frijol activa, crecimiento avena/alfalfa/trigo, inicio manzana. Forestal: Siembra/reforestación activa, trasplante árboles, preparación viveros. Ganadero: Pastoreo primaveral, reparación cercas post-invierno, preparación agostaderos."
+        elif month in [5, 6, 7]:
+            durango_crops = "Ciclos Durango: Crecimiento maíz/frijol, cosecha avena/alfalfa, desarrollo manzana, inicio chile. Forestal: Crecimiento activo árboles, mantenimiento reforestaciones, control plagas forestales. Ganadero: Pastoreo intensivo, construcción/reparación cercas, protección sombra para ganado, preparación henificación."
+        elif month in [8, 9]:
+            durango_crops = "Ciclos Durango: Cosecha manzana (ago-sep), desarrollo chile, preparación siembra otoño-invierno (avena, trigo, cultivos de frío). Forestal: Mantenimiento reforestaciones, preparación viveros otoño-invierno, protección contra incendios. Ganadero: Cosecha forraje, henificación, preparación alimentación invernal, mantenimiento infraestructura ganadera."
+        elif month in [10, 11]:
+            durango_crops = "Ciclos Durango: Cosecha frijol (oct-nov), cosecha chile (oct-nov), siembra activa avena/trigo (cultivos de frío otoño-invierno), preparación protección frío. Forestal: Siembra otoño-invierno especies forestales, protección árboles contra heladas tempranas, mantenimiento viveros. Ganadero: Almacenamiento forraje, preparación protección ganado frío, reparación cercas y corrales, alimentación suplementaria inicio."
+        elif month == 12:
+            durango_crops = "Ciclos Durango: Protección heladas crítica, mantenimiento invernal cultivos de frío (avena/trigo), preparación nuevo ciclo. Forestal: Protección árboles contra heladas, mantenimiento viveros invernal, planificación reforestación siguiente año. Ganadero: Protección ganado heladas crítica, alimentación suplementaria intensiva, mantenimiento cercas y refugios, preparación próximo ciclo."
+    except:
+        durango_crops = ""
+
     creation_prompt = (
         f"ACTÚA COMO: Social Media Manager. TEMA ELEGIDO: {strat_data.get('topic')}\n"
         f"TIPO DE POST: {strat_data.get('post_type')}\n"
-        f"{selected_product_info}\n\n"
+        f"{selected_product_info}\n"
+        f"{durango_crops}\n"
+        f"{dedup_info}\n"
         
         "PRODUCTOS ENCONTRADOS EN ALMACÉN (Usa uno si aplica):\n"
         f"{catalog_str}\n\n"
