@@ -246,6 +246,19 @@ class Quotation(Base):
     archived_at = Column(DateTime(timezone=True), nullable=True)  # Soft delete timestamp
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+class SocialPost(Base):
+    __tablename__ = "social_post"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date_for = Column(String(10), nullable=False) # Target date YYYY-MM-DD
+    caption = Column(Text, nullable=False)
+    image_prompt = Column(Text, nullable=True)
+    post_type = Column(String(50), nullable=True)
+    status = Column(String(20), default="planned") # planned, posted, archived
+    selected_product_id = Column(String, nullable=True)
+    formatted_content = Column(JSON, nullable=True) # Full JSON response 
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 # Parse the database URL to get the endpoint ID
 parsed_url = urlparse(database_url)
