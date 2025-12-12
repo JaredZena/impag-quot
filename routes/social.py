@@ -78,6 +78,7 @@ class SocialGenRequest(BaseModel):
     recentPostHistory: Optional[List[str]] = None
     dedupContext: Optional[Dict[str, Any]] = None
     used_in_batch: Optional[Dict[str, Any]] = None
+    batch_generated_history: Optional[List[str]] = None # New field for real-time batch awareness
 
 class SocialGenResponse(BaseModel):
     caption: str
@@ -450,6 +451,11 @@ async def generate_social_copy(
     ).order_by(SocialPost.created_at.desc()).limit(20).all()
     
     history_items = [f"{p.caption[:60]}... (Type: {p.post_type})" for p in recent_posts]
+    
+    # Add batch history if present (posts generated just now in this session)
+    if payload.batch_generated_history:
+        history_items.extend(payload.batch_generated_history)
+
     recent_history = "\n- ".join(history_items)
     
     # Extract deduplication info from recent posts
@@ -483,6 +489,19 @@ async def generate_social_copy(
     sales_context = get_season_context(dt)
     important_dates = str([d["name"] for d in get_nearby_dates(dt)])
     
+    # Calculate variety metrics
+    recent_types = [p.post_type for p in recent_posts]
+    db_promo_count = sum(1 for t in recent_types if t and ('promo' in t.lower() or 'venta' in t.lower()))
+    
+    batch_promo_count = 0
+    if payload.batch_generated_history:
+        batch_promo_count = sum(1 for item in payload.batch_generated_history if 'promo' in item.lower() or 'venta' in item.lower())
+
+    total_recent = len(recent_types) + (len(payload.batch_generated_history) if payload.batch_generated_history else 0)
+    promo_count = db_promo_count + batch_promo_count
+    
+    penalize_promo = total_recent > 0 and (promo_count / total_recent) > 0.3 # Penalize if > 30% are promos
+
     # --- 2. STRATEGY PHASE ---
     strategy_prompt = (
         f"ACTÚA COMO: Director de Estrategia Comercial. FECHA: {payload.date}\n"
@@ -491,17 +510,24 @@ async def generate_social_copy(
         f"EFEMÉRIDES: {important_dates}.\n"
         f"PREFERENCIA USUARIO: {payload.category or 'Ninguna (Decide tú)'}.\n\n"
         
-        "HISTORIAL RECIENTE (EVITA REPETIR ESTOS TEMAS):\n"
+        "HISTORIAL RECIENTE (TUS ÚLTIMAS DECISIONES):\n"
         f"- {recent_history or 'Sin historial previo.'}\n\n"
 
-        "TIPOS DE POST DISPONIBLES:\n"
+        "REGLAS DE VARIEDAD (CRÍTICO - SÍGUELAS O FALLARÁ LA ESTRATEGIA):\n"
+        f"{'⛔ ALERTA: EXCESO DE PROMOS DETECTADO. ESTÁ PROHIBIDO ELEGIR TIPO `promo` PARA ESTE DÍA. USA EDUCATIVO/ENGAGEMENT.' if penalize_promo else ''}\n"
+        "- NO repitas el mismo TIPO de post que el día anterior.\n"
+        "- NO repitas el mismo PRODUCTO/TEMA que en los últimos 3 días.\n"
+        "- El éxito depende de mezclar: Venta (20%), Educación (40%), Entretenimiento (20%), Comunidad (20%).\n"
+        "- PRIORIZA tipos como: Infografías, Memes, Kits, UGC, Tutoriales.\n\n"
+
+        "TIPOS DE POST DISPONIBLES (ELIGE UNO DE ESTA LISTA):\n"
         f"{POST_TYPES_DEFINITIONS}\n\n"
 
-        "TU TAREA: Decide el TEMA del post de hoy y si necesitamos buscar productos.\n"
+        "TU TAREA: Decide el TEMA del post de hoy y el TIPO DE POST exacto.\n"
         "RESPONDE SOLO JSON:\n"
         "{\n"
         '  "topic": "Tema principal (ej. Preparación de suelo)",\n'
-        '  "post_type": "promo/educativo/meme",\n'
+        '  "post_type": "Escribe EXACTAMENTE el nombre del tipo (ej. Infografías, Memes/tips rápidos, Kits, etc.)",\n'
         '  "search_needed": true/false,\n'
         '  "search_keywords": "términos de búsqueda para base de datos (ej. arado, fertilizante inicio)"\n'
         "}"
