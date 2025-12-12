@@ -258,6 +258,10 @@ class SocialPost(Base):
     status = Column(String(20), default="planned") # planned, posted, archived
     selected_product_id = Column(String, nullable=True)
     formatted_content = Column(JSON, nullable=True) # Full JSON response 
+    # Channel-specific fields
+    channel = Column(String(50), nullable=True) # wa-status, fb-post, tiktok, etc.
+    carousel_slides = Column(JSON, nullable=True) # Array of slide prompts for carousels (TikTok, FB/IG)
+    needs_music = Column(Boolean, default=False) # Whether this content needs background music
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 # Parse the database URL to get the endpoint ID

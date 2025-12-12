@@ -6,6 +6,7 @@ import os
 import json
 import random
 from datetime import datetime
+from pathlib import Path
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from models import get_db, Product, ProductCategory, SocialPost
@@ -69,6 +70,58 @@ POST_TYPES_DEFINITIONS = """
 - Cómo pedir / logística: Simplificar proceso de compra.
 """
 
+CHANNEL_FORMATS = """
+FORMATOS POR CANAL (CRÍTICO - ADAPTA EL CONTENIDO):
+
+📱 WA STATUS (wa-status):
+  - Aspecto: Vertical 9:16 (1080×1920)
+  - Música: ✅ OBLIGATORIO (corridos mexicanos, regional)
+  - Caption: Mínimo (el contenido visual habla)
+  - Duración: 15-30 segundos si es video
+  - Efímero: Desaparece en 24h
+  - Ejemplo: Alerta urgente, "Llegó X producto", UGC rápido
+
+📨 WA BROADCAST (wa-broadcast):
+  - Aspecto: Cuadrado 1:1 (1080×1080)
+  - Música: ❌ No aplica
+  - Caption: Corto pero informativo (~200 chars)
+  - Ejemplo: Oferta VIP, aviso de stock
+
+📲 WA MENSAJE (wa-message):
+  - Texto conversacional, personal
+  - Se puede incluir imagen cuadrada
+
+📸 FB + IG POST (fb-post, ig-post):
+  - Aspecto: Cuadrado 1:1 (1080×1080)
+  - Carrusel: ✅ Hasta 10 slides
+  - Música: ❌ No
+  - Caption: LARGO permitido (hasta 2000 chars)
+  - Se replica automáticamente FB → IG
+  - Ejemplo: Infografía, carrusel educativo, caso de éxito
+
+🎬 FB + IG REEL (fb-reel, ig-reel):
+  - Aspecto: Vertical 9:16 (1080×1920)
+  - Video: ✅ 15-90 segundos
+  - Música: ✅ OBLIGATORIO (trending o mexicana)
+  - Caption: CORTO (texto va EN el video con subtítulos)
+  - Se replica automáticamente FB → IG
+  - Hook en primeros 3 segundos
+  - Ejemplo: Instalación rápida, antes/después, tip del día
+
+🎵 TIKTOK (tiktok) - ⚠️ FORMATO ESPECIAL:
+  - Aspecto: Vertical 9:16 (1080×1920)
+  - ⚠️ CARRUSEL DE 2-3 IMÁGENES (NO video)
+  - El usuario DESLIZA para ver siguiente imagen
+  - Música: ✅ OBLIGATORIO (corridos mexicanos, regional popular)
+  - Caption: MUY CORTO (~150 chars max)
+  - ⚠️ TODO EL TEXTO VA EN LAS IMÁGENES, NO en caption
+  - Estructura típica 3 slides:
+    1. HOOK/Problema (primera imagen engancha)
+    2. CONTENIDO/Solución
+    3. CTA/Contacto
+  - Ejemplo: "3 errores al instalar" / "Antes→Después→Precio"
+"""
+
 # --- Models ---
 
 class SocialGenRequest(BaseModel):
@@ -90,8 +143,254 @@ class SocialGenResponse(BaseModel):
     selected_product_id: Optional[str] = None
     selected_category: Optional[str] = None # New field for AI decision
     selected_product_details: Optional[Dict[str, Any]] = None # Full product object for frontend
+    # Channel-specific fields
+    channel: Optional[str] = None # wa-status, wa-broadcast, fb-post, fb-reel, tiktok, etc.
+    carousel_slides: Optional[List[str]] = None # For TikTok carousels: list of 2-3 image prompts
+    needs_music: Optional[bool] = None # Whether this content needs background music
+    aspect_ratio: Optional[str] = None # 1:1, 9:16, 4:5
 
 # --- Logic ---
+
+# Simple in-memory cache for context (key: month, value: context string)
+_durango_context_cache: dict[int, str] = {}
+
+def load_durango_context(month: int) -> str:
+    """
+    Load Durango sector context (agricultura, forestal, ganadería, agroindustria) from markdown files.
+    Returns formatted context string for AI prompts.
+    
+    Uses a simple cache to avoid re-reading files on every request.
+    Cache is cleared on server restart (stateless).
+    """
+    # Check cache first
+    if month in _durango_context_cache:
+        return _durango_context_cache[month]
+    
+    try:
+        # Get the docs directory (docs is at impag-app/docs, we're in impag-quot/routes/social.py)
+        # So we need to go up: impag-quot -> impag-app -> docs
+        current_file = Path(__file__)  # impag-quot/routes/social.py
+        project_root = current_file.parent.parent.parent  # impag-app
+        docs_dir = project_root / "docs"
+        
+        context_parts = []
+        
+        # Load agricultura context
+        agricultura_file = docs_dir / "durango-agricultura.md"
+        if agricultura_file.exists():
+            with open(agricultura_file, 'r', encoding='utf-8') as f:
+                agricultura_content = f.read()
+                # Extract relevant section for the month + key stats
+                month_section = extract_month_section(agricultura_content, month)
+                key_stats = extract_key_stats(agricultura_content, "agricultura")
+                agricultura_context = month_section
+                if key_stats:
+                    agricultura_context = f"{key_stats}\n\n{month_section}" if month_section else key_stats
+                if agricultura_context.strip():
+                    context_parts.append(f"AGRICULTURA DURANGO:\n{agricultura_context}")
+        
+        # Load forestal context
+        forestal_file = docs_dir / "durango-forestal.md"
+        if forestal_file.exists():
+            with open(forestal_file, 'r', encoding='utf-8') as f:
+                forestal_content = f.read()
+                month_section = extract_month_section(forestal_content, month)
+                key_stats = extract_key_stats(forestal_content, "forestal")
+                forestal_context = month_section
+                if key_stats:
+                    forestal_context = f"{key_stats}\n\n{month_section}" if month_section else key_stats
+                if forestal_context.strip():
+                    context_parts.append(f"FORESTAL DURANGO:\n{forestal_context}")
+        
+        # Load ganadería context
+        ganaderia_file = docs_dir / "durango-ganaderia.md"
+        if ganaderia_file.exists():
+            with open(ganaderia_file, 'r', encoding='utf-8') as f:
+                ganaderia_content = f.read()
+                month_section = extract_month_section(ganaderia_content, month)
+                key_stats = extract_key_stats(ganaderia_content, "ganaderia")
+                ganaderia_context = month_section
+                if key_stats:
+                    ganaderia_context = f"{key_stats}\n\n{month_section}" if month_section else key_stats
+                if ganaderia_context.strip():
+                    context_parts.append(f"GANADERÍA DURANGO:\n{ganaderia_context}")
+        
+        # Load agroindustria context
+        agroindustria_file = docs_dir / "durango-agroindustria.md"
+        if agroindustria_file.exists():
+            with open(agroindustria_file, 'r', encoding='utf-8') as f:
+                agroindustria_content = f.read()
+                # For agroindustria, include month-specific processing cycles if available
+                month_section = extract_month_section(agroindustria_content, month)
+                if month_section:
+                    context_parts.append(f"AGROINDUSTRIA DURANGO:\n{month_section}")
+                else:
+                    # If no month-specific section, include key sections (Resumen, Contexto, Oportunidades)
+                    summary = extract_agroindustria_summary(agroindustria_content)
+                    if summary:
+                        context_parts.append(f"AGROINDUSTRIA DURANGO:\n{summary}")
+        
+        if context_parts:
+            result = "\n\n".join(context_parts)
+            # Cache the result (limit cache size to avoid memory issues)
+            if len(_durango_context_cache) < 12:  # Only cache up to 12 months
+                _durango_context_cache[month] = result
+            return result
+        else:
+            # Fallback to hardcoded if files don't exist
+            return get_fallback_durango_context(month)
+    except Exception as e:
+        print(f"Error loading Durango context: {e}")
+        return get_fallback_durango_context(month)
+
+def extract_key_stats(content: str, sector: str) -> str:
+    """
+    Extract key statistics and rankings from markdown content.
+    Looks for sections like "## Posicionamiento Nacional" or "## Estadísticas"
+    """
+    lines = content.split('\n')
+    stats_lines = []
+    in_stats_section = False
+    
+    # Look for key sections that contain important stats
+    key_sections = [
+        "posicionamiento nacional",
+        "estadísticas",
+        "ranking",
+        "producción total",
+        "valor de producción"
+    ]
+    
+    for i, line in enumerate(lines):
+        line_lower = line.lower()
+        # Check if this is a relevant stats section
+        if any(key in line_lower for key in key_sections) and ('##' in line or '###' in line):
+            in_stats_section = True
+            stats_lines.append(line)
+        elif in_stats_section:
+            # Stop at next major section (##) that's not a sub-section
+            if line.startswith('##') and not line.startswith('###'):
+                break
+            # Include subsections and content
+            if line.strip() and (line.startswith('#') or line.startswith('-') or ':' in line):
+                stats_lines.append(line)
+            # Limit to avoid too much context
+            if len(stats_lines) > 15:
+                break
+    
+    return '\n'.join(stats_lines[:15]) if stats_lines else ""
+
+def extract_agroindustria_summary(content: str) -> str:
+    """
+    Extract summary sections from agroindustria markdown (Resumen, Contexto, Oportunidades).
+    """
+    lines = content.split('\n')
+    summary_lines = []
+    sections_to_include = [
+        "## Resumen General",
+        "## Contexto del Sector",
+        "## Oportunidades"
+    ]
+    in_target_section = False
+    current_section = None
+    
+    for line in lines:
+        # Check if entering a target section
+        if any(section in line for section in sections_to_include):
+            in_target_section = True
+            current_section = line
+            summary_lines.append(line)
+        elif in_target_section:
+            # Stop at next major section (##) that's not a sub-section
+            if line.startswith('##') and not line.startswith('###'):
+                # Check if this is another target section
+                if any(section in line for section in sections_to_include):
+                    current_section = line
+                    summary_lines.append(line)
+                else:
+                    break
+            else:
+                # Include content (limit length)
+                if line.strip():
+                    summary_lines.append(line)
+                    if len(summary_lines) > 60:  # Limit total lines
+                        break
+    
+    return '\n'.join(summary_lines) if summary_lines else ""
+
+def extract_month_section(content: str, month: int) -> str:
+    """
+    Extract the section relevant to the given month from markdown content.
+    Looks for sections like "### Enero-Febrero" or "## Ciclos por Mes"
+    """
+    month_names = {
+        1: ["enero", "febrero"], 2: ["enero", "febrero"],
+        3: ["marzo", "abril"], 4: ["marzo", "abril"],
+        5: ["mayo", "junio", "julio"], 6: ["mayo", "junio", "julio"], 7: ["mayo", "junio", "julio"],
+        8: ["agosto", "septiembre"], 9: ["agosto", "septiembre"],
+        10: ["octubre", "noviembre"], 11: ["octubre", "noviembre"],
+        12: ["diciembre"]
+    }
+    
+    target_months = month_names.get(month, [])
+    if not target_months:
+        return ""
+    
+    lines = content.split('\n')
+    in_relevant_section = False
+    section_lines = []
+    current_section = []
+    
+    for line in lines:
+        # Check if this is a month header
+        line_lower = line.lower()
+        if any(month_name in line_lower for month_name in target_months) and ('###' in line or '##' in line):
+            in_relevant_section = True
+            current_section = [line]
+        elif in_relevant_section:
+            # Stop at next major section (## or ###)
+            if line.startswith('##') and not any(month_name in line.lower() for month_name in target_months):
+                break
+            current_section.append(line)
+    
+    if current_section:
+        return '\n'.join(current_section)
+    
+    # If no specific month section found, return summary from "Ciclos por Mes" section
+    return extract_general_cycles(content)
+
+def extract_general_cycles(content: str) -> str:
+    """Extract general cycle information if month-specific not found."""
+    lines = content.split('\n')
+    in_cycles_section = False
+    cycles_lines = []
+    
+    for line in lines:
+        if 'ciclos' in line.lower() and ('##' in line or '###' in line):
+            in_cycles_section = True
+        elif in_cycles_section:
+            if line.startswith('##') and 'ciclos' not in line.lower():
+                break
+            if line.strip():
+                cycles_lines.append(line)
+    
+    return '\n'.join(cycles_lines[:20]) if cycles_lines else "Información general del sector disponible."
+
+def get_fallback_durango_context(month: int) -> str:
+    """Fallback context if markdown files are not available."""
+    if month in [1, 2]:
+        return "Ciclos Durango: Preparación siembra maíz/frijol (feb-mar), mantenimiento avena/alfalfa/trigo (cultivos de frío otoño-invierno). Forestal: Protección árboles jóvenes contra heladas, mantenimiento viveros forestales. Ganadero: Alimentación suplementaria, protección ganado contra frío, mantenimiento cercas y corrales."
+    elif month in [3, 4]:
+        return "Ciclos Durango: Siembra maíz/frijol activa, crecimiento avena/alfalfa/trigo, inicio manzana. Forestal: Siembra/reforestación activa, trasplante árboles, preparación viveros. Ganadero: Pastoreo primaveral, reparación cercas post-invierno, preparación agostaderos."
+    elif month in [5, 6, 7]:
+        return "Ciclos Durango: Crecimiento maíz/frijol, cosecha avena/alfalfa, desarrollo manzana, inicio chile. Forestal: Crecimiento activo árboles, mantenimiento reforestaciones, control plagas forestales. Ganadero: Pastoreo intensivo, construcción/reparación cercas, protección sombra para ganado, preparación henificación."
+    elif month in [8, 9]:
+        return "Ciclos Durango: Cosecha manzana (ago-sep), desarrollo chile, preparación siembra otoño-invierno (avena, trigo, cultivos de frío). Forestal: Mantenimiento reforestaciones, preparación viveros otoño-invierno, protección contra incendios. Ganadero: Cosecha forraje, henificación, preparación alimentación invernal, mantenimiento infraestructura ganadera."
+    elif month in [10, 11]:
+        return "Ciclos Durango: Cosecha frijol (oct-nov), cosecha chile (oct-nov), siembra activa avena/trigo (cultivos de frío otoño-invierno), preparación protección frío. Forestal: Siembra otoño-invierno especies forestales, protección árboles contra heladas tempranas, mantenimiento viveros. Ganadero: Almacenamiento forraje, preparación protección ganado frío, reparación cercas y corrales, alimentación suplementaria inicio."
+    elif month == 12:
+        return "Ciclos Durango: Protección heladas crítica, mantenimiento invernal cultivos de frío (avena/trigo), preparación nuevo ciclo. Forestal: Protección árboles contra heladas, mantenimiento viveros invernal, planificación reforestación siguiente año. Ganadero: Protección ganado heladas crítica, alimentación suplementaria intensiva, mantenimiento cercas y refugios, preparación próximo ciclo."
+    return ""
 
 def repair_json_string(json_str: str) -> str:
     """
@@ -311,6 +610,10 @@ class SocialPostSaveRequest(BaseModel):
     status: str = "planned"
     selected_product_id: Optional[str] = None
     formatted_content: Optional[Dict[str, Any]] = None
+    # Channel-specific fields
+    channel: Optional[str] = None  # wa-status, fb-post, tiktok, etc.
+    carousel_slides: Optional[List[str]] = None  # Array of slide prompts for carousels (TikTok, FB/IG)
+    needs_music: Optional[bool] = False
 
 @router.get("/posts")
 async def get_social_posts(
@@ -353,6 +656,9 @@ async def get_social_posts(
                     "status": p.status,
                     "selected_product_id": p.selected_product_id,
                     "formatted_content": p.formatted_content,
+                    "channel": p.channel,
+                    "carousel_slides": p.carousel_slides,
+                    "needs_music": p.needs_music,
                     "created_at": p.created_at.isoformat() if p.created_at else None
                 }
                 for p in posts
@@ -389,6 +695,9 @@ async def get_social_posts_by_date(
                     "status": p.status,
                     "selected_product_id": p.selected_product_id,
                     "formatted_content": p.formatted_content,
+                    "channel": p.channel,
+                    "carousel_slides": p.carousel_slides,
+                    "needs_music": p.needs_music,
                     "created_at": p.created_at.isoformat() if p.created_at else None
                 }
                 for p in posts
@@ -412,7 +721,10 @@ async def save_social_post(
             post_type=payload.post_type,
             status=payload.status,
             selected_product_id=payload.selected_product_id,
-            formatted_content=payload.formatted_content
+            formatted_content=payload.formatted_content,
+            channel=payload.channel,
+            carousel_slides=payload.carousel_slides,
+            needs_music=payload.needs_music
         )
         db.add(new_post)
         db.commit()
@@ -624,40 +936,32 @@ async def generate_social_copy(
         dedup_info += "- Puedes repetir el TEMA (ej. heladas) pero usa DIFERENTES productos o soluciones.\n"
         dedup_info += "- Si el tema es urgente (heladas, siembra), está bien repetirlo por 1 semana pero variando productos.\n"
     
-    # Add Durango crop cycle context (including forestal and ganadero)
-    try:
-        month = dt.month
-        durango_crops = ""
-        if month in [1, 2]:
-            durango_crops = "Ciclos Durango: Preparación siembra maíz/frijol (feb-mar), mantenimiento avena/alfalfa/trigo (cultivos de frío otoño-invierno). Forestal: Protección árboles jóvenes contra heladas, mantenimiento viveros forestales. Ganadero: Alimentación suplementaria, protección ganado contra frío, mantenimiento cercas y corrales."
-        elif month in [3, 4]:
-            durango_crops = "Ciclos Durango: Siembra maíz/frijol activa, crecimiento avena/alfalfa/trigo, inicio manzana. Forestal: Siembra/reforestación activa, trasplante árboles, preparación viveros. Ganadero: Pastoreo primaveral, reparación cercas post-invierno, preparación agostaderos."
-        elif month in [5, 6, 7]:
-            durango_crops = "Ciclos Durango: Crecimiento maíz/frijol, cosecha avena/alfalfa, desarrollo manzana, inicio chile. Forestal: Crecimiento activo árboles, mantenimiento reforestaciones, control plagas forestales. Ganadero: Pastoreo intensivo, construcción/reparación cercas, protección sombra para ganado, preparación henificación."
-        elif month in [8, 9]:
-            durango_crops = "Ciclos Durango: Cosecha manzana (ago-sep), desarrollo chile, preparación siembra otoño-invierno (avena, trigo, cultivos de frío). Forestal: Mantenimiento reforestaciones, preparación viveros otoño-invierno, protección contra incendios. Ganadero: Cosecha forraje, henificación, preparación alimentación invernal, mantenimiento infraestructura ganadera."
-        elif month in [10, 11]:
-            durango_crops = "Ciclos Durango: Cosecha frijol (oct-nov), cosecha chile (oct-nov), siembra activa avena/trigo (cultivos de frío otoño-invierno), preparación protección frío. Forestal: Siembra otoño-invierno especies forestales, protección árboles contra heladas tempranas, mantenimiento viveros. Ganadero: Almacenamiento forraje, preparación protección ganado frío, reparación cercas y corrales, alimentación suplementaria inicio."
-        elif month == 12:
-            durango_crops = "Ciclos Durango: Protección heladas crítica, mantenimiento invernal cultivos de frío (avena/trigo), preparación nuevo ciclo. Forestal: Protección árboles contra heladas, mantenimiento viveros invernal, planificación reforestación siguiente año. Ganadero: Protección ganado heladas crítica, alimentación suplementaria intensiva, mantenimiento cercas y refugios, preparación próximo ciclo."
-    except:
-        durango_crops = ""
+    # Load Durango sector context from markdown files
+    durango_context = load_durango_context(month=dt.month)
 
     creation_prompt = (
         f"ACTÚA COMO: Social Media Manager. TEMA ELEGIDO: {strat_data.get('topic')}\n"
         f"TIPO DE POST: {strat_data.get('post_type')}\n"
-        f"{selected_product_info}\n"
-        f"{durango_crops}\n"
+        f"{selected_product_info}\n\n"
+        f"CONTEXTO REGIONAL DURANGO (USA ESTA INFORMACIÓN PARA CONTENIDO RELEVANTE):\n"
+        f"{durango_context}\n\n"
         f"{dedup_info}\n"
         
         "PRODUCTOS ENCONTRADOS EN ALMACÉN (Usa uno si aplica):\n"
         f"{catalog_str}\n\n"
         
+        f"{CHANNEL_FORMATS}\n\n"
+        
         "INSTRUCCIONES:\n"
         "1. Selecciona el mejor producto de la lista (si hay) que encaje con el tema.\n"
         "2. Si no hay productos relevantes, haz un post genérico de marca/educativo.\n"
         "3. Prioriza productos con Stock ✅.\n"
-        "4. Genera el contenido.\n\n"
+        "4. ELIGE UN CANAL ESPECÍFICO de la lista anterior y adapta el contenido:\n"
+        "   - Si es TikTok: Genera prompts para 2-3 imágenes del carrusel\n"
+        "   - Si es Reel: Indica que necesita música y texto en pantalla\n"
+        "   - Si es WA Status: Formato vertical, contenido urgente/directo\n"
+        "   - Si es FB/IG Post: Puede ser más detallado y educativo\n"
+        "5. Genera el contenido adaptado al canal.\n\n"
         
         "--- INSTRUCCIONES ESPECÍFICAS PARA image_prompt ---\n"
         "El campo 'image_prompt' DEBE ser un prompt detallado y técnico para generación de imágenes (estilo IMPAG).\n"
@@ -720,8 +1024,11 @@ async def generate_social_copy(
         "{\n"
         '  "selected_category": "...",\n'
         '  "selected_product_id": "...",\n'
+        '  "channel": "wa-status|wa-broadcast|fb-post|fb-reel|tiktok (elige uno)",\n'
         '  "caption": "...",\n'
-        '  "image_prompt": "...",\n'
+        '  "image_prompt": "... (adaptar dimensiones al canal: 1080x1920 vertical para status/reels/tiktok, 1080x1080 cuadrado para posts)",\n'
+        '  "carousel_slides": ["Prompt slide 1", "Prompt slide 2", ...] (para TikTok 2-3, FB/IG hasta 10),\n'
+        '  "needs_music": true/false,\n'
         '  "posting_time": "...",\n'
         '  "notes": "..."\n'
         "}"
