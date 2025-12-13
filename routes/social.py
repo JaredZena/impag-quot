@@ -38,7 +38,7 @@ SEASON_PATTERNS = {
     9: {"phase": "siembra-oi", "name": "Septiembre", "actions": ["Semilla cebolla/ajo", "Cinta riego", "Acolchado"]},
     10: {"phase": "desarrollo-oi", "name": "Octubre", "actions": ["Nutrición foliar", "Enraizadores", "Monitoreo"]},
     11: {"phase": "frio-temprano", "name": "Noviembre", "actions": ["Manta térmica", "Anti-heladas", "Invernaderos"]},
-    12: {"phase": "proteccion-frio", "name": "Diciembre", "actions": ["Calefacción", "Sellado invernadero", "Mantenimiento"]}
+    12: {"phase": "proteccion-frio", "name": "Diciembre", "actions": ["Calefacción", "Sellado invernadero", "Mantenimiento", "Planificación ciclo 2026", "Preparación suelo", "Análisis resultados"]}
 }
 
 DEFAULT_DATES = [
@@ -76,7 +76,8 @@ FORMATOS POR CANAL (CRÍTICO - ADAPTA EL CONTENIDO):
 📱 WA STATUS (wa-status):
   - Aspecto: Vertical 9:16 (1080×1920)
   - Música: ✅ OBLIGATORIO (corridos mexicanos, regional)
-  - Caption: Mínimo (el contenido visual habla)
+  - ⚠️ CAPTION: MÍNIMO O VACÍO (máximo 50 caracteres). El contenido visual/imagen debe comunicar TODO.
+  - ⚠️ PRIORIDAD: La imagen/video es lo más importante, NO el texto.
   - Duración: 15-30 segundos si es video
   - Efímero: Desaparece en 24h
   - Ejemplo: Alerta urgente, "Llegó X producto", UGC rápido
@@ -103,22 +104,31 @@ FORMATOS POR CANAL (CRÍTICO - ADAPTA EL CONTENIDO):
   - Aspecto: Vertical 9:16 (1080×1920)
   - Video: ✅ 15-90 segundos
   - Música: ✅ OBLIGATORIO (trending o mexicana)
-  - Caption: CORTO (texto va EN el video con subtítulos)
+  - ⚠️ CAPTION: MUY CORTO (máximo 100 caracteres). El texto principal va EN EL VIDEO con subtítulos.
+  - ⚠️ PRIORIDAD: El video y su contenido visual es lo más importante, NO el caption.
   - Se replica automáticamente FB → IG
   - Hook en primeros 3 segundos
   - Ejemplo: Instalación rápida, antes/después, tip del día
+
+📱 FB + IG STORIES (fb-story, ig-story):
+  - Aspecto: Vertical 9:16 (1080×1920)
+  - ⚠️ CAPTION: MÍNIMO O VACÍO (máximo 50 caracteres). El contenido visual/imagen debe comunicar TODO.
+  - ⚠️ PRIORIDAD: La imagen/video es lo más importante, NO el texto.
+  - Efímero: Desaparece en 24h
+  - Ejemplo: Alerta urgente, promoción flash, behind-the-scenes
 
 🎵 TIKTOK (tiktok) - ⚠️ FORMATO ESPECIAL:
   - Aspecto: Vertical 9:16 (1080×1920)
   - ⚠️ CARRUSEL DE 2-3 IMÁGENES (NO video)
   - El usuario DESLIZA para ver siguiente imagen
   - Música: ✅ OBLIGATORIO (corridos mexicanos, regional popular)
-  - Caption: MUY CORTO (~150 chars max)
-  - ⚠️ TODO EL TEXTO VA EN LAS IMÁGENES, NO en caption
+  - ⚠️ CAPTION: MUY CORTO (máximo 150 caracteres). SOLO hashtags o texto mínimo.
+  - ⚠️ PRIORIDAD: TODO EL TEXTO PRINCIPAL VA EN LAS IMÁGENES DEL CARRUSEL, NO en caption.
+  - ⚠️ CRÍTICO: El caption es secundario, las imágenes con texto grande son lo importante.
   - Estructura típica 3 slides:
-    1. HOOK/Problema (primera imagen engancha)
-    2. CONTENIDO/Solución
-    3. CTA/Contacto
+    1. HOOK/Problema (primera imagen engancha con texto grande visible)
+    2. CONTENIDO/Solución (texto en imagen)
+    3. CTA/Contacto (texto en imagen)
   - Ejemplo: "3 errores al instalar" / "Antes→Después→Precio"
 """
 
@@ -132,6 +142,7 @@ class SocialGenRequest(BaseModel):
     dedupContext: Optional[Dict[str, Any]] = None
     used_in_batch: Optional[Dict[str, Any]] = None
     batch_generated_history: Optional[List[str]] = None # New field for real-time batch awareness
+    suggested_topic: Optional[str] = None # User-suggested topic for the post
 
 class SocialGenResponse(BaseModel):
     caption: str
@@ -143,6 +154,7 @@ class SocialGenResponse(BaseModel):
     selected_product_id: Optional[str] = None
     selected_category: Optional[str] = None # New field for AI decision
     selected_product_details: Optional[Dict[str, Any]] = None # Full product object for frontend
+    post_type: Optional[str] = None # Post type from strategy phase (e.g., "Infografías", "Memes/tips rápidos", "Kits")
     # Channel-specific fields
     channel: Optional[str] = None # wa-status, wa-broadcast, fb-post, fb-reel, tiktok, etc.
     carousel_slides: Optional[List[str]] = None # For TikTok carousels: list of 2-3 image prompts
@@ -614,6 +626,7 @@ class SocialPostSaveRequest(BaseModel):
     channel: Optional[str] = None  # wa-status, fb-post, tiktok, etc.
     carousel_slides: Optional[List[str]] = None  # Array of slide prompts for carousels (TikTok, FB/IG)
     needs_music: Optional[bool] = False
+    user_feedback: Optional[str] = None  # 'like', 'dislike', or None
 
 @router.get("/posts")
 async def get_social_posts(
@@ -659,6 +672,7 @@ async def get_social_posts(
                     "channel": p.channel,
                     "carousel_slides": p.carousel_slides,
                     "needs_music": p.needs_music,
+                    "user_feedback": p.user_feedback,
                     "created_at": p.created_at.isoformat() if p.created_at else None
                 }
                 for p in posts
@@ -698,6 +712,7 @@ async def get_social_posts_by_date(
                     "channel": p.channel,
                     "carousel_slides": p.carousel_slides,
                     "needs_music": p.needs_music,
+                    "user_feedback": p.user_feedback,
                     "created_at": p.created_at.isoformat() if p.created_at else None
                 }
                 for p in posts
@@ -712,24 +727,112 @@ async def save_social_post(
     db: Session = Depends(get_db),
     user: dict = Depends(verify_google_token) # Optional auth
 ):
-    """Save a generated/approved post to the backend history (shared across all users)."""
+    """Save or update a generated/approved post to the backend history (shared across all users).
+    If a post with the same formatted_content.id exists, it will be updated instead of creating a new one.
+    """
     try:
-        new_post = SocialPost(
-            date_for=payload.date_for,
-            caption=payload.caption,
-            image_prompt=payload.image_prompt,
-            post_type=payload.post_type,
-            status=payload.status,
-            selected_product_id=payload.selected_product_id,
-            formatted_content=payload.formatted_content,
-            channel=payload.channel,
-            carousel_slides=payload.carousel_slides,
-            needs_music=payload.needs_music
-        )
-        db.add(new_post)
+        # Validate user_feedback if provided
+        if payload.user_feedback and payload.user_feedback not in ['like', 'dislike']:
+            raise HTTPException(status_code=400, detail="user_feedback must be 'like', 'dislike', or None")
+        
+        # Check if post already exists (by formatted_content.id or DB ID)
+        existing_post = None
+        if payload.formatted_content and payload.formatted_content.get('id'):
+            target_id = payload.formatted_content.get('id')
+            
+            # First, try to extract DB ID if format is "db-{id}"
+            db_id_match = None
+            if isinstance(target_id, str) and target_id.startswith('db-'):
+                try:
+                    db_id_match = int(target_id.replace('db-', ''))
+                    # Try to find by DB ID first (most reliable)
+                    existing_post = db.query(SocialPost).filter(SocialPost.id == db_id_match).first()
+                except ValueError:
+                    pass
+            
+            # If not found by DB ID, search by formatted_content.id in JSON field
+            if not existing_post:
+                posts = db.query(SocialPost).filter(
+                    SocialPost.formatted_content.isnot(None)
+                ).all()
+                for p in posts:
+                    if p.formatted_content and isinstance(p.formatted_content, dict):
+                        if p.formatted_content.get('id') == target_id:
+                            existing_post = p
+                            break
+        
+        if existing_post:
+            # Update existing post
+            existing_post.date_for = payload.date_for
+            existing_post.caption = payload.caption
+            existing_post.image_prompt = payload.image_prompt
+            existing_post.post_type = payload.post_type
+            existing_post.status = payload.status
+            existing_post.selected_product_id = payload.selected_product_id
+            existing_post.formatted_content = payload.formatted_content
+            existing_post.channel = payload.channel
+            existing_post.carousel_slides = payload.carousel_slides
+            existing_post.needs_music = payload.needs_music
+            existing_post.user_feedback = payload.user_feedback
+            db.commit()
+            db.refresh(existing_post)
+            return {"status": "success", "id": existing_post.id, "updated": True}
+        else:
+            # Create new post
+            new_post = SocialPost(
+                date_for=payload.date_for,
+                caption=payload.caption,
+                image_prompt=payload.image_prompt,
+                post_type=payload.post_type,
+                status=payload.status,
+                selected_product_id=payload.selected_product_id,
+                formatted_content=payload.formatted_content,
+                channel=payload.channel,
+                carousel_slides=payload.carousel_slides,
+                needs_music=payload.needs_music,
+                user_feedback=payload.user_feedback
+            )
+            db.add(new_post)
+            db.commit()
+            db.refresh(new_post)
+            return {"status": "success", "id": new_post.id, "updated": False}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+class FeedbackUpdateRequest(BaseModel):
+    feedback: Optional[str] = None  # 'like', 'dislike', or None
+
+@router.put("/posts/{post_id}/feedback")
+async def update_post_feedback(
+    post_id: int,
+    payload: FeedbackUpdateRequest,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token) # Optional auth
+):
+    """Update user feedback for an existing post."""
+    try:
+        # Validate feedback if provided
+        if payload.feedback and payload.feedback not in ['like', 'dislike']:
+            raise HTTPException(status_code=400, detail="feedback must be 'like', 'dislike', or None")
+        
+        post = db.query(SocialPost).filter(SocialPost.id == post_id).first()
+        if not post:
+            raise HTTPException(status_code=404, detail="Post not found")
+        
+        post.user_feedback = payload.feedback
         db.commit()
-        db.refresh(new_post)
-        return {"status": "success", "id": new_post.id}
+        db.refresh(post)
+        
+        return {
+            "status": "success",
+            "id": post.id,
+            "user_feedback": post.user_feedback
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -762,13 +865,31 @@ async def generate_social_copy(
         SocialPost.date_for <= payload.date
     ).order_by(SocialPost.created_at.desc()).limit(20).all()
     
-    history_items = [f"{p.caption[:60]}... (Type: {p.post_type})" for p in recent_posts]
+    # Build comprehensive history with post_type, channel, topic, and product
+    history_items = []
+    for p in recent_posts:
+        # Extract topic from caption (first line or first 40 chars)
+        topic_hint = p.caption.split('\n')[0][:40] if p.caption else "Sin tema"
+        if len(topic_hint) < 10:
+            topic_hint = p.caption[:40] if p.caption else "Sin tema"
+        
+        # Build history entry with all relevant info
+        entry_parts = []
+        if p.post_type:
+            entry_parts.append(f"Tipo: {p.post_type}")
+        if p.channel:
+            entry_parts.append(f"Canal: {p.channel}")
+        entry_parts.append(f"Tema: {topic_hint}...")
+        if p.selected_product_id:
+            entry_parts.append(f"Producto ID: {p.selected_product_id}")
+        
+        history_items.append(" | ".join(entry_parts))
     
     # Add batch history if present (posts generated just now in this session)
     if payload.batch_generated_history:
         history_items.extend(payload.batch_generated_history)
 
-    recent_history = "\n- ".join(history_items)
+    recent_history = "\n- ".join(history_items) if history_items else "Sin historial previo."
     
     # Extract deduplication info from recent posts
     recent_product_ids = set()
@@ -801,49 +922,226 @@ async def generate_social_copy(
     sales_context = get_season_context(dt)
     important_dates = str([d["name"] for d in get_nearby_dates(dt)])
     
-    # Calculate variety metrics
-    recent_types = [p.post_type for p in recent_posts]
-    db_promo_count = sum(1 for t in recent_types if t and ('promo' in t.lower() or 'venta' in t.lower()))
+    # Calculate variety metrics for post_type, channel, and topics
+    recent_types = [p.post_type for p in recent_posts if p.post_type]
+    recent_channels = [p.channel for p in recent_posts if p.channel]
+    recent_topics = []  # Extract topics from captions
+    recent_topic_keywords = set()  # Extract keywords from topics for better deduplication
+    for p in recent_posts:
+        if p.caption:
+            # Try to extract topic (first line or first meaningful phrase)
+            topic = p.caption.split('\n')[0].strip()
+            if len(topic) > 10 and len(topic) < 100:
+                recent_topics.append(topic.lower())
+                # Extract keywords (remove emojis, common words)
+                import re
+                topic_clean = re.sub(r'[^\w\s]', ' ', topic.lower())
+                keywords = [w for w in topic_clean.split() if len(w) > 4 and w not in ['para', 'con', 'del', 'las', 'los', 'una', 'uno', 'este', 'esta', 'estos', 'estas']]
+                recent_topic_keywords.update(keywords)
     
+    # Count promos and analyze post type variety
+    db_promo_count = sum(1 for t in recent_types if t and ('promo' in t.lower() or 'venta' in t.lower() or 'promoción' in t.lower() or 'promoción puntual' in t.lower()))
     batch_promo_count = 0
     if payload.batch_generated_history:
-        batch_promo_count = sum(1 for item in payload.batch_generated_history if 'promo' in item.lower() or 'venta' in item.lower())
+        batch_promo_count = sum(1 for item in payload.batch_generated_history if 'promo' in item.lower() or 'venta' in item.lower() or 'promoción' in item.lower())
 
     total_recent = len(recent_types) + (len(payload.batch_generated_history) if payload.batch_generated_history else 0)
     promo_count = db_promo_count + batch_promo_count
     
-    penalize_promo = total_recent > 0 and (promo_count / total_recent) > 0.3 # Penalize if > 30% are promos
+    # More strict: penalize if > 20% are promos OR if last 2 posts were promos
+    last_two_are_promo = len(recent_types) >= 2 and all(
+        t and ('promo' in t.lower() or 'venta' in t.lower() or 'promoción' in t.lower()) 
+        for t in recent_types[-2:]
+    )
+    penalize_promo = (total_recent > 0 and (promo_count / total_recent) > 0.2) or last_two_are_promo
+    
+    # Analyze post type distribution
+    from collections import Counter
+    type_counter = Counter([t.lower() for t in recent_types if t])
+    most_common_type = type_counter.most_common(1)[0][0] if type_counter else None
+    most_common_count = type_counter.most_common(1)[0][1] if type_counter else 0
+    
+    # If same type used 2+ times in recent posts, warn
+    type_repetition_warning = ""
+    if most_common_count >= 2 and total_recent >= 2:
+        type_repetition_warning = f"⛔ ALERTA: El tipo '{most_common_type}' se ha usado {most_common_count} veces recientemente. ELIGE UN TIPO DIFERENTE hoy.\n"
+    
+    # Also check if last 2-3 posts are the same type
+    if len(recent_types) >= 2:
+        last_two_types = [t.lower() if t else '' for t in recent_types[-2:]]
+        if last_two_types[0] == last_two_types[1] and last_two_types[0] != '':
+            type_repetition_warning += f"⛔ ALERTA: Los últimos 2 posts fueron del tipo '{last_two_types[0]}'. ESTÁ PROHIBIDO usar este tipo hoy.\n"
+    
+    # Analyze channel variety
+    channel_counts = {}
+    for ch in recent_channels:
+        channel_counts[ch] = channel_counts.get(ch, 0) + 1
+    
+    # Analyze topic variety (check for repeated topics)
+    topic_counts = {}
+    for topic in recent_topics:
+        # Normalize topic (remove common words)
+        normalized = ' '.join([w for w in topic.split() if len(w) > 4])
+        if normalized:
+            topic_counts[normalized] = topic_counts.get(normalized, 0) + 1
 
     # --- 2. STRATEGY PHASE ---
-    strategy_prompt = (
-        f"ACTÚA COMO: Director de Estrategia Comercial. FECHA: {payload.date}\n"
-        f"FASE AGRÍCOLA: {sales_context['phase']} ({sales_context['name']}).\n"
-        f"ACCIONES SUGERIDAS: {', '.join(sales_context['actions'])}.\n"
-        f"EFEMÉRIDES: {important_dates}.\n"
-        f"PREFERENCIA USUARIO: {payload.category or 'Ninguna (Decide tú)'}.\n\n"
-        
-        "HISTORIAL RECIENTE (TUS ÚLTIMAS DECISIONES):\n"
-        f"- {recent_history or 'Sin historial previo.'}\n\n"
-
-        "REGLAS DE VARIEDAD (CRÍTICO - SÍGUELAS O FALLARÁ LA ESTRATEGIA):\n"
-        f"{'⛔ ALERTA: EXCESO DE PROMOS DETECTADO. ESTÁ PROHIBIDO ELEGIR TIPO `promo` PARA ESTE DÍA. USA EDUCATIVO/ENGAGEMENT.' if penalize_promo else ''}\n"
+    # Check if we're over-focusing on a single topic (e.g., calefacción)
+    # Use both topics and keywords for better detection
+    calefaccion_count = sum(1 for t in recent_topics if 'calefacc' in t or 'calefacción' in t)
+    calefaccion_count += sum(1 for k in recent_topic_keywords if 'calefacc' in k)
+    heladas_count = sum(1 for t in recent_topics if 'helada' in t)
+    heladas_count += sum(1 for k in recent_topic_keywords if 'helada' in k)
+    invernadero_count = sum(1 for t in recent_topics if 'invernader' in t)
+    invernadero_count += sum(1 for k in recent_topic_keywords if 'invernader' in k)
+    mantenimiento_count = sum(1 for t in recent_topics if 'mantenimiento' in t)
+    mantenimiento_count += sum(1 for k in recent_topic_keywords if 'mantenimiento' in k)
+    
+    # Also check in captions for more comprehensive detection
+    for p in recent_posts:
+        if p.caption:
+            caption_lower = p.caption.lower()
+            if 'calefacc' in caption_lower or 'calefacción' in caption_lower:
+                calefaccion_count += 0.5  # Partial match
+            if 'helada' in caption_lower:
+                heladas_count += 0.5
+            if 'invernader' in caption_lower:
+                invernadero_count += 0.5
+    
+    over_focus_warning = ""
+    if calefaccion_count >= 2:
+        over_focus_warning = f"⛔ ALERTA CRÍTICA: Ya se han generado {int(calefaccion_count)} posts sobre calefacción recientemente. ESTÁ PROHIBIDO usar este tema hoy. Busca otros temas relevantes para la temporada.\n"
+    if heladas_count >= 3:
+        over_focus_warning += f"⛔ ALERTA CRÍTICA: Ya se han generado {int(heladas_count)} posts sobre heladas recientemente. ESTÁ PROHIBIDO usar este tema hoy. Elige un tema completamente diferente.\n"
+    if mantenimiento_count >= 3:
+        over_focus_warning += f"⛔ ALERTA: Ya se han generado {int(mantenimiento_count)} posts sobre mantenimiento recientemente. Varía el tema significativamente.\n"
+    if invernadero_count >= 5:
+        over_focus_warning += f"⛔ ALERTA: Ya se han generado {int(invernadero_count)} posts sobre invernaderos recientemente. Considera otros temas agrícolas (campo abierto, ganadería, forestal, etc.).\n"
+    
+    # Suggest alternative topics for December
+    alternative_topics_december = [
+        "Planificación del ciclo primavera 2026",
+        "Optimización de recursos y costos",
+        "Preparación de suelo para próximo ciclo",
+        "Análisis de resultados del año",
+        "Nuevas tecnologías y tendencias",
+        "Gestión de inventario y almacén",
+        "Capacitación y educación agrícola",
+        "Sustentabilidad y buenas prácticas",
+        "Optimización de riego",
+        "Manejo de cultivos de frío (avena, trigo, alfalfa)"
+    ]
+    
+    # Build strategy prompt (avoiding backslashes in f-string expressions)
+    strategy_prompt = f"ACTÚA COMO: Director de Estrategia Comercial. FECHA: {payload.date}\n"
+    strategy_prompt += f"FASE AGRÍCOLA: {sales_context['phase']} ({sales_context['name']}).\n"
+    strategy_prompt += f"ACCIONES SUGERIDAS: {', '.join(sales_context['actions'])}.\n"
+    strategy_prompt += f"EFEMÉRIDES: {important_dates}.\n"
+    strategy_prompt += f"PREFERENCIA USUARIO: {payload.category or 'Ninguna (Decide tú)'}.\n"
+    
+    # Add suggested topic if provided
+    if payload.suggested_topic:
+        strategy_prompt += f"💡 TEMA SUGERIDO POR EL USUARIO: {payload.suggested_topic}\n⚠️ USA ESTE TEMA COMO BASE, pero puedes adaptarlo o expandirlo según sea necesario.\n\n"
+    
+    # Add over focus warning if present
+    if over_focus_warning:
+        strategy_prompt += f"{over_focus_warning}\n"
+    
+    # Continue building the prompt
+    strategy_prompt += "HISTORIAL RECIENTE (TUS ÚLTIMAS DECISIONES):\n"
+    strategy_prompt += f"- {recent_history or 'Sin historial previo.'}\n\n"
+    
+    # Add alternative topics if needed
+    if over_focus_warning and dt.month == 12:
+        alt_topics = ', '.join(alternative_topics_december[:5]) + '...'
+        strategy_prompt += f"💡 TEMAS ALTERNATIVOS SUGERIDOS (para evitar repetición): {alt_topics}\n"
+    
+    if dt.month == 12 and (calefaccion_count >= 1 or heladas_count >= 2):
+        alt_topics_full = ', '.join(alternative_topics_december)
+        strategy_prompt += f"📋 TEMAS ALTERNATIVOS PARA DICIEMBRE (si necesitas ideas): {alt_topics_full}\n"
+    
+    strategy_prompt += "REGLAS DE VARIEDAD (CRÍTICO - SÍGUELAS O FALLARÁ LA ESTRATEGIA):\n"
+    
+    # Add promo penalty warning if needed
+    if penalize_promo:
+        strategy_prompt += "⛔ ALERTA: EXCESO DE PROMOS DETECTADO. ESTÁ PROHIBIDO ELEGIR TIPO `Promoción puntual` PARA ESTE DÍA. USA EDUCATIVO/ENGAGEMENT.\n"
+    
+    # Add type repetition warning if needed
+    if type_repetition_warning:
+        strategy_prompt += type_repetition_warning
+    
+    strategy_prompt += (
         "- NO repitas el mismo TIPO de post que el día anterior.\n"
-        "- NO repitas el mismo PRODUCTO/TEMA que en los últimos 3 días.\n"
+        "- NO repitas el mismo TIPO de post que en los últimos 2 días.\n"
+        "- NO repitas el mismo CANAL que el día anterior (varía entre wa-status, fb-post, tiktok, etc.).\n"
+        "- NO repitas el mismo TEMA/TOPIC que en los últimos 3 días.\n"
+        "- NO repitas el mismo PRODUCTO que en los últimos 3 días.\n"
         "- El éxito depende de mezclar: Venta (20%), Educación (40%), Entretenimiento (20%), Comunidad (20%).\n"
-        "- PRIORIZA tipos como: Infografías, Memes, Kits, UGC, Tutoriales.\n\n"
-
-        "TIPOS DE POST DISPONIBLES (ELIGE UNO DE ESTA LISTA):\n"
-        f"{POST_TYPES_DEFINITIONS}\n\n"
-
-        "TU TAREA: Decide el TEMA del post de hoy y el TIPO DE POST exacto.\n"
-        "RESPONDE SOLO JSON:\n"
-        "{\n"
-        '  "topic": "Tema principal (ej. Preparación de suelo)",\n'
-        '  "post_type": "Escribe EXACTAMENTE el nombre del tipo (ej. Infografías, Memes/tips rápidos, Kits, etc.)",\n'
-        '  "search_needed": true/false,\n'
-        '  "search_keywords": "términos de búsqueda para base de datos (ej. arado, fertilizante inicio)"\n'
-        "}"
+        "- PRIORIZA tipos EDUCATIVOS como: Infografías, Memes/tips rápidos, Tutoriales, Checklist operativo, FAQ/Mitos.\n"
+        "- PRIORIZA tipos de ENGAGEMENT como: Caso de éxito/UGC, Antes/Después, Convocatoria a UGC.\n"
+        "- USA 'Promoción puntual' SOLO cuando realmente haya una oferta especial o liquidación.\n"
+        "- VARÍA los canales: no uses siempre fb-post, alterna con wa-status, tiktok, reels.\n"
+        "- VARÍA los temas: aunque la fase agrícola sea 'protección contra frío', puedes hablar de:\n"
+        "  * Preparación para el siguiente ciclo\n"
+        " * Planificación y organización\n"
+        " * Mantenimiento preventivo general (no solo calefacción)\n"
+        " * Educación sobre otros temas agrícolas\n"
+        " * Casos de éxito y resultados\n"
+        " * NO te limites solo a calefacción/heladas - hay más temas relevantes.\n\n"
+        
+        f"ANÁLISIS DE VARIEDAD RECIENTE:\n"
+        f"- Tipos de post usados (últimos {len(recent_types)}): {', '.join(recent_types[-5:]) if recent_types else 'Ninguno'}\n"
+        f"- Distribución de tipos: {dict(type_counter.most_common(5)) if type_counter else 'Ninguno'}\n"
+        f"- ⚠️ Si ves que un tipo se repite 2+ veces, ELIGE UNO DIFERENTE.\n"
+        f"- Canales usados: {', '.join(set(recent_channels[:5])) if recent_channels else 'Ninguno'}\n"
+        f"- Temas/topics recientes: {', '.join(recent_topics[:5]) if recent_topics else 'Ninguno'}\n"
+        f"- Palabras clave frecuentes: {', '.join(list(recent_topic_keywords)[:8]) if recent_topic_keywords else 'Ninguna'}\n"
+        f"- ⚠️ EVITA repetir estos temas/palabras clave en tu decisión de hoy.\n"
+        f"- ⚠️ Si ves muchas menciones de 'calefacción', 'heladas', 'invernadero', elige un tema DIFERENTE.\n"
+        f"- ⚠️ CONTEO ESPECÍFICO: Calefacción={calefaccion_count}, Heladas={heladas_count}, Invernaderos={invernadero_count}, Mantenimiento={mantenimiento_count}\n"
+        f"- ⚠️ CONTEO DE PROMOS: {promo_count} de {total_recent} posts recientes son promos ({promo_count/total_recent*100:.0f}%)\n"
+        f"- Si algún conteo es >= 2, EVITA ese tema completamente hoy.\n\n"
     )
+    
+    strategy_prompt += "TIPOS DE POST DISPONIBLES (ELIGE UNO DE ESTA LISTA - VARÍA RESPECTO A LOS ÚLTIMOS DÍAS):\n"
+    strategy_prompt += f"{POST_TYPES_DEFINITIONS}\n\n"
+    
+    strategy_prompt += "TIPOS RECOMENDADOS PARA VARIEDAD (prioriza estos si has usado muchos 'Promoción puntual'):\n"
+    strategy_prompt += "- Infografías: Muy educativo, alto engagement\n"
+    strategy_prompt += "- Memes/tips rápidos: Divertido, fácil de compartir\n"
+    strategy_prompt += "- Tutorial corto: Educativo y práctico\n"
+    strategy_prompt += "- Checklist operativo: Útil y accionable\n"
+    strategy_prompt += "- Caso de éxito / UGC: Prueba social, genera confianza\n"
+    strategy_prompt += "- Antes / Después: Visualmente impactante\n"
+    strategy_prompt += "- FAQ / Mitos: Remueve objeciones\n"
+    strategy_prompt += "- ROI / números rápidos: Justifica inversión\n"
+    strategy_prompt += "\n"
+    strategy_prompt += "⚠️ USA 'Promoción puntual' SOLO cuando realmente haya una oferta especial, liquidación o alta rotación urgente.\n"
+    strategy_prompt += "⚠️ NO uses 'Promoción puntual' como tipo por defecto - varía con tipos educativos y de engagement.\n\n"
+
+    strategy_prompt += "TU TAREA: Decide el TEMA del post de hoy y el TIPO DE POST exacto.\n"
+    strategy_prompt += "IMPORTANTE SOBRE TEMAS (CRÍTICO):\n"
+    strategy_prompt += "- Las 'ACCIONES SUGERIDAS' son solo sugerencias, NO son obligatorias.\n"
+    strategy_prompt += "- Puedes elegir temas relacionados pero DIFERENTES a las acciones sugeridas.\n"
+    strategy_prompt += "- Ejemplo: Si la acción es 'Calefacción', puedes hablar de:\n"
+    strategy_prompt += "  * Planificación del siguiente ciclo (maíz, frijol para primavera)\n"
+    strategy_prompt += "  * Preparación de suelo para siembra\n"
+    strategy_prompt += "  * Optimización de recursos y costos\n"
+    strategy_prompt += "  * Educación sobre otros aspectos agrícolas (riego, fertilización, etc.)\n"
+    strategy_prompt += "  * Casos de éxito o resultados del año\n"
+    strategy_prompt += "  * Gestión de inventario y organización\n"
+    strategy_prompt += "  * Cultivos de frío actuales (avena, trigo, alfalfa) - no solo invernaderos\n"
+    strategy_prompt += "  * Tecnología y innovación agrícola\n"
+    strategy_prompt += "- VARÍA los temas incluso dentro de la misma fase agrícola.\n"
+    strategy_prompt += "- NO te limites solo a 'protección contra frío' - hay muchos otros temas relevantes en diciembre.\n"
+    strategy_prompt += "- Considera que en diciembre también se prepara para el ciclo primavera-verano.\n\n"
+    strategy_prompt += "RESPONDE SOLO CON EL JSON:\n"
+    strategy_prompt += "{\n"
+    strategy_prompt += '  "topic": "Tema principal (ej. Preparación de suelo, Planificación ciclo 2026, Optimización recursos) - DEBE SER DIFERENTE a temas recientes",\n'
+    strategy_prompt += '  "post_type": "Escribe EXACTAMENTE el nombre del tipo (ej. Infografías, Memes/tips rápidos, Kits, etc.)",\n'
+    strategy_prompt += '  "search_needed": true/false,\n'
+    strategy_prompt += '  "search_keywords": "términos de búsqueda para base de datos (ej. arado, fertilizante inicio)"\n'
+    strategy_prompt += "}"
     
     try:
         strat_resp = client.messages.create(
@@ -919,22 +1217,58 @@ async def generate_social_copy(
     # Build product details for image prompt if product is selected
     selected_product_info = ""
     if found_products:
-        # Get first product details for context
+        # Get first product details for context with full information
         first_product = found_products[0]
-        selected_product_info = f"\nProducto seleccionado: {first_product['name']} (Categoría: {first_product['category']}, SKU: {first_product['sku']})"
+        # Fetch full product details from DB for better context
+        try:
+            pid = int(first_product['id'])
+            p_obj = db.query(Product).filter(Product.id == pid).first()
+            if p_obj:
+                product_desc = p_obj.description or "Sin descripción disponible"
+                product_specs = p_obj.specifications or {}
+                specs_str = ", ".join([f"{k}: {v}" for k, v in product_specs.items()]) if isinstance(product_specs, dict) else str(product_specs)
+                selected_product_info = (
+                    f"\n📦 PRODUCTO SELECCIONADO (USA ESTA INFORMACIÓN PARA GENERAR CONTENIDO PRECISO):\n"
+                    f"- Nombre: {first_product['name']}\n"
+                    f"- Categoría: {first_product['category']}\n"
+                    f"- SKU: {first_product['sku']}\n"
+                    f"- Descripción: {product_desc}\n"
+                    f"- Especificaciones: {specs_str if specs_str else 'No disponibles'}\n"
+                    f"- Stock: {'✅ Disponible' if first_product.get('inStock') else '⚠️ Consultar disponibilidad'}\n"
+                    f"- Uso típico: {first_product.get('category', 'Agrícola')} - {product_desc[:200] if len(product_desc) > 200 else product_desc}\n"
+                    f"\n⚠️ IMPORTANTE: El caption y el prompt de imagen DEBEN reflejar el uso real, propósito y características de este producto específico.\n"
+                    f"Investiga mentalmente: ¿Para qué se usa este producto? ¿En qué cultivos? ¿Qué problema resuelve? ¿Cómo se instala/usa?\n"
+                )
+            else:
+                selected_product_info = f"\nProducto seleccionado: {first_product['name']} (Categoría: {first_product['category']}, SKU: {first_product['sku']})"
+        except:
+            selected_product_info = f"\nProducto seleccionado: {first_product['name']} (Categoría: {first_product['category']}, SKU: {first_product['sku']})"
 
-    # Build deduplication context for AI
+    # Build deduplication context for AI (includes products, categories, channels, topics)
     dedup_info = ""
-    if recent_product_ids or recent_categories:
-        dedup_info = "\n\n⚠️ IMPORTANTE - EVITA REPETIR:\n"
+    if recent_product_ids or recent_categories or recent_channels or recent_topics:
+        dedup_info = "\n\n⚠️ IMPORTANTE - EVITA REPETIR (Últimos 10 días):\n"
         if recent_product_ids:
-            dedup_info += f"- Productos usados recientemente (últimos 10 días): {len(recent_product_ids)} productos\n"
+            dedup_info += f"- Productos usados: {len(recent_product_ids)} productos diferentes\n"
         if recent_categories:
-            dedup_info += f"- Categorías usadas recientemente: {', '.join(list(recent_categories)[:5])}\n"
+            dedup_info += f"- Categorías usadas: {', '.join(list(recent_categories)[:5])}\n"
+        if recent_channels:
+            unique_channels = list(set(recent_channels))
+            dedup_info += f"- Canales usados recientemente: {', '.join(unique_channels[:5])}\n"
+            dedup_info += "  → VARÍA el canal: no uses el mismo que ayer. Alterna entre wa-status, fb-post, tiktok, reels.\n"
+        if recent_topics:
+            # Show most common topics to avoid
+            from collections import Counter
+            topic_counter = Counter(recent_topics)
+            top_topics = [t for t, _ in topic_counter.most_common(3)]
+            dedup_info += f"- Topics/temas recientes: {', '.join([t[:30] for t in top_topics])}\n"
         if used_in_batch_ids:
             dedup_info += f"- Productos ya usados en esta generación: {len(used_in_batch_ids)} productos\n"
+        dedup_info += "\nREGLAS:\n"
         dedup_info += "- Puedes repetir el TEMA (ej. heladas) pero usa DIFERENTES productos o soluciones.\n"
         dedup_info += "- Si el tema es urgente (heladas, siembra), está bien repetirlo por 1 semana pero variando productos.\n"
+        dedup_info += "- NO uses el mismo CANAL que el post de ayer.\n"
+        dedup_info += "- NO uses el mismo TIPO DE POST que el post de ayer.\n"
     
     # Load Durango sector context from markdown files
     durango_context = load_durango_context(month=dt.month)
@@ -943,12 +1277,24 @@ async def generate_social_copy(
         f"ACTÚA COMO: Social Media Manager. TEMA ELEGIDO: {strat_data.get('topic')}\n"
         f"TIPO DE POST: {strat_data.get('post_type')}\n"
         f"{selected_product_info}\n\n"
-        f"CONTEXTO REGIONAL DURANGO (USA ESTA INFORMACIÓN PARA CONTENIDO RELEVANTE):\n"
+        f"CONTEXTO REGIONAL DURANGO (USA ESTA INFORMACIÓN PARA CONTENIDO RELEVANTE, PERO NO TE LIMITES SOLO A ESTO):\n"
         f"{durango_context}\n\n"
+        f"⚠️ NOTA SOBRE EL CONTEXTO: El contexto de Durango menciona actividades estacionales, pero NO debes limitarte solo a esos temas.\n"
+        f"Puedes hablar de otros temas relevantes como planificación, optimización, educación, casos de éxito, etc.\n\n"
         f"{dedup_info}\n"
         
         "PRODUCTOS ENCONTRADOS EN ALMACÉN (Usa uno si aplica):\n"
         f"{catalog_str}\n\n"
+        "⚠️ CONTEXTO DEL PRODUCTO (CRÍTICO):\n"
+        "Cuando selecciones un producto, investiga mentalmente:\n"
+        "- ¿Para qué se usa este producto específicamente? (riego, protección, siembra, etc.)\n"
+        "- ¿En qué tipo de cultivos o actividades se utiliza? (maíz, frijol, invernaderos, ganadería, etc.)\n"
+        "- ¿Qué problema resuelve? (ahorro de agua, protección contra heladas, aumento de producción, etc.)\n"
+        "- ¿Cómo se instala o usa? (pasos básicos, requisitos técnicos)\n"
+        "- ¿Qué beneficios específicos ofrece? (durabilidad, eficiencia, costo-beneficio)\n"
+        "\n"
+        "El caption y el prompt de imagen DEBEN reflejar esta información específica del producto.\n"
+        "NO uses descripciones genéricas - sé específico sobre el producto seleccionado.\n\n"
         
         f"{CHANNEL_FORMATS}\n\n"
         
@@ -957,30 +1303,58 @@ async def generate_social_copy(
         "2. Si no hay productos relevantes, haz un post genérico de marca/educativo.\n"
         "3. Prioriza productos con Stock ✅.\n"
         "4. ELIGE UN CANAL ESPECÍFICO de la lista anterior y adapta el contenido:\n"
-        "   - Si es TikTok: Genera prompts para 2-3 imágenes del carrusel\n"
-        "   - Si es Reel: Indica que necesita música y texto en pantalla\n"
-        "   - Si es WA Status: Formato vertical, contenido urgente/directo\n"
-        "   - Si es FB/IG Post: Puede ser más detallado y educativo\n"
-        "5. Genera el contenido adaptado al canal.\n\n"
+        f"   ⚠️ Canales usados recientemente: {', '.join(set(recent_channels[:5])) if recent_channels else 'Ninguno'}\n"
+        "   → EVITA usar el mismo canal que ayer. Varía entre canales.\n\n"
+        "   ⚠️⚠️⚠️ REGLAS CRÍTICAS DE CAPTION POR CANAL ⚠️⚠️⚠️:\n"
+        "   - WA STATUS (wa-status): Caption MÍNIMO (máx 50 chars). La imagen/video comunica TODO.\n"
+        "   - FB/IG STORIES: Caption MÍNIMO (máx 50 chars). La imagen/video comunica TODO.\n"
+        "   - TIKTOK: Caption MUY CORTO (máx 150 chars). TODO el texto va EN LAS IMÁGENES del carrusel.\n"
+        "   - REELS (fb-reel, ig-reel): Caption CORTO (máx 100 chars). El texto principal va EN EL VIDEO con subtítulos.\n"
+        "   - FB/IG POST (fb-post, ig-post): Caption puede ser LARGO (hasta 2000 chars). Aquí sí puedes ser detallado.\n\n"
+        "   IMPORTANTE: Para wa-status, stories, tiktok y reels, el CAPTION es secundario.\n"
+        "   La IMAGEN/VIDEO debe ser autoexplicativa y comunicar el mensaje completo.\n\n"
+        "   - Si es TikTok: Genera prompts para 2-3 imágenes del carrusel CON TEXTO GRANDE EN CADA IMAGEN\n"
+        "   - Si es Reel: Indica que necesita música y texto EN EL VIDEO con subtítulos\n"
+        "   - Si es WA Status: Formato vertical, contenido urgente/directo, caption mínimo\n"
+        "   - Si es FB/IG Post: Puede ser más detallado y educativo, caption largo permitido\n"
+        "5. Genera el contenido adaptado al canal, respetando las reglas de caption arriba.\n\n"
         
         "--- INSTRUCCIONES ESPECÍFICAS PARA image_prompt ---\n"
         "El campo 'image_prompt' DEBE ser un prompt detallado y técnico para generación de imágenes (estilo IMPAG).\n"
         "Sigue este formato estructurado:\n\n"
         
-        "FORMATO REQUERIDO:\n"
-        "Genera una imagen cuadrada 1080×1080 px, estilo [flyer técnico/paisaje agrícola/catálogo técnico] IMPAG, con diseño limpio, moderno y profesional.\n"
+        "⚠️⚠️⚠️ ADAPTACIÓN POR CANAL (CRÍTICO) ⚠️⚠️⚠️:\n"
+        "- Para wa-status, stories, tiktok, reels: La imagen DEBE ser AUTOEXPLICATIVA con TEXTO GRANDE Y VISIBLE.\n"
+        "  El usuario debe entender el mensaje SOLO viendo la imagen, sin leer el caption.\n"
+        "- Para fb-post, ig-post: La imagen puede ser más técnica/detallada, el caption puede complementar.\n\n"
+        
+        "FORMATO REQUERIDO (adaptar dimensiones al canal):\n"
+        "- wa-status/stories/tiktok/reels: Vertical 1080×1920 px\n"
+        "- fb-post/ig-post: Cuadrado 1080×1080 px\n"
+        "Estilo [flyer técnico/paisaje agrícola/catálogo técnico] IMPAG, con diseño limpio, moderno y profesional.\n"
         "Mantén siempre la estética corporativa IMPAG: fondo agrícola difuminado, tonos blanco–gris, acentos verde–azul, sombras suaves, tipografías gruesas para títulos y delgadas para texto técnico.\n\n"
         
         "Instrucciones de diseño detalladas:\n"
-        "1. LOGO IMPAG:\n"
-        "   - Colocar el logo 'IMPAG Agricultura Inteligente' en la esquina superior derecha, sin deformarlo y manteniendo la proporción.\n"
-        "   - O mencionar 'espacio reservado para logo IMPAG en esquina superior derecha'.\n\n"
+        "1. LOGOS (OBLIGATORIO):\n"
+        "   - Logo IMPAG: Colocar el logo oficial de 'IMPAG Agricultura Inteligente' en la esquina superior derecha, sin deformarlo y manteniendo la proporción.\n"
+        "   - Logo 'Todo para el Campo': Si el contexto lo permite, incluir también el logo de 'Todo para el Campo' en la esquina inferior izquierda o derecha (según composición).\n"
+        "   - Ambos logos deben ser visibles, nítidos y con buen contraste sobre el fondo.\n"
+        "   - Los logos son parte esencial de la identidad visual IMPAG - NUNCA los omitas.\n\n"
         
-        "2. ELEMENTO PRINCIPAL:\n"
+        "2. ELEMENTO PRINCIPAL (CON PERSONAS CUANDO APLIQUE):\n"
         "   - Si hay producto: Imagen realista del producto en alta resolución, fotorealista, iluminación de estudio suave o golden hour.\n"
+        "   - ⚠️ INCLUYE PERSONAS cuando sea apropiado:\n"
+        "     * Para productos agrícolas: Agricultor/productor mexicano usando el producto en campo, sosteniéndolo, o mostrándolo como recomendación.\n"
+        "     * Para productos ganaderos: Ganadero usando el producto, mostrándolo en uso real.\n"
+        "     * Para productos forestales: Ingeniero forestal o trabajador forestal usando el producto.\n"
+        "     * Para productos de riego/instalación: Ingeniero agrónomo o técnico instalando o mostrando el producto.\n"
+        "     * Las personas deben verse profesionales, auténticas, con ropa de trabajo agrícola/ganadero/forestal apropiada.\n"
+        "     * Las personas deben estar interactuando con el producto de forma natural (sosteniéndolo, instalándolo, usándolo).\n"
         "   - Si es paisaje: Paisaje agrícola realista del norte de México (Durango), cultivos en hileras, iluminación natural suave.\n"
         "   - Si es kit: Componentes completamente visibles, montados o desglosados en técnica 'knolling', cables ordenados.\n"
-        "   - Mantener proporción, ubicación, integración suave con fondo, estilo profesional tipo catálogo.\n\n"
+        "   - Mantener proporción, ubicación, integración suave con fondo, estilo profesional tipo catálogo.\n"
+        "   ⚠️ PARA STORIES/STATUS/TIKTOK/REELS: Agrega TEXTO GRANDE Y VISIBLE en la imagen que comunique el mensaje principal.\n"
+        "   El texto debe ser legible desde lejos, con buen contraste, tamaño mínimo 60-80px.\n\n"
         
         "3. ESPECIFICACIONES TÉCNICAS (si aplica):\n"
         "   - Bloque técnico con viñetas: 📏 Especificaciones Técnicas:\n"
@@ -1003,7 +1377,8 @@ async def generate_social_copy(
         "   - Profundidad de campo controlada (bokeh en fondos si aplica)\n\n"
         
         "EJEMPLOS DE PROMPTS CORRECTOS:\n"
-        "- 'Genera una imagen cuadrada 1080×1080 px, estilo flyer técnico IMPAG, con diseño limpio, moderno y profesional. Mantén siempre la estética corporativa IMPAG: fondo agrícola difuminado, tonos blanco–gris, acentos verde–azul, sombras suaves, tipografías gruesas para títulos y delgadas para texto técnico. Logo IMPAG en esquina superior derecha. Imagen realista del producto [nombre] en alta resolución, fotorealista, iluminación de estudio suave. Bloque técnico con especificaciones: [lista de specs]. Pie del flyer: todoparaelcampo.com.mx, Envíos a todo México, WhatsApp: 677-119-7737. Estilo: técnico–comercial IMPAG, moderno, limpio, con fuerte presencia visual del producto, enfoque agrícola profesional.'\n\n"
+        "- 'Genera una imagen cuadrada 1080×1080 px, estilo flyer técnico IMPAG, con diseño limpio, moderno y profesional. Mantén siempre la estética corporativa IMPAG: fondo agrícola difuminado, tonos blanco–gris, acentos verde–azul, sombras suaves, tipografías gruesas para títulos y delgadas para texto técnico. Logo IMPAG 'Agricultura Inteligente' en esquina superior derecha, logo 'Todo para el Campo' en esquina inferior izquierda. Imagen realista del producto [nombre] en alta resolución, fotorealista, con un agricultor/productor mexicano sosteniéndolo o usándolo en campo, iluminación de estudio suave o golden hour. El agricultor debe verse profesional, auténtico, con ropa de trabajo agrícola. Bloque técnico con especificaciones: [lista de specs]. Pie del flyer: todoparaelcampo.com.mx, Envíos a todo México, WhatsApp: 677-119-7737. Estilo: técnico–comercial IMPAG, moderno, limpio, con fuerte presencia visual del producto, enfoque agrícola profesional.'\n\n"
+        "- 'Imagen vertical 1080×1920 px para WA Status, estilo story IMPAG. Logo IMPAG en esquina superior derecha, logo Todo para el Campo en esquina inferior. TEXTO GRANDE Y VISIBLE en el centro comunicando el mensaje principal (tamaño mínimo 80px, buen contraste). Imagen del producto [nombre] destacada, con un ingeniero agrónomo o técnico mostrándolo como recomendación, en campo agrícola de Durango, iluminación natural. El técnico debe verse profesional, sosteniendo o señalando el producto. Colores vibrantes pero naturales. El texto en la imagen comunica TODO el mensaje sin necesidad de leer el caption.'\n\n"
         
         "OUTPUT JSON (MUY IMPORTANTE - LEE ESTO):\n"
         "- TODOS los strings JSON deben estar entre comillas dobles y CERRADOS correctamente\n"
@@ -1038,18 +1413,37 @@ async def generate_social_copy(
         '  "posting_time": "10:00",\n'
         '  "notes": "Carrusel TikTok con 3 slides..."\n'
         "}\n\n"
+        "EJEMPLO CORRECTO (WA Status - caption mínimo):\n"
+        "{\n"
+        '  "selected_category": "Categoría",\n'
+        '  "selected_product_id": "123",\n'
+        '  "channel": "wa-status",\n'
+        '  "caption": "🔥 Llegó hoy",\n'
+        '  "image_prompt": "Imagen vertical 1080×1920, estilo story IMPAG. Logo IMPAG \'Agricultura Inteligente\' en esquina superior derecha, logo \'Todo para el Campo\' en esquina inferior izquierda. TEXTO GRANDE Y VISIBLE en el centro (tamaño 80px, buen contraste): \\"NUEVO PRODUCTO LLEGÓ HOY\\". Imagen del producto [nombre específico] destacada, con un agricultor/productor mexicano sosteniéndolo o mostrándolo como recomendación, en campo agrícola de Durango, iluminación natural golden hour. El agricultor debe verse profesional, auténtico, con ropa de trabajo agrícola. Colores vibrantes pero naturales. El texto en la imagen comunica TODO el mensaje sin necesidad de leer el caption.",\n'
+        '  "needs_music": true,\n'
+        '  "posting_time": "10:00",\n'
+        '  "notes": "WA Status - imagen autoexplicativa, caption mínimo"\n'
+        "}\n\n"
         "RESPONDE SOLO CON EL JSON (sin texto adicional):\n"
         "{\n"
         '  "selected_category": "...",\n'
         '  "selected_product_id": "...",\n'
         '  "channel": "wa-status|wa-broadcast|fb-post|fb-reel|tiktok (elige uno)",\n'
-        '  "caption": "...",\n'
-        '  "image_prompt": "... (SOLO si es post de 1 imagen)",\n'
-        '  "carousel_slides": ["Slide 1...", "Slide 2...", ...] (SOLO si es carrusel: TikTok 2-3, FB/IG 2-10),\n'
+        '  "caption": "... (RESPETA: wa-status/stories/tiktok/reels = MUY CORTO, fb-post = puede ser largo)",\n'
+        '  "image_prompt": "... (SOLO si es post de 1 imagen. Para stories/status debe ser autoexplicativa)",\n'
+        '  "carousel_slides": ["Slide 1 CON TEXTO GRANDE...", "Slide 2 CON TEXTO...", ...] (SOLO si es carrusel: TikTok 2-3, FB/IG 2-10),\n'
         '  "needs_music": true/false,\n'
         '  "posting_time": "...",\n'
         '  "notes": "..."\n'
-        "}"
+        "}\n\n"
+        "⚠️ RECUERDA: Para wa-status, stories, tiktok y reels, el caption debe ser MÍNIMO.\n"
+        "La imagen/video debe comunicar el mensaje completo sin depender del caption.\n\n"
+        "⚠️⚠️⚠️ REGLAS FINALES CRÍTICAS ⚠️⚠️⚠️:\n"
+        "1. SIEMPRE incluye el logo IMPAG 'Agricultura Inteligente' en esquina superior derecha.\n"
+        "2. Cuando sea apropiado, incluye el logo 'Todo para el Campo' en esquina inferior.\n"
+        "3. SIEMPRE incluye personas (agricultores, productores, ingenieros, técnicos) usando o mostrando el producto cuando sea relevante.\n"
+        "4. El caption y el prompt de imagen DEBEN reflejar el uso real, propósito y características específicas del producto seleccionado.\n"
+        "5. NO uses descripciones genéricas - sé específico sobre el producto y su uso en agricultura/ganadería/forestal de Durango."
     )
 
     try:
@@ -1197,7 +1591,11 @@ Responde SOLO con el JSON, sin explicaciones ni texto adicional.""",
         cta=data.get("cta"),
         selected_product_id=str(data.get("selected_product_id", "")),
         selected_category=data.get("selected_category"),
-        selected_product_details=product_details
+        selected_product_details=product_details,
+        post_type=strat_data.get("post_type"), # Include post_type from strategy phase
+        channel=data.get("channel"),
+        carousel_slides=data.get("carousel_slides"),
+        needs_music=data.get("needs_music")
     )
 
 

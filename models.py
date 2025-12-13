@@ -262,6 +262,7 @@ class SocialPost(Base):
     channel = Column(String(50), nullable=True) # wa-status, fb-post, tiktok, etc.
     carousel_slides = Column(JSON, nullable=True) # Array of slide prompts for carousels (TikTok, FB/IG)
     needs_music = Column(Boolean, default=False) # Whether this content needs background music
+    user_feedback = Column(String(20), nullable=True) # 'like', 'dislike', or None
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 # Parse the database URL to get the endpoint ID
