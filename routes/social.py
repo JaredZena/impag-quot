@@ -1010,15 +1010,33 @@ async def generate_social_copy(
         "- Si un string contiene saltos de línea (\\n), escápalos como \\\\n\n"
         "- Si un string contiene comillas, escápalas como \\\"\n"
         "- NUNCA dejes strings sin cerrar - cada \" debe tener su \" de cierre\n"
-        "- El JSON debe ser válido y parseable\n\n"
-        "EJEMPLO CORRECTO:\n"
+        "- El JSON debe ser válido y parseable\n"
+        "- IMPORTANTE PARA CARRUSELES: Si el canal es 'tiktok' o 'fb-post' con carrusel, usa 'carousel_slides' en lugar de 'image_prompt'\n\n"
+        "EJEMPLO CORRECTO (post normal):\n"
         "{\n"
         '  "selected_category": "Categoría",\n'
         '  "selected_product_id": "123",\n'
+        '  "channel": "fb-post",\n'
         '  "caption": "Texto del caption con \\n\\n para saltos de línea",\n'
-        '  "image_prompt": "Prompt detallado...",\n'
+        '  "image_prompt": "Prompt detallado para UNA imagen...",\n'
+        '  "needs_music": false,\n'
         '  "posting_time": "14:30",\n'
         '  "notes": "Estrategia explicada"\n'
+        "}\n\n"
+        "EJEMPLO CORRECTO (carrusel TikTok o FB/IG):\n"
+        "{\n"
+        '  "selected_category": "Categoría",\n'
+        '  "selected_product_id": "123",\n'
+        '  "channel": "tiktok",\n'
+        '  "caption": "Texto corto...",\n'
+        '  "carousel_slides": [\n'
+        '    "SLIDE 1 (HOOK): Imagen vertical 9:16, texto grande: ¿Error #1 en invernaderos?...",\n'
+        '    "SLIDE 2 (CONTENIDO): Imagen vertical 9:16, muestra la solución...",\n'
+        '    "SLIDE 3 (CTA): Imagen vertical 9:16, contacto y llamada a acción..."\n'
+        '  ],\n'
+        '  "needs_music": true,\n'
+        '  "posting_time": "10:00",\n'
+        '  "notes": "Carrusel TikTok con 3 slides..."\n'
         "}\n\n"
         "RESPONDE SOLO CON EL JSON (sin texto adicional):\n"
         "{\n"
@@ -1026,8 +1044,8 @@ async def generate_social_copy(
         '  "selected_product_id": "...",\n'
         '  "channel": "wa-status|wa-broadcast|fb-post|fb-reel|tiktok (elige uno)",\n'
         '  "caption": "...",\n'
-        '  "image_prompt": "... (adaptar dimensiones al canal: 1080x1920 vertical para status/reels/tiktok, 1080x1080 cuadrado para posts)",\n'
-        '  "carousel_slides": ["Prompt slide 1", "Prompt slide 2", ...] (para TikTok 2-3, FB/IG hasta 10),\n'
+        '  "image_prompt": "... (SOLO si es post de 1 imagen)",\n'
+        '  "carousel_slides": ["Slide 1...", "Slide 2...", ...] (SOLO si es carrusel: TikTok 2-3, FB/IG 2-10),\n'
         '  "needs_music": true/false,\n'
         '  "posting_time": "...",\n'
         '  "notes": "..."\n'
@@ -1181,4 +1199,5 @@ Responde SOLO con el JSON, sin explicaciones ni texto adicional.""",
         selected_category=data.get("selected_category"),
         selected_product_details=product_details
     )
+
 
