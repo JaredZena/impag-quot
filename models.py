@@ -125,6 +125,7 @@ class SupplierProduct(Base):
 
     supplier = relationship("Supplier", back_populates="products")
     product = relationship("Product", back_populates="supplier_products")
+    category = relationship("ProductCategory", foreign_keys=[category_id])
 
 class Kit(Base):
     __tablename__ = "kit"

@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from models import get_db, Product, ProductCategory, SocialPost
+from models import get_db, Product, ProductCategory, SocialPost, SupplierProduct
 from auth import verify_google_token
 
 router = APIRouter()
@@ -553,64 +553,163 @@ def get_nearby_dates(date_obj):
 
 def fetch_db_products(db: Session, limit: int = 10) -> List[Dict[str, Any]]:
     """
-    Fetch random active products from the database.
+    Fetch random active supplier products from the database with full details for ranking.
+    Uses SupplierProduct table which has embeddings for semantic search.
     """
-    db_products = db.query(Product).join(ProductCategory).filter(
-        Product.is_active == True
+    db_products = db.query(SupplierProduct).join(ProductCategory, SupplierProduct.category_id == ProductCategory.id).filter(
+        SupplierProduct.is_active == True,
+        SupplierProduct.archived_at == None
     ).limit(limit).all()
     
     catalog = []
-    for p in db_products:
-        cat_name = p.category.name if p.category else "General"
+    for sp in db_products:
+        cat_name = sp.category.name if sp.category else (sp.product.category.name if sp.product and sp.product.category else "General")
         catalog.append({
-            "id": str(p.id),
-            "name": p.name,
+            "id": str(sp.id),
+            "name": sp.name or (sp.product.name if sp.product else "Unknown"),
             "category": cat_name,
-            "inStock": p.stock > 0 if p.stock is not None else False,
-            "sku": p.sku
+            "inStock": sp.stock > 0 if sp.stock is not None else False,
+            "sku": sp.sku or (sp.product.sku if sp.product else ""),
+            "description": sp.description or (sp.product.description if sp.product else "") or "",
+            "specifications": sp.specifications or (sp.product.specifications if sp.product else {}) or {},
+            "hasDescription": bool((sp.description or (sp.product.description if sp.product else "")) and len((sp.description or (sp.product.description if sp.product else "")).strip()) > 20),
+            "hasSpecs": bool((sp.specifications or (sp.product.specifications if sp.product else {})) and (isinstance(sp.specifications or (sp.product.specifications if sp.product else {}), dict) and len((sp.specifications or (sp.product.specifications if sp.product else {}))) > 0))
         })
     return catalog
 
+def calculate_product_interest_score(product: Dict[str, Any], topic: str = "") -> float:
+    """
+    Calculate an interest score for a product based on how engaging/educational it can be.
+    Higher score = more interesting for customers.
+    """
+    score = 0.0
+    
+    # Products with descriptions are more engaging (can tell a story)
+    if product.get("hasDescription"):
+        desc_len = len(product.get("description", ""))
+        if desc_len > 100:
+            score += 3.0  # Detailed descriptions are very engaging
+        elif desc_len > 50:
+            score += 2.0
+        else:
+            score += 1.0
+    
+    # Products with specifications are educational (teachable moments)
+    if product.get("hasSpecs"):
+        score += 2.5  # Technical specs = educational content potential
+    
+    # Products with both description and specs are highly engaging
+    if product.get("hasDescription") and product.get("hasSpecs"):
+        score += 1.5  # Bonus for having both
+    
+    # Category relevance (some categories are more visually interesting)
+    category = product.get("category", "").lower()
+    visually_interesting_categories = [
+        "bombeo-solar", "kits", "estructuras", "riego", 
+        "mallasombra", "antiheladas", "acolchado"
+    ]
+    if any(cat in category for cat in visually_interesting_categories):
+        score += 1.0  # These categories make for better visual content
+    
+    # Topic relevance (if topic matches product category/keywords)
+    if topic:
+        topic_lower = topic.lower()
+        product_name_lower = product.get("name", "").lower()
+        category_lower = category
+        
+        # Check if topic keywords match product
+        topic_words = set(topic_lower.split())
+        product_words = set(product_name_lower.split() + category_lower.split())
+        if topic_words.intersection(product_words):
+            score += 2.0  # High relevance to topic
+    
+    # Products with SKU suggest they're catalog items (more professional)
+    if product.get("sku"):
+        score += 0.5
+    
+    return score
+
 def search_products(db: Session, query: str, limit: int = 10) -> List[Dict[str, Any]]:
     """
-    Search products by name/description using simple ILIKE matching.
+    Search supplier products using semantic search with embeddings when available,
+    falling back to text search (ILIKE) if embeddings are not available.
+    Uses SupplierProduct table which has embeddings for semantic search.
     """
     if not query:
         return fetch_db_products(db, limit) # Fallback to random if no query
 
-    # Split keywords for better matching (e.g. "manta termica" -> %manta% AND %termica%)
+    # Try semantic search with embeddings first
+    try:
+        from rag_system_moved.embeddings import generate_embeddings
+        query_embedding = generate_embeddings([query])[0]
+        
+        # Use vector similarity search for products with embeddings
+        db_products = db.query(SupplierProduct).join(
+            ProductCategory, SupplierProduct.category_id == ProductCategory.id
+        ).filter(
+            SupplierProduct.is_active == True,
+            SupplierProduct.archived_at == None,
+            SupplierProduct.embedding != None
+        ).order_by(
+            SupplierProduct.embedding.cosine_distance(query_embedding)
+        ).limit(limit).all()
+        
+        if db_products:
+            # Convert to catalog format
+            catalog = []
+            for sp in db_products:
+                cat_name = sp.category.name if sp.category else (sp.product.category.name if sp.product and sp.product.category else "General")
+                catalog.append({
+                    "id": str(sp.id),
+                    "name": sp.name or (sp.product.name if sp.product else "Unknown"),
+                    "category": cat_name,
+                    "inStock": sp.stock > 0 if sp.stock is not None else False,
+                    "sku": sp.sku or (sp.product.sku if sp.product else ""),
+                    "description": sp.description or (sp.product.description if sp.product else "") or "",
+                    "specifications": sp.specifications or (sp.product.specifications if sp.product else {}) or {},
+                    "hasDescription": bool((sp.description or (sp.product.description if sp.product else "")) and len((sp.description or (sp.product.description if sp.product else "")).strip()) > 20),
+                    "hasSpecs": bool((sp.specifications or (sp.product.specifications if sp.product else {})) and (isinstance(sp.specifications or (sp.product.specifications if sp.product else {}), dict) and len((sp.specifications or (sp.product.specifications if sp.product else {}))) > 0))
+                })
+            return catalog
+    except Exception as e:
+        print(f"Embedding search failed, falling back to text search: {e}")
+    
+    # Fallback to text search (ILIKE) if embeddings fail or no results
     terms = query.split()
-    filters = []
-    for term in terms:
-        filters.append(Product.name.ilike(f"%{term}%"))
     
-    # Search products (active only)
-    # matching ALL terms (AND logic) for precision, or OR for recall?
-    # Let's try OR for recall, then rank? Or just Name match.
-    # Simple approach: Name matches ANY term OR Description matches ANY term
-    
-    db_products = db.query(Product).join(ProductCategory).filter(
-        Product.is_active == True,
-        Product.name.ilike(f"%{query}%") # Try exact phrase match first or simple contain
+    # Search supplier products by name (active only)
+    db_products = db.query(SupplierProduct).join(
+        ProductCategory, SupplierProduct.category_id == ProductCategory.id
+    ).filter(
+        SupplierProduct.is_active == True,
+        SupplierProduct.archived_at == None,
+        SupplierProduct.name.ilike(f"%{query}%")
     ).limit(limit).all()
     
     # If loose match needed:
     if not db_products and len(terms) > 0:
          # Fallback: search by first word
-         db_products = db.query(Product).join(ProductCategory).filter(
-            Product.is_active == True,
-            Product.name.ilike(f"%{terms[0]}%")
-        ).limit(limit).all()
+         db_products = db.query(SupplierProduct).join(
+             ProductCategory, SupplierProduct.category_id == ProductCategory.id
+         ).filter(
+             SupplierProduct.is_active == True,
+             SupplierProduct.archived_at == None,
+             SupplierProduct.name.ilike(f"%{terms[0]}%")
+         ).limit(limit).all()
 
     catalog = []
-    for p in db_products:
-        cat_name = p.category.name if p.category else "General"
+    for sp in db_products:
+        cat_name = sp.category.name if sp.category else (sp.product.category.name if sp.product and sp.product.category else "General")
         catalog.append({
-            "id": str(p.id),
-            "name": p.name,
+            "id": str(sp.id),
+            "name": sp.name or (sp.product.name if sp.product else "Unknown"),
             "category": cat_name,
-            "inStock": p.stock > 0 if p.stock is not None else False,
-            "sku": p.sku
+            "inStock": sp.stock > 0 if sp.stock is not None else False,
+            "sku": sp.sku or (sp.product.sku if sp.product else ""),
+            "description": sp.description or (sp.product.description if sp.product else "") or "",
+            "specifications": sp.specifications or (sp.product.specifications if sp.product else {}) or {},
+            "hasDescription": bool((sp.description or (sp.product.description if sp.product else "")) and len((sp.description or (sp.product.description if sp.product else "")).strip()) > 20),
+            "hasSpecs": bool((sp.specifications or (sp.product.specifications if sp.product else {})) and (isinstance(sp.specifications or (sp.product.specifications if sp.product else {}), dict) and len((sp.specifications or (sp.product.specifications if sp.product else {}))) > 0))
         })
     return catalog
 
@@ -1139,8 +1238,10 @@ async def generate_social_copy(
     strategy_prompt += "{\n"
     strategy_prompt += '  "topic": "Tema principal (ej. Preparación de suelo, Planificación ciclo 2026, Optimización recursos) - DEBE SER DIFERENTE a temas recientes",\n'
     strategy_prompt += '  "post_type": "Escribe EXACTAMENTE el nombre del tipo (ej. Infografías, Memes/tips rápidos, Kits, etc.)",\n'
+    strategy_prompt += '  "channel": "wa-status|wa-broadcast|fb-post|fb-reel|ig-post|ig-reel|tiktok (elige uno, DIFERENTE al usado ayer)",\n'
+    strategy_prompt += '  "preferred_category": "Categoría de producto preferida (ej. riego, mallasombra, fertilizantes) o vacío si no hay preferencia",\n'
     strategy_prompt += '  "search_needed": true/false,\n'
-    strategy_prompt += '  "search_keywords": "términos de búsqueda para base de datos (ej. arado, fertilizante inicio)"\n'
+    strategy_prompt += '  "search_keywords": "términos de búsqueda para embeddings (ej. arado, fertilizante inicio, protección heladas)"\n'
     strategy_prompt += "}"
     
     try:
@@ -1158,91 +1259,116 @@ async def generate_social_copy(
         print(f"Strategy JSON Parse Error: {e}")
         print(f"Response text: {strat_resp.content[0].text[:200] if 'strat_resp' in locals() else 'No response'}")
         # Fallback Strategy
-        strat_data = {"topic": "General", "search_needed": True, "search_keywords": ""}
+        strat_data = {"topic": "General", "post_type": "Infografías", "channel": "fb-post", "preferred_category": "", "search_needed": True, "search_keywords": ""}
     except Exception as e:
         print(f"Strategy Error: {e}")
         # Fallback Strategy
-        strat_data = {"topic": "General", "search_needed": True, "search_keywords": ""}
+        strat_data = {"topic": "General", "post_type": "Infografías", "channel": "fb-post", "preferred_category": "", "search_needed": True, "search_keywords": ""}
 
-    # --- 3. RETRIEVAL PHASE ---
-    found_products = []
-    if strat_data.get("search_needed"):
-        keywords = strat_data.get("search_keywords", "")
-        # If user overrode category, prioritize that in search? No, rely on keywords.
-        found_products = search_products(db, keywords, limit=20)  # Get more to filter
-        
-        # Filter out recently used products (last 10 days)
-        # Allow same topic but different products
-        filtered_products = []
-        for p in found_products:
-            # Skip if product was used in last 10 days (unless it's been 7+ days)
-            if p['id'] in recent_product_ids or p['id'] in used_in_batch_ids:
-                continue
-            # Skip if category was heavily used (more than 3 times in last 10 days)
-            category_count = sum(1 for cat in recent_categories if cat.lower() == p['category'].lower())
-            if category_count >= 3:
-                continue
-            filtered_products.append(p)
-        
-        # If filtering removed everything, allow some repeats but prefer different products
-        if not filtered_products:
-            # Allow products from different categories than heavily used ones
-            for p in found_products:
-                if p['category'].lower() not in [c.lower() for c in used_in_batch_categories]:
-                    filtered_products.append(p)
-                    break
-        
-        found_products = filtered_products[:15]  # Limit to 15 after filtering
-        
-        # If search yielded nothing, fallback to random active products (avoiding recent)
-        if not found_products:
-            all_products = fetch_db_products(db, limit=30)
-            for p in all_products:
-                if p['id'] not in recent_product_ids and p['id'] not in used_in_batch_ids:
-                    found_products.append(p)
-                    if len(found_products) >= 10:
-                        break
+    # --- 3. PRODUCT SELECTION PHASE (using embeddings) ---
+    selected_product_id = None
+    selected_category = None
     
-    catalog_str = "\n".join([
-        f"- {p['name']} (Cat: {p['category']}, Stock: {'✅' if p['inStock'] else '⚠️'}, ID: {p['id']})"
-        for p in found_products
-    ])
-
-    # --- 4. CREATION PHASE ---
-    brand_guardrails = (
-        "Marca IMPAG. Paleta blanco/gris con acentos verde/azul. "
-        f"Contacto: {CONTACT_INFO['whatsapp']}."
-    )
-
-    # Build product details for image prompt if product is selected
-    selected_product_info = ""
-    if found_products:
-        # Get first product details for context with full information
-        first_product = found_products[0]
-        # Fetch full product details from DB for better context
+    if strat_data.get("search_needed"):
+        search_query = strat_data.get("search_keywords", "") or strat_data.get("topic", "")
+        preferred_category = strat_data.get("preferred_category", "")
+        
+        # Use semantic search with embeddings
         try:
-            pid = int(first_product['id'])
-            p_obj = db.query(Product).filter(Product.id == pid).first()
-            if p_obj:
-                product_desc = p_obj.description or "Sin descripción disponible"
-                product_specs = p_obj.specifications or {}
-                specs_str = ", ".join([f"{k}: {v}" for k, v in product_specs.items()]) if isinstance(product_specs, dict) else str(product_specs)
+            from rag_system_moved.embeddings import generate_embeddings
+            query_embedding = generate_embeddings([search_query])[0]
+            
+            # Build query for supplier products with embeddings
+            product_query = db.query(SupplierProduct).join(
+                ProductCategory, SupplierProduct.category_id == ProductCategory.id
+            ).filter(
+                SupplierProduct.is_active == True,
+                SupplierProduct.archived_at == None,
+                SupplierProduct.embedding != None
+            )
+            
+            # Filter by preferred category if specified
+            if preferred_category:
+                product_query = product_query.filter(
+                    ProductCategory.name.ilike(f"%{preferred_category}%")
+                )
+            
+            # Get top products by vector similarity
+            candidate_products = product_query.order_by(
+                SupplierProduct.embedding.cosine_distance(query_embedding)
+            ).limit(30).all()
+            
+            # Filter out recently used products
+            filtered_candidates = []
+            for sp in candidate_products:
+                sp_id_str = str(sp.id)
+                # Skip if used recently
+                if sp_id_str in recent_product_ids or sp_id_str in used_in_batch_ids:
+                    continue
+                # Skip if category was heavily used
+                cat_name = sp.category.name if sp.category else (sp.product.category.name if sp.product and sp.product.category else "General")
+                category_count = sum(1 for cat in recent_categories if cat.lower() == cat_name.lower())
+                if category_count >= 3:
+                    continue
+                filtered_candidates.append(sp)
+            
+            # If filtering removed everything, allow some repeats
+            if not filtered_candidates:
+                for sp in candidate_products[:10]:
+                    sp_id_str = str(sp.id)
+                    if sp_id_str not in used_in_batch_ids:
+                        filtered_candidates.append(sp)
+                        break
+            
+            # Select the best product (first in similarity-ordered list after filtering)
+            if filtered_candidates:
+                selected_sp = filtered_candidates[0]
+                selected_product_id = str(selected_sp.id)
+                selected_category = selected_sp.category.name if selected_sp.category else (selected_sp.product.category.name if selected_sp.product and selected_sp.product.category else "General")
+            
+        except Exception as e:
+            print(f"Embedding-based product selection failed: {e}")
+            # Fallback to text search
+            keywords = strat_data.get("search_keywords", "") or strat_data.get("topic", "")
+            found_products = search_products(db, keywords, limit=10)
+            
+            # Filter and select
+            for p in found_products:
+                if p['id'] not in recent_product_ids and p['id'] not in used_in_batch_ids:
+                    selected_product_id = p['id']
+                    selected_category = p['category']
+                    break
+
+    # --- 4. CONTENT GENERATION PHASE ---
+    # Fetch selected product details if a product was selected
+    selected_product_info = ""
+    if selected_product_id:
+        try:
+            pid = int(selected_product_id)
+            sp_obj = db.query(SupplierProduct).filter(SupplierProduct.id == pid).first()
+            if sp_obj:
+                product_name = sp_obj.name or (sp_obj.product.name if sp_obj.product else "Unknown")
+                product_desc = sp_obj.description or (sp_obj.product.description if sp_obj.product else "") or "Sin descripción disponible"
+                product_specs = sp_obj.specifications or (sp_obj.product.specifications if sp_obj.product else {}) or {}
+                specs_str = ", ".join([f"{k}: {v}" for k, v in product_specs.items()]) if isinstance(product_specs, dict) and len(product_specs) > 0 else str(product_specs) if product_specs else "No disponibles"
+                cat_name = sp_obj.category.name if sp_obj.category else (sp_obj.product.category.name if sp_obj.product and sp_obj.product.category else "General")
+                sku = sp_obj.sku or (sp_obj.product.sku if sp_obj.product else "N/A")
+                
                 selected_product_info = (
                     f"\n📦 PRODUCTO SELECCIONADO (USA ESTA INFORMACIÓN PARA GENERAR CONTENIDO PRECISO):\n"
-                    f"- Nombre: {first_product['name']}\n"
-                    f"- Categoría: {first_product['category']}\n"
-                    f"- SKU: {first_product['sku']}\n"
+                    f"- ID: {selected_product_id}\n"
+                    f"- Nombre: {product_name}\n"
+                    f"- Categoría: {cat_name}\n"
+                    f"- SKU: {sku}\n"
                     f"- Descripción: {product_desc}\n"
-                    f"- Especificaciones: {specs_str if specs_str else 'No disponibles'}\n"
-                    f"- Stock: {'✅ Disponible' if first_product.get('inStock') else '⚠️ Consultar disponibilidad'}\n"
-                    f"- Uso típico: {first_product.get('category', 'Agrícola')} - {product_desc[:200] if len(product_desc) > 200 else product_desc}\n"
+                    f"- Especificaciones: {specs_str}\n"
                     f"\n⚠️ IMPORTANTE: El caption y el prompt de imagen DEBEN reflejar el uso real, propósito y características de este producto específico.\n"
                     f"Investiga mentalmente: ¿Para qué se usa este producto? ¿En qué cultivos? ¿Qué problema resuelve? ¿Cómo se instala/usa?\n"
+                    f"Enfócate en el valor educativo y el interés del producto para generar contenido atractivo.\n"
                 )
-            else:
-                selected_product_info = f"\nProducto seleccionado: {first_product['name']} (Categoría: {first_product['category']}, SKU: {first_product['sku']})"
-        except:
-            selected_product_info = f"\nProducto seleccionado: {first_product['name']} (Categoría: {first_product['category']}, SKU: {first_product['sku']})"
+        except Exception as e:
+            print(f"Error fetching product details: {e}")
+            selected_product_info = f"\nProducto seleccionado ID: {selected_product_id}\n"
 
     # Build deduplication context for AI (includes products, categories, channels, topics)
     dedup_info = ""
@@ -1274,37 +1400,26 @@ async def generate_social_copy(
     durango_context = load_durango_context(month=dt.month)
 
     creation_prompt = (
-        f"ACTÚA COMO: Social Media Manager. TEMA ELEGIDO: {strat_data.get('topic')}\n"
-        f"TIPO DE POST: {strat_data.get('post_type')}\n"
-        f"{selected_product_info}\n\n"
+        f"ACTÚA COMO: Social Media Manager especializado en contenido agrícola.\n\n"
+        f"ESTRATEGIA DEFINIDA:\n"
+        f"- TEMA: {strat_data.get('topic')}\n"
+        f"- TIPO DE POST: {strat_data.get('post_type')}\n"
+        f"- CANAL: {strat_data.get('channel')}\n"
+        f"{selected_product_info}\n"
         f"CONTEXTO REGIONAL DURANGO (USA ESTA INFORMACIÓN PARA CONTENIDO RELEVANTE, PERO NO TE LIMITES SOLO A ESTO):\n"
         f"{durango_context}\n\n"
         f"⚠️ NOTA SOBRE EL CONTEXTO: El contexto de Durango menciona actividades estacionales, pero NO debes limitarte solo a esos temas.\n"
         f"Puedes hablar de otros temas relevantes como planificación, optimización, educación, casos de éxito, etc.\n\n"
         f"{dedup_info}\n"
         
-        "PRODUCTOS ENCONTRADOS EN ALMACÉN (Usa uno si aplica):\n"
-        f"{catalog_str}\n\n"
-        "⚠️ CONTEXTO DEL PRODUCTO (CRÍTICO):\n"
-        "Cuando selecciones un producto, investiga mentalmente:\n"
-        "- ¿Para qué se usa este producto específicamente? (riego, protección, siembra, etc.)\n"
-        "- ¿En qué tipo de cultivos o actividades se utiliza? (maíz, frijol, invernaderos, ganadería, etc.)\n"
-        "- ¿Qué problema resuelve? (ahorro de agua, protección contra heladas, aumento de producción, etc.)\n"
-        "- ¿Cómo se instala o usa? (pasos básicos, requisitos técnicos)\n"
-        "- ¿Qué beneficios específicos ofrece? (durabilidad, eficiencia, costo-beneficio)\n"
-        "\n"
-        "El caption y el prompt de imagen DEBEN reflejar esta información específica del producto.\n"
-        "NO uses descripciones genéricas - sé específico sobre el producto seleccionado.\n\n"
-        
         f"{CHANNEL_FORMATS}\n\n"
         
         "INSTRUCCIONES:\n"
-        "1. Selecciona el mejor producto de la lista (si hay) que encaje con el tema.\n"
-        "2. Si no hay productos relevantes, haz un post genérico de marca/educativo.\n"
-        "3. Prioriza productos con Stock ✅.\n"
-        "4. ELIGE UN CANAL ESPECÍFICO de la lista anterior y adapta el contenido:\n"
+        "1. El producto ya fue seleccionado en la fase anterior. Usa la información del producto proporcionada arriba.\n"
+        "2. Si NO hay producto seleccionado, crea un post genérico de marca/educativo sobre el tema.\n"
+        "3. EL CANAL ya fue definido en la estrategia: {strat_data.get('channel')}. Adapta el contenido a este canal específico.\n"
         f"   ⚠️ Canales usados recientemente: {', '.join(set(recent_channels[:5])) if recent_channels else 'Ninguno'}\n"
-        "   → EVITA usar el mismo canal que ayer. Varía entre canales.\n\n"
+        f"   → El canal '{strat_data.get('channel')}' ya fue seleccionado. Asegúrate de adaptar el contenido a este canal.\n\n"
         "   ⚠️⚠️⚠️ REGLAS CRÍTICAS DE CAPTION POR CANAL ⚠️⚠️⚠️:\n"
         "   - WA STATUS (wa-status): Caption MÍNIMO (máx 50 chars). La imagen/video comunica TODO.\n"
         "   - FB/IG STORIES: Caption MÍNIMO (máx 50 chars). La imagen/video comunica TODO.\n"
@@ -1387,9 +1502,9 @@ async def generate_social_copy(
         "- NUNCA dejes strings sin cerrar - cada \" debe tener su \" de cierre\n"
         "- El JSON debe ser válido y parseable\n"
         "- IMPORTANTE PARA CARRUSELES: Si el canal es 'tiktok' o 'fb-post' con carrusel, usa 'carousel_slides' en lugar de 'image_prompt'\n\n"
-        "EJEMPLO CORRECTO (post normal):\n"
+        "EJEMPLO CORRECTO (post normal con producto):\n"
         "{\n"
-        '  "selected_category": "Categoría",\n'
+        '  "selected_category": "riego",\n'
         '  "selected_product_id": "123",\n'
         '  "channel": "fb-post",\n'
         '  "caption": "Texto del caption con \\n\\n para saltos de línea",\n'
@@ -1398,10 +1513,21 @@ async def generate_social_copy(
         '  "posting_time": "14:30",\n'
         '  "notes": "Estrategia explicada"\n'
         "}\n\n"
+        "EJEMPLO CORRECTO (post genérico sin producto específico):\n"
+        "{\n"
+        '  "selected_category": "",\n'
+        '  "selected_product_id": "",\n'
+        '  "channel": "fb-post",\n'
+        '  "caption": "Contenido educativo general...",\n'
+        '  "image_prompt": "Prompt para imagen genérica...",\n'
+        '  "needs_music": false,\n'
+        '  "posting_time": "10:00",\n'
+        '  "notes": "Post educativo sin producto específico"\n'
+        "}\n\n"
         "EJEMPLO CORRECTO (carrusel TikTok o FB/IG):\n"
         "{\n"
-        '  "selected_category": "Categoría",\n'
-        '  "selected_product_id": "123",\n'
+        '  "selected_category": "mallasombra",\n'
+        '  "selected_product_id": "456",\n'
         '  "channel": "tiktok",\n'
         '  "caption": "Texto corto...",\n'
         '  "carousel_slides": [\n'
@@ -1428,7 +1554,7 @@ async def generate_social_copy(
         "{\n"
         '  "selected_category": "...",\n'
         '  "selected_product_id": "...",\n'
-        '  "channel": "wa-status|wa-broadcast|fb-post|fb-reel|tiktok (elige uno)",\n'
+        f'  "channel": "{strat_data.get("channel", "fb-post")}",\n'
         '  "caption": "... (RESPETA: wa-status/stories/tiktok/reels = MUY CORTO, fb-post = puede ser largo)",\n'
         '  "image_prompt": "... (SOLO si es post de 1 imagen. Para stories/status debe ser autoexplicativa)",\n'
         '  "carousel_slides": ["Slide 1 CON TEXTO GRANDE...", "Slide 2 CON TEXTO...", ...] (SOLO si es carrusel: TikTok 2-3, FB/IG 2-10),\n'
@@ -1439,11 +1565,12 @@ async def generate_social_copy(
         "⚠️ RECUERDA: Para wa-status, stories, tiktok y reels, el caption debe ser MÍNIMO.\n"
         "La imagen/video debe comunicar el mensaje completo sin depender del caption.\n\n"
         "⚠️⚠️⚠️ REGLAS FINALES CRÍTICAS ⚠️⚠️⚠️:\n"
-        "1. SIEMPRE incluye el logo IMPAG 'Agricultura Inteligente' en esquina superior derecha.\n"
-        "2. Cuando sea apropiado, incluye el logo 'Todo para el Campo' en esquina inferior.\n"
-        "3. SIEMPRE incluye personas (agricultores, productores, ingenieros, técnicos) usando o mostrando el producto cuando sea relevante.\n"
-        "4. El caption y el prompt de imagen DEBEN reflejar el uso real, propósito y características específicas del producto seleccionado.\n"
-        "5. NO uses descripciones genéricas - sé específico sobre el producto y su uso en agricultura/ganadería/forestal de Durango."
+        f"1. ⚠️ PRODUCTO: El producto ya fue seleccionado (ID: {selected_product_id or 'ninguno'}). Usa esta información para generar contenido específico.\n"
+        "2. SIEMPRE incluye el logo IMPAG 'Agricultura Inteligente' en esquina superior derecha.\n"
+        "3. Cuando sea apropiado, incluye el logo 'Todo para el Campo' en esquina inferior.\n"
+        "4. SIEMPRE incluye personas (agricultores, productores, ingenieros, técnicos) usando o mostrando el producto cuando sea relevante.\n"
+        "5. El caption y el prompt de imagen DEBEN reflejar el uso real, propósito y características específicas del producto seleccionado.\n"
+        "6. NO uses descripciones genéricas - sé específico sobre el producto y su uso en agricultura/ganadería/forestal de Durango."
     )
 
     try:
@@ -1569,15 +1696,22 @@ Responde SOLO con el JSON, sin explicaciones ni texto adicional.""",
     if data.get("selected_product_id"):
         try:
              pid = int(data["selected_product_id"])
-             p_obj = db.query(Product).filter(Product.id == pid).first()
-             if p_obj:
+             sp_obj = db.query(SupplierProduct).filter(SupplierProduct.id == pid).first()
+             if sp_obj:
+                 cat_name = sp_obj.category.name if sp_obj.category else (sp_obj.product.category.name if sp_obj.product and sp_obj.product.category else "General")
+                 # Calculate price from supplier cost + shipping + margin
+                 cost = float(sp_obj.cost or 0)
+                 shipping = float(sp_obj.shipping_cost_direct or 0)
+                 margin = float(sp_obj.default_margin or 0.30)  # Default 30% margin
+                 price = (cost + shipping) / (1 - margin) if margin < 1 else cost + shipping
+                 
                  product_details = {
-                     "id": str(p_obj.id),
-                     "name": p_obj.name,
-                     "category": p_obj.category.name if p_obj.category else "General",
-                     "sku": p_obj.sku,
-                     "inStock": p_obj.stock > 0 if p_obj.stock is not None else False,
-                     "price": float(p_obj.price or 0)
+                     "id": str(sp_obj.id),
+                     "name": sp_obj.name or (sp_obj.product.name if sp_obj.product else "Unknown"),
+                     "category": cat_name,
+                     "sku": sp_obj.sku or (sp_obj.product.sku if sp_obj.product else ""),
+                     "inStock": sp_obj.stock > 0 if sp_obj.stock is not None else False,
+                     "price": price
                  }
         except:
             pass # Use string ID or invalid ID, ignore
@@ -1589,11 +1723,11 @@ Responde SOLO con el JSON, sin explicaciones ni texto adicional.""",
         notes=data.get("notes"),
         format=data.get("format"),
         cta=data.get("cta"),
-        selected_product_id=str(data.get("selected_product_id", "")),
-        selected_category=data.get("selected_category"),
+        selected_product_id=selected_product_id or str(data.get("selected_product_id", "")),  # Use from product selection phase
+        selected_category=selected_category or data.get("selected_category"),  # Use from product selection phase
         selected_product_details=product_details,
-        post_type=strat_data.get("post_type"), # Include post_type from strategy phase
-        channel=data.get("channel"),
+        post_type=strat_data.get("post_type"),  # From strategy phase
+        channel=strat_data.get("channel") or data.get("channel"),  # From strategy phase, fallback to content phase
         carousel_slides=data.get("carousel_slides"),
         needs_music=data.get("needs_music")
     )
