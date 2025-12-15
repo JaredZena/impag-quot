@@ -11,3 +11,5 @@ COMMENT ON COLUMN social_post.user_feedback IS 'User feedback: ''like'', ''disli
 
 -- Optional: Create an index if you plan to query by feedback frequently
 -- CREATE INDEX IF NOT EXISTS idx_social_post_user_feedback ON social_post(user_feedback);
+
+

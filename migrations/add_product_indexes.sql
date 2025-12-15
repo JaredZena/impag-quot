@@ -33,3 +33,5 @@ COMMENT ON INDEX idx_supplier_product_is_active_category IS 'Composite index for
 COMMENT ON INDEX idx_supplier_product_category_id IS 'Index on category_id foreign key for faster category joins';
 COMMENT ON INDEX idx_supplier_product_name_active IS 'Composite index for name searches on active supplier products';
 COMMENT ON INDEX idx_supplier_product_archived_at IS 'Index for filtering non-archived supplier products (soft delete)';
+
+
