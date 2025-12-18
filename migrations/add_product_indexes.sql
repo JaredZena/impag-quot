@@ -35,3 +35,4 @@ COMMENT ON INDEX idx_supplier_product_name_active IS 'Composite index for name s
 COMMENT ON INDEX idx_supplier_product_archived_at IS 'Index for filtering non-archived supplier products (soft delete)';
 
 
+

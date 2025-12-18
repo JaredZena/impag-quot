@@ -1735,3 +1735,4 @@ Responde SOLO con el JSON, sin explicaciones ni texto adicional.""",
 
 
 
+
