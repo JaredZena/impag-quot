@@ -1380,6 +1380,9 @@ async def generate_social_copy(
     sales_context = get_season_context(dt)
     important_dates = str([d["name"] for d in get_nearby_dates(dt)])
     
+    # Load Durango context early (needed for problem identification)
+    durango_context = load_durango_context(month=dt.month)
+    
     # Calculate variety metrics for post_type, channel, and topics
     recent_types = [p.post_type for p in recent_posts if p.post_type]
     recent_channels = [p.channel for p in recent_posts if p.channel]
@@ -1847,8 +1850,7 @@ async def generate_social_copy(
         dedup_info += "- NO uses el mismo CANAL que el post de ayer.\n"
         dedup_info += "- NO uses el mismo TIPO DE POST que el post de ayer.\n"
     
-    # Load Durango sector context from markdown files
-    durango_context = load_durango_context(month=dt.month)
+    # durango_context already loaded earlier for problem identification
 
     creation_prompt = (
         f"ACTÚA COMO: Social Media Manager especializado en contenido agrícola.\n\n"
@@ -2268,7 +2270,7 @@ Responde SOLO con el JSON, sin explicaciones ni texto adicional.""",
     if strat_data.get("problem_identified"):
         problem_note = f"Problema identificado: {strat_data.get('problem_identified')}"
         notes_with_problem = f"{problem_note}\n\n{notes_with_problem}" if notes_with_problem else problem_note
-    
+
     return SocialGenResponse(
         caption=data.get("caption", ""),
         image_prompt=data.get("image_prompt", ""),
