@@ -36,3 +36,4 @@ COMMENT ON INDEX idx_supplier_product_archived_at IS 'Index for filtering non-ar
 
 
 
+

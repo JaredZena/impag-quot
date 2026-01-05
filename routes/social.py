@@ -546,6 +546,365 @@ def get_season_context(date_obj):
     month = date_obj.month
     return SEASON_PATTERNS.get(month, SEASON_PATTERNS[1])
 
+def validate_problem_focused_topic(topic: str) -> dict:
+    """
+    Validates that topic follows problem → solution format.
+    """
+    issues = []
+    
+    # Check for problem indicators
+    problem_indicators = [
+        "causa", "provoca", "genera", "resulta en", "desperdicia",
+        "pierde", "reduce", "afecta", "daña", "mata", "quema"
+    ]
+    has_problem = any(indicator in topic.lower() for indicator in problem_indicators)
+    
+    # Check for solution indicators
+    solution_indicators = [
+        "→", "soluciona", "resuelve", "evita", "previene", "protege",
+        "mejora", "aumenta", "optimiza", "reduce"
+    ]
+    has_solution = any(indicator in topic.lower() for indicator in solution_indicators)
+    
+    # Check format
+    has_arrow = "→" in topic
+    
+    if not has_problem:
+        issues.append("Tema no identifica un problema específico")
+    
+    if not has_solution:
+        issues.append("Tema no propone una solución clara")
+    
+    if not has_arrow:
+        issues.append("Tema no sigue formato 'Problema → Solución'")
+    
+    # Check for vague terms
+    vague_terms = ["mejora", "optimiza", "mejor", "bueno"]
+    vague_count = sum(1 for term in vague_terms if term in topic.lower())
+    if vague_count > 1:
+        issues.append("Tema usa términos vagos en lugar de problemas específicos")
+    
+    return {
+        "is_valid": len(issues) == 0,
+        "issues": issues,
+        "has_problem": has_problem,
+        "has_solution": has_solution,
+        "format_correct": has_arrow
+    }
+
+def identify_agricultural_problems(
+    month: int,
+    phase: str,
+    nearby_dates: list,
+    durango_context: str
+) -> dict:
+    """
+    Identifies real agricultural problems based on season, phase, and regional context.
+    Returns problems with urgency, impact, and solution categories.
+    """
+    # Problem database by month/phase
+    problem_map = {
+        # Enero (Germinación)
+        1: {
+            "urgent": [
+                {
+                    "problem": "Heladas matutinas queman plántulas recién emergidas",
+                    "symptoms": "Plántulas con hojas quemadas, muerte de semillas germinadas",
+                    "impact": "Pérdida 30-50% de germinación, retraso en ciclo",
+                    "solution_category": "antiheladas",
+                    "urgency": "high",
+                    "time_window": "Enero-Febrero",
+                    "common_mistake": "No proteger charolas en invernadero sin calefacción"
+                },
+                {
+                    "problem": "Sustrato seco en charolas causa germinación desigual",
+                    "symptoms": "Algunas cavidades germinan, otras no",
+                    "impact": "Plántulas desuniformes, pérdida de tiempo",
+                    "solution_category": "riego",
+                    "urgency": "high",
+                    "time_window": "Enero-Marzo",
+                    "common_mistake": "Regar después de llenar en lugar de antes"
+                }
+            ],
+            "preventive": [
+                {
+                    "problem": "Charolas sucias transmiten enfermedades a nuevas siembras",
+                    "symptoms": "Damping-off, pudrición de raíces",
+                    "impact": "Pérdida 20-40% de plántulas",
+                    "solution_category": "charolas",
+                    "urgency": "medium",
+                    "time_window": "Todo el año",
+                    "common_mistake": "Reutilizar charolas sin desinfectar"
+                }
+            ]
+        },
+        # Febrero (Trasplante)
+        2: {
+            "urgent": [
+                {
+                    "problem": "Plántulas se estresan en trasplante y no prenden",
+                    "symptoms": "Plántulas marchitas, hojas amarillas, muerte post-trasplante",
+                    "impact": "Pérdida 25-40% de plántulas trasplantadas",
+                    "solution_category": "vivero",
+                    "urgency": "high",
+                    "time_window": "Febrero-Marzo",
+                    "common_mistake": "Trasplantar sin endurecer plántulas"
+                },
+                {
+                    "problem": "Suelo no preparado causa raíces débiles",
+                    "symptoms": "Raíces no penetran, plantas atrofiadas",
+                    "impact": "Crecimiento lento, menor producción",
+                    "solution_category": "acolchado",
+                    "urgency": "high",
+                    "time_window": "Febrero",
+                    "common_mistake": "Trasplantar en suelo compactado sin preparar"
+                }
+            ],
+            "preventive": [
+                {
+                    "problem": "Riego por surco desperdicia 70% del agua en febrero",
+                    "symptoms": "Agua corriendo fuera del surco, suelo seco entre plantas",
+                    "impact": "Costo alto de agua, plantas estresadas",
+                    "solution_category": "riego",
+                    "urgency": "medium",
+                    "time_window": "Febrero-Abril",
+                    "common_mistake": "Usar riego tradicional en lugar de goteo"
+                }
+            ]
+        },
+        # Marzo-Abril (Crecimiento)
+        3: {
+            "urgent": [
+                {
+                    "problem": "Calor intenso quema hojas y reduce fotosíntesis",
+                    "symptoms": "Hojas quemadas, plantas estresadas, menor crecimiento",
+                    "impact": "Reducción 20-30% en producción",
+                    "solution_category": "mallasombra",
+                    "urgency": "high",
+                    "time_window": "Marzo-Mayo",
+                    "common_mistake": "No instalar sombra antes del calor"
+                },
+                {
+                    "problem": "Riego irregular causa estrés hídrico y menor rendimiento",
+                    "symptoms": "Hojas marchitas intermitentes, frutos pequeños",
+                    "impact": "Reducción 15-25% en producción",
+                    "solution_category": "riego",
+                    "urgency": "high",
+                    "time_window": "Marzo-Julio",
+                    "common_mistake": "Regar por horario en lugar de por necesidad"
+                }
+            ]
+        },
+        4: {
+            "urgent": [
+                {
+                    "problem": "Calor intenso quema hojas y reduce fotosíntesis",
+                    "symptoms": "Hojas quemadas, plantas estresadas, menor crecimiento",
+                    "impact": "Reducción 20-30% en producción",
+                    "solution_category": "mallasombra",
+                    "urgency": "high",
+                    "time_window": "Marzo-Mayo",
+                    "common_mistake": "No instalar sombra antes del calor"
+                },
+                {
+                    "problem": "Riego irregular causa estrés hídrico y menor rendimiento",
+                    "symptoms": "Hojas marchitas intermitentes, frutos pequeños",
+                    "impact": "Reducción 15-25% en producción",
+                    "solution_category": "riego",
+                    "urgency": "high",
+                    "time_window": "Marzo-Julio",
+                    "common_mistake": "Regar por horario en lugar de por necesidad"
+                }
+            ]
+        },
+        # Mayo-Junio (Cosecha)
+        5: {
+            "urgent": [
+                {
+                    "problem": "Cosecha tardía reduce calidad y precio de venta",
+                    "symptoms": "Frutos sobre-maduros, menor precio en mercado",
+                    "impact": "Pérdida 20-30% en valor de venta",
+                    "solution_category": "herramientas",
+                    "urgency": "medium",
+                    "time_window": "Mayo-Junio",
+                    "common_mistake": "Esperar a que todos los frutos maduren"
+                }
+            ]
+        },
+        6: {
+            "urgent": [
+                {
+                    "problem": "Cosecha tardía reduce calidad y precio de venta",
+                    "symptoms": "Frutos sobre-maduros, menor precio en mercado",
+                    "impact": "Pérdida 20-30% en valor de venta",
+                    "solution_category": "herramientas",
+                    "urgency": "medium",
+                    "time_window": "Mayo-Junio",
+                    "common_mistake": "Esperar a que todos los frutos maduren"
+                }
+            ]
+        },
+        # Julio (Lluvias)
+        7: {
+            "urgent": [
+                {
+                    "problem": "Exceso de humedad causa pudrición y enfermedades fúngicas",
+                    "symptoms": "Pudrición de frutos, hojas con manchas, plantas enfermas",
+                    "impact": "Pérdida 30-50% de producción en lluvias intensas",
+                    "solution_category": "plasticos",
+                    "urgency": "high",
+                    "time_window": "Julio-Agosto",
+                    "common_mistake": "No tener drenaje adecuado en invernaderos"
+                },
+                {
+                    "problem": "Lluvias lavan nutrientes del suelo",
+                    "symptoms": "Plantas amarillas, crecimiento lento post-lluvia",
+                    "impact": "Necesidad de re-fertilizar, costo adicional",
+                    "solution_category": "fertilizantes",
+                    "urgency": "medium",
+                    "time_window": "Julio",
+                    "common_mistake": "No proteger fertilizantes aplicados antes de lluvia"
+                }
+            ]
+        },
+        8: {
+            "preventive": [
+                {
+                    "problem": "Preparación inadecuada para ciclo otoño-invierno",
+                    "symptoms": "Suelo no preparado, falta de planificación",
+                    "impact": "Retraso en siembra, menor productividad",
+                    "solution_category": "general",
+                    "urgency": "medium",
+                    "time_window": "Agosto-Septiembre",
+                    "common_mistake": "No planificar con anticipación"
+                }
+            ]
+        },
+        9: {
+            "urgent": [
+                {
+                    "problem": "Siembra tardía reduce ventana de crecimiento",
+                    "symptoms": "Cultivos no alcanzan madurez antes de heladas",
+                    "impact": "Pérdida de producción, necesidad de protección temprana",
+                    "solution_category": "general",
+                    "urgency": "high",
+                    "time_window": "Septiembre-Octubre",
+                    "common_mistake": "Retrasar siembra por falta de preparación"
+                }
+            ]
+        },
+        10: {
+            "preventive": [
+                {
+                    "problem": "Falta de protección temprana contra frío",
+                    "symptoms": "Cultivos vulnerables a primeras heladas",
+                    "impact": "Pérdida parcial o total si helada temprana",
+                    "solution_category": "antiheladas",
+                    "urgency": "medium",
+                    "time_window": "Octubre-Noviembre",
+                    "common_mistake": "Esperar a que haya helada para proteger"
+                }
+            ]
+        },
+        # Noviembre-Diciembre (Frío/Heladas)
+        11: {
+            "urgent": [
+                {
+                    "problem": "Heladas matan cultivos de ciclo otoño-invierno",
+                    "symptoms": "Plantas congeladas, hojas negras, muerte total",
+                    "impact": "Pérdida 100% del cultivo si no se protege",
+                    "solution_category": "antiheladas",
+                    "urgency": "critical",
+                    "time_window": "Noviembre-Enero",
+                    "common_mistake": "No instalar protección hasta que ya hay helada"
+                },
+                {
+                    "problem": "Cultivos de invierno (avena, trigo) no resisten heladas extremas",
+                    "symptoms": "Plantas congeladas, pérdida de forraje",
+                    "impact": "Pérdida total si temperatura baja de -5°C",
+                    "solution_category": "antiheladas",
+                    "urgency": "critical",
+                    "time_window": "Diciembre-Enero",
+                    "common_mistake": "Confiar solo en resistencia natural de cultivos"
+                }
+            ]
+        },
+        12: {
+            "urgent": [
+                {
+                    "problem": "Heladas matan cultivos de ciclo otoño-invierno",
+                    "symptoms": "Plantas congeladas, hojas negras, muerte total",
+                    "impact": "Pérdida 100% del cultivo si no se protege",
+                    "solution_category": "antiheladas",
+                    "urgency": "critical",
+                    "time_window": "Noviembre-Enero",
+                    "common_mistake": "No instalar protección hasta que ya hay helada"
+                },
+                {
+                    "problem": "Cultivos de invierno (avena, trigo) no resisten heladas extremas",
+                    "symptoms": "Plantas congeladas, pérdida de forraje",
+                    "impact": "Pérdida total si temperatura baja de -5°C",
+                    "solution_category": "antiheladas",
+                    "urgency": "critical",
+                    "time_window": "Diciembre-Enero",
+                    "common_mistake": "Confiar solo en resistencia natural de cultivos"
+                }
+            ]
+        }
+    }
+    
+    # Get problems for current month
+    month_problems = problem_map.get(month, {})
+    
+    # Add phase-specific problems
+    phase_problems = {
+        "germinacion": [
+            {
+                "problem": "Temperatura inadecuada retrasa o impide germinación",
+                "symptoms": "Semillas no germinan, tiempo de germinación muy largo",
+                "impact": "Retraso en ciclo, pérdida de ventana de siembra",
+                "solution_category": "vivero",
+                "urgency": "high"
+            }
+        ],
+        "proteccion-frio": [
+            {
+                "problem": "Heladas sorpresa sin protección causan pérdidas totales",
+                "symptoms": "Cultivos completamente congelados en una noche",
+                "impact": "Pérdida 100% del cultivo, inversión perdida",
+                "solution_category": "antiheladas",
+                "urgency": "critical"
+            }
+        ]
+    }
+    
+    # Combine and prioritize
+    all_problems = []
+    if month_problems.get("urgent"):
+        all_problems.extend(month_problems["urgent"])
+    if month_problems.get("preventive"):
+        all_problems.extend(month_problems["preventive"])
+    if phase in phase_problems:
+        all_problems.extend(phase_problems[phase])
+    
+    # Check nearby dates for additional urgency
+    for date in nearby_dates:
+        if isinstance(date, dict) and date.get("type") == "seasonal" and "helada" in str(date.get("name", "")).lower():
+            # Boost helada-related problems
+            for prob in all_problems:
+                if "helada" in prob.get("problem", "").lower():
+                    prob["urgency"] = "critical"
+                    if "daysUntil" in date:
+                        prob["days_until"] = date.get("daysUntil", 0)
+    
+    return {
+        "problems": all_problems,
+        "most_urgent": [p for p in all_problems if p.get("urgency") == "critical"],
+        "high_priority": [p for p in all_problems if p.get("urgency") == "high"],
+        "month": month,
+        "phase": phase
+    }
+
 def get_nearby_dates(date_obj):
     # Simple logic: return dates in the same month
     month = date_obj.month
@@ -1131,12 +1490,69 @@ async def generate_social_copy(
         "Manejo de cultivos de frío (avena, trigo, alfalfa)"
     ]
     
-    # Build strategy prompt (avoiding backslashes in f-string expressions)
-    strategy_prompt = f"ACTÚA COMO: Director de Estrategia Comercial. FECHA: {payload.date}\n"
-    strategy_prompt += f"FASE AGRÍCOLA: {sales_context['phase']} ({sales_context['name']}).\n"
-    strategy_prompt += f"ACCIONES SUGERIDAS: {', '.join(sales_context['actions'])}.\n"
+    # Identify real problems first
+    nearby_dates_list = get_nearby_dates(dt)
+    problems_data = identify_agricultural_problems(
+        dt.month,
+        sales_context['phase'],
+        nearby_dates_list,
+        durango_context
+    )
+    
+    # Build problem-focused strategy prompt
+    strategy_prompt = f"ACTÚA COMO: Ingeniero Agrónomo Experto con 15+ años en campo Durango.\n"
+    strategy_prompt += f"Tu trabajo diario es VISITAR PARCELAS, IDENTIFICAR PROBLEMAS REALES y SOLUCIONARLOS.\n\n"
+    strategy_prompt += f"FECHA: {payload.date}\n"
+    strategy_prompt += f"FASE AGRÍCOLA: {sales_context['phase']} ({sales_context['name']})\n"
+    strategy_prompt += f"CONTEXTO REGIONAL: {durango_context[:500]}...\n\n"
+    
+    # Add urgent problems
+    if problems_data["most_urgent"]:
+        strategy_prompt += "🔴 PROBLEMAS CRÍTICOS (URGENTE - RESOLVER HOY):\n"
+        for i, prob in enumerate(problems_data["most_urgent"][:3], 1):
+            strategy_prompt += f"""
+{i}. PROBLEMA: {prob['problem']}
+   Síntomas: {prob.get('symptoms', 'N/A')}
+   Impacto: {prob.get('impact', 'N/A')}
+   Error común: {prob.get('common_mistake', 'N/A')}
+   Categoría solución: {prob.get('solution_category', 'general')}
+   Ventana de tiempo: {prob.get('time_window', 'Inmediato')}
+"""
+        strategy_prompt += "\n💡 PRIORIZA CONTENIDO QUE RESUELVA ESTOS PROBLEMAS CRÍTICOS.\n\n"
+
+    if problems_data["high_priority"]:
+        strategy_prompt += "🟡 PROBLEMAS DE ALTA PRIORIDAD:\n"
+        for i, prob in enumerate(problems_data["high_priority"][:3], 1):
+            strategy_prompt += f"""
+{i}. {prob['problem']}
+   Impacto: {prob.get('impact', 'N/A')}
+   Categoría: {prob.get('solution_category', 'general')}
+"""
+        strategy_prompt += "\n"
+    
     strategy_prompt += f"EFEMÉRIDES: {important_dates}.\n"
-    strategy_prompt += f"PREFERENCIA USUARIO: {payload.category or 'Ninguna (Decide tú)'}.\n"
+    strategy_prompt += f"PREFERENCIA USUARIO: {payload.category or 'Ninguna - Genera contenido educativo valioso sobre cualquier tema agrícola relevante'}.\n"
+    strategy_prompt += "⚠️ IMPORTANTE: Si no hay preferencia de categoría, NO estás limitado a productos.\n"
+    strategy_prompt += "Puedes generar contenido educativo sobre CUALQUIER tema agrícola valioso (técnicas, gestión, planificación, etc.).\n\n"
+    
+    strategy_prompt += "TU MENTALIDAD COMO INGENIERO EXPERTO:\n\n"
+    strategy_prompt += "1. PROBLEMA PRIMERO, PRODUCTO DESPUÉS\n"
+    strategy_prompt += "   - NO pienses '¿Qué producto promociono hoy?'\n"
+    strategy_prompt += "   - SÍ piensa '¿Qué problema real está enfrentando el agricultor HOY?'\n"
+    strategy_prompt += "   - Luego: '¿Qué solución técnica resuelve este problema?'\n\n"
+    strategy_prompt += "2. IDENTIFICA SÍNTOMAS, NO SOLO PROBLEMAS\n"
+    strategy_prompt += "   - Los agricultores ven síntomas (hojas amarillas, plantas muertas)\n"
+    strategy_prompt += "   - Tú como experto identificas la causa raíz\n"
+    strategy_prompt += "   - El contenido debe conectar síntoma → causa → solución\n\n"
+    strategy_prompt += "3. ERRORES COMUNES SON OPORTUNIDADES DE EDUCACIÓN\n"
+    strategy_prompt += "   - Si un error común causa el problema, edúcales sobre cómo evitarlo\n"
+    strategy_prompt += "   - Ejemplo: 'Error común: No proteger charolas → Solución: Sistema antiheladas'\n\n"
+    strategy_prompt += "4. IMPACTO MEDIBLE GENERA URGENCIA\n"
+    strategy_prompt += "   - 'Pérdida 30-50% de germinación' es más urgente que 'mejora la germinación'\n"
+    strategy_prompt += "   - Usa números concretos del impacto del problema\n\n"
+    strategy_prompt += "5. VENTANA DE TIEMPO CREA URGENCIA\n"
+    strategy_prompt += "   - 'Enero-Febrero' es más urgente que 'durante el año'\n"
+    strategy_prompt += "   - Si estamos en la ventana, el problema es INMEDIATO\n\n"
     
     # Add suggested topic if provided
     if payload.suggested_topic:
@@ -1218,8 +1634,33 @@ async def generate_social_copy(
     strategy_prompt += "⚠️ USA 'Promoción puntual' SOLO cuando realmente haya una oferta especial, liquidación o alta rotación urgente.\n"
     strategy_prompt += "⚠️ NO uses 'Promoción puntual' como tipo por defecto - varía con tipos educativos y de engagement.\n\n"
 
-    strategy_prompt += "TU TAREA: Decide el TEMA del post de hoy y el TIPO DE POST exacto.\n"
-    strategy_prompt += "IMPORTANTE SOBRE TEMAS (CRÍTICO):\n"
+    strategy_prompt += "FORMATO DE TEMA (OBLIGATORIO):\n"
+    strategy_prompt += "El tema DEBE seguir este formato: 'Problema → Solución'\n\n"
+    strategy_prompt += "Ejemplos CORRECTOS:\n"
+    strategy_prompt += "- 'Heladas queman plántulas → Protección con sistemas antiheladas'\n"
+    strategy_prompt += "- 'Riego por surco desperdicia 70% agua → Riego por goteo eficiente'\n"
+    strategy_prompt += "- 'Sustrato seco causa germinación desigual → Técnica correcta de hidratación'\n"
+    strategy_prompt += "- 'Calor intenso reduce producción 30% → Mallasombra para protección'\n\n"
+    strategy_prompt += "Ejemplos INCORRECTOS (evitar):\n"
+    strategy_prompt += "- 'Sistemas de riego' (genérico, no identifica problema)\n"
+    strategy_prompt += "- 'Productos agrícolas' (no es problema)\n"
+    strategy_prompt += "- 'Mejora tu cultivo' (vago, no específico)\n\n"
+    strategy_prompt += "TU TAREA:\n"
+    strategy_prompt += "1. Identifica el PROBLEMA MÁS URGENTE de la lista arriba (o uno relacionado)\n"
+    strategy_prompt += "2. Formula el tema como 'Problema → Solución'\n"
+    strategy_prompt += "3. Elige el tipo de post que mejor comunique la solución\n"
+    strategy_prompt += "4. Selecciona categoría de producto que resuelve el problema (o vacío si no aplica)\n\n"
+    strategy_prompt += "⚠️⚠️⚠️ IMPORTANTE SOBRE TEMAS (CRÍTICO) ⚠️⚠️⚠️:\n"
+    strategy_prompt += "- Los temas NO están limitados a categorías de productos que vendemos.\n"
+    strategy_prompt += "- El objetivo es generar contenido VALIOSO para agricultores, no solo promocionar productos.\n"
+    strategy_prompt += "- Puedes elegir CUALQUIER tema agrícola relevante que proporcione valor educativo:\n"
+    strategy_prompt += "  * Técnicas agrícolas (preparación de suelo, rotación de cultivos, etc.)\n"
+    strategy_prompt += "  * Gestión y planificación (inventario, costos, ROI, organización)\n"
+    strategy_prompt += "  * Educación general (fertilización, riego, plagas, enfermedades)\n"
+    strategy_prompt += "  * Casos de éxito y resultados\n"
+    strategy_prompt += "  * Tendencias y tecnología agrícola\n"
+    strategy_prompt += "  * Problemas comunes y soluciones\n"
+    strategy_prompt += "  * Preparación para ciclos futuros\n"
     strategy_prompt += "- Las 'ACCIONES SUGERIDAS' son solo sugerencias, NO son obligatorias.\n"
     strategy_prompt += "- Puedes elegir temas relacionados pero DIFERENTES a las acciones sugeridas.\n"
     strategy_prompt += "- Ejemplo: Si la acción es 'Calefacción', puedes hablar de:\n"
@@ -1233,15 +1674,18 @@ async def generate_social_copy(
     strategy_prompt += "  * Tecnología y innovación agrícola\n"
     strategy_prompt += "- VARÍA los temas incluso dentro de la misma fase agrícola.\n"
     strategy_prompt += "- NO te limites solo a 'protección contra frío' - hay muchos otros temas relevantes en diciembre.\n"
-    strategy_prompt += "- Considera que en diciembre también se prepara para el ciclo primavera-verano.\n\n"
+    strategy_prompt += "- Considera que en diciembre también se prepara para el ciclo primavera-verano.\n"
+    strategy_prompt += "- 'preferred_category' es SOLO para selección de productos (si aplica), NO limita el tema del contenido.\n"
+    strategy_prompt += "- Puedes generar contenido educativo SIN producto asociado si el tema lo requiere.\n\n"
     strategy_prompt += "RESPONDE SOLO CON EL JSON:\n"
     strategy_prompt += "{\n"
-    strategy_prompt += '  "topic": "Tema principal (ej. Preparación de suelo, Planificación ciclo 2026, Optimización recursos) - DEBE SER DIFERENTE a temas recientes",\n'
+    strategy_prompt += '  "problem_identified": "Descripción del problema real que el agricultor enfrenta HOY",\n'
+    strategy_prompt += '  "topic": "Problema → Solución (formato exacto como en ejemplos) - DEBE SER DIFERENTE a temas recientes",\n'
     strategy_prompt += '  "post_type": "Escribe EXACTAMENTE el nombre del tipo (ej. Infografías, Memes/tips rápidos, Kits, etc.)",\n'
     strategy_prompt += '  "channel": "wa-status|wa-broadcast|fb-post|fb-reel|ig-post|ig-reel|tiktok (elige uno, DIFERENTE al usado ayer)",\n'
-    strategy_prompt += '  "preferred_category": "Categoría de producto preferida (ej. riego, mallasombra, fertilizantes) o vacío si no hay preferencia",\n'
-    strategy_prompt += '  "search_needed": true/false,\n'
-    strategy_prompt += '  "search_keywords": "términos de búsqueda para embeddings (ej. arado, fertilizante inicio, protección heladas)"\n'
+    strategy_prompt += '  "preferred_category": "Categoría de producto preferida SOLO si el tema requiere un producto específico (ej. riego, mallasombra). Si el tema es educativo general sin producto, deja vacío",\n'
+    strategy_prompt += '  "search_needed": true/false (true solo si necesitas buscar un producto para el tema, false si el contenido es educativo general sin producto),\n'
+    strategy_prompt += '  "search_keywords": "términos de búsqueda para embeddings SOLO si search_needed=true (ej. arado, fertilizante inicio, protección heladas). Si no hay producto, deja vacío"\n'
     strategy_prompt += "}"
     
     try:
@@ -1255,15 +1699,22 @@ async def generate_social_copy(
         response_text = strat_resp.content[0].text
         cleaned_json = clean_json_text(response_text)
         strat_data = json.loads(cleaned_json)
+        
+        # Validate topic is problem-focused
+        topic_validation = validate_problem_focused_topic(strat_data.get("topic", ""))
+        if not topic_validation["is_valid"]:
+            print(f"⚠️ Topic validation issues: {topic_validation['issues']}")
+            # Log but don't block - allow generation to continue
+            # Could regenerate or flag for review in future
     except json.JSONDecodeError as e:
         print(f"Strategy JSON Parse Error: {e}")
         print(f"Response text: {strat_resp.content[0].text[:200] if 'strat_resp' in locals() else 'No response'}")
         # Fallback Strategy
-        strat_data = {"topic": "General", "post_type": "Infografías", "channel": "fb-post", "preferred_category": "", "search_needed": True, "search_keywords": ""}
+        strat_data = {"problem_identified": "", "topic": "General", "post_type": "Infografías", "channel": "fb-post", "preferred_category": "", "search_needed": True, "search_keywords": ""}
     except Exception as e:
         print(f"Strategy Error: {e}")
         # Fallback Strategy
-        strat_data = {"topic": "General", "post_type": "Infografías", "channel": "fb-post", "preferred_category": "", "search_needed": True, "search_keywords": ""}
+        strat_data = {"problem_identified": "", "topic": "General", "post_type": "Infografías", "channel": "fb-post", "preferred_category": "", "search_needed": True, "search_keywords": ""}
 
     # --- 3. PRODUCT SELECTION PHASE (using embeddings) ---
     selected_product_id = None
@@ -1414,9 +1865,38 @@ async def generate_social_copy(
         
         f"{CHANNEL_FORMATS}\n\n"
         
+        "--- GUÍAS PARA CONTENIDO EDUCATIVO DE ALTO IMPACTO ---\n\n"
+        "ESTRUCTURA VISUAL REQUERIDA (según tipo de post):\n\n"
+        "1. INFOGRAFÍA COMPARATIVA (si tema incluye 'vs', 'comparar', 'tradicional vs'):\n"
+        "   - Panel izquierdo (40%): Problema/Método antiguo (fondo naranja/rojo)\n"
+        "   - Panel derecho (40%): Solución/Método mejorado (fondo verde)\n"
+        "   - Sección inferior (20%): Tabla comparativa con especificaciones\n"
+        "   - Código de colores: Naranja/Rojo (problema), Verde (solución)\n\n"
+        "2. INFOGRAFÍA TUTORIAL (si tema incluye 'paso', 'cómo', 'instalación'):\n"
+        "   - Título principal (20%): Nombre del proceso\n"
+        "   - 4-6 pasos numerados (60%): Cada paso con número grande, ilustración, descripción\n"
+        "   - Tips destacados (20%): Caja azul con borde verde\n\n"
+        "3. INFOGRAFÍA DE SISTEMA (si tema incluye 'sistema', 'instalación completa'):\n"
+        "   - Vista superior (40%): Sistema en contexto agrícola\n"
+        "   - Vista en corte (40%): Componentes técnicos y flujos subterráneos\n"
+        "   - Tabla especificaciones (20%): Materiales, dimensiones, capacidades\n\n"
+        "4. INFOGRAFÍA MULTI-PANEL (default para infografías educativas):\n"
+        "   - Panel 1 (25%): Título + Concepto principal\n"
+        "   - Panel 2 (20%): Problema/Necesidad (si aplica)\n"
+        "   - Panel 3 (20%): Solución/Método\n"
+        "   - Panel 4 (20%): Especificaciones técnicas (tabla/lista)\n"
+        "   - Panel 5 (15%): Tips/Beneficios destacados\n\n"
+        "REQUISITOS TÉCNICOS OBLIGATORIOS:\n"
+        "- Medidas específicas: SIEMPRE usar números exactos ('10-20 cm' no 'profundidad adecuada')\n"
+        "- Porcentajes concretos: SIEMPRE usar números ('70% ahorro' no 'ahorro significativo')\n"
+        "- Código de colores: Verde (bueno), Amarillo (atención), Rojo (problema), Naranja (necesita acción)\n"
+        "- Tips: SIEMPRE en caja destacada (fondo azul claro, borde verde, icono 💡)\n\n"
+        
         "INSTRUCCIONES:\n"
         "1. El producto ya fue seleccionado en la fase anterior. Usa la información del producto proporcionada arriba.\n"
-        "2. Si NO hay producto seleccionado, crea un post genérico de marca/educativo sobre el tema.\n"
+        "2. Si NO hay producto seleccionado, crea un post educativo/valioso sobre el tema.\n"
+        "   ⚠️ Esto es PERFECTO y DESEADO - no todos los posts necesitan un producto.\n"
+        "   El contenido educativo general (técnicas, gestión, planificación) es muy valioso.\n"
         "3. EL CANAL ya fue definido en la estrategia: {strat_data.get('channel')}. Adapta el contenido a este canal específico.\n"
         f"   ⚠️ Canales usados recientemente: {', '.join(set(recent_channels[:5])) if recent_channels else 'Ninguno'}\n"
         f"   → El canal '{strat_data.get('channel')}' ya fue seleccionado. Asegúrate de adaptar el contenido a este canal.\n\n"
@@ -1433,8 +1913,75 @@ async def generate_social_copy(
         "   - Si es WA Status: Formato vertical, contenido urgente/directo, caption mínimo\n"
         "   - Si es FB/IG Post: Puede ser más detallado y educativo, caption largo permitido\n"
         "5. Genera el contenido adaptado al canal, respetando las reglas de caption arriba.\n\n"
-        
+    )
+    
+    # Detect structure type based on topic (before building image prompt section)
+    topic_lower = strat_data.get('topic', '').lower()
+    post_type_lower = strat_data.get('post_type', '').lower()
+    
+    if "compar" in topic_lower or " vs " in topic_lower or "tradicional" in topic_lower:
+        structure_type = "COMPARATIVA"
+        structure_guide = """
+ESTRUCTURA: Comparativa lado a lado (Problema → Solución)
+- Panel izquierdo (40% espacio, fondo naranja/rojo): [MÉTODO TRADICIONAL/PROBLEMA]
+  * Título grande: "[MÉTODO TRADICIONAL]" (texto blanco, bold)
+  * Indicador numérico grande: "[X% pérdida/problema]" (número 120px, color rojo)
+  * 3-4 problemas específicos con porcentajes/datos
+  * Iconos de pérdida/riesgo (rojos)
+  * Flechas rojas hacia abajo
+- Panel derecho (40% espacio, fondo verde): [MÉTODO MEJORADO/SOLUCIÓN]
+  * Título grande: "[MÉTODO MEJORADO]" (texto blanco, bold)
+  * Indicador numérico grande: "[X% ahorro/beneficio]" (número 120px, color verde)
+  * 3-4 beneficios específicos con porcentajes/datos
+  * Iconos de beneficio/éxito (verdes)
+  * Flechas verdes hacia arriba
+- Sección inferior (20% espacio, fondo blanco): Tabla comparativa
+  * Columnas: Método | Consumo | Uniformidad | Costo | ROI
+  * Filas: Tradicional vs Tecnificado con datos específicos
+"""
+    elif "paso" in topic_lower or "cómo" in topic_lower or "instalación" in topic_lower or "tutorial" in post_type_lower:
+        structure_type = "TUTORIAL"
+        structure_guide = """
+ESTRUCTURA: Tutorial paso a paso
+- Título principal (20% altura, fondo verde/azul IMPAG): "[Nombre del Proceso]"
+- 4-6 pasos numerados (60% altura, cada paso en panel separado):
+  * Número grande (150px, color verde IMPAG): "1", "2", "3"...
+  * Título del paso (texto bold, 60px)
+  * Ilustración mostrando la acción
+  * Especificación técnica (medidas exactas)
+  * Indicador visual del resultado esperado
+- Sección de tips (20% altura, fondo azul claro con borde verde):
+  * Icono 💡 grande (40px)
+  * Texto: Consejos prácticos destacados
+"""
+    elif "sistema" in topic_lower or "instalación completa" in topic_lower or "diagrama" in topic_lower:
+        structure_type = "DIAGRAMA DE SISTEMA"
+        structure_guide = """
+ESTRUCTURA: Diagrama de sistema técnico
+- Vista superior (50% espacio): Sistema completo en paisaje agrícola Durango
+- Vista en corte (50% espacio): Sección técnica mostrando:
+  * Componentes subterráneos visibles
+  * Flujos con flechas de color (azul=agua, verde=nutrientes, naranja=energía)
+  * Dimensiones específicas etiquetadas (ej: "30-50 cm", "1-4 m")
+  * Materiales y conexiones visibles
+- Tabla de especificaciones (inferior): Materiales, dimensiones, capacidades
+"""
+    else:
+        structure_type = "MULTI-PANEL"
+        structure_guide = """
+ESTRUCTURA: Infografía educativa multi-panel
+- Panel 1 (25% altura): Título + Concepto principal (visual grande)
+- Panel 2 (20% altura): Problema/Necesidad (si aplica, fondo amarillo/naranja)
+- Panel 3 (20% altura): Solución/Método (fondo verde)
+- Panel 4 (20% altura): Especificaciones técnicas (tabla/lista con medidas específicas)
+- Panel 5 (15% altura): Tips/Beneficios destacados (caja azul con borde verde)
+"""
+    
+    # Continue building creation_prompt with structure detection
+    creation_prompt += (
         "--- INSTRUCCIONES ESPECÍFICAS PARA image_prompt ---\n"
+        f"ESTRUCTURA DETECTADA: {structure_type}\n"
+        f"{structure_guide}\n\n"
         "El campo 'image_prompt' DEBE ser un prompt detallado y técnico para generación de imágenes (estilo IMPAG).\n"
         "Sigue este formato estructurado:\n\n"
         
@@ -1716,11 +2263,17 @@ Responde SOLO con el JSON, sin explicaciones ni texto adicional.""",
         except:
             pass # Use string ID or invalid ID, ignore
 
+    # Include problem_identified in notes if available
+    notes_with_problem = data.get("notes", "")
+    if strat_data.get("problem_identified"):
+        problem_note = f"Problema identificado: {strat_data.get('problem_identified')}"
+        notes_with_problem = f"{problem_note}\n\n{notes_with_problem}" if notes_with_problem else problem_note
+    
     return SocialGenResponse(
         caption=data.get("caption", ""),
         image_prompt=data.get("image_prompt", ""),
         posting_time=data.get("posting_time"),
-        notes=data.get("notes"),
+        notes=notes_with_problem,
         format=data.get("format"),
         cta=data.get("cta"),
         selected_product_id=selected_product_id or str(data.get("selected_product_id", "")),  # Use from product selection phase
@@ -1731,6 +2284,7 @@ Responde SOLO con el JSON, sin explicaciones ni texto adicional.""",
         carousel_slides=data.get("carousel_slides"),
         needs_music=data.get("needs_music")
     )
+
 
 
 
