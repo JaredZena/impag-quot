@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, create_engine, Boolean, Text, Numeric, JSON, Enum
+from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, create_engine, Boolean, Text, Numeric, JSON, Enum, Date
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -252,18 +252,23 @@ class SocialPost(Base):
     __tablename__ = "social_post"
 
     id = Column(Integer, primary_key=True, index=True)
-    date_for = Column(String(10), nullable=False) # Target date YYYY-MM-DD
+    date_for = Column(Date, nullable=False) # Target date (migrated from VARCHAR to DATE)
     caption = Column(Text, nullable=False)
     image_prompt = Column(Text, nullable=True)
     post_type = Column(String(50), nullable=True)
     status = Column(String(20), default="planned") # planned, posted, archived
     selected_product_id = Column(String, nullable=True)
-    formatted_content = Column(JSON, nullable=True) # Full JSON response 
+    formatted_content = Column(JSON, nullable=True) # Full JSON response (migrated to JSONB in DB)
+    external_id = Column(String(255), nullable=True, index=True) # External ID for efficient lookups (e.g., from formatted_content.id)
     # Channel-specific fields
     channel = Column(String(50), nullable=True) # wa-status, fb-post, tiktok, etc.
     carousel_slides = Column(JSON, nullable=True) # Array of slide prompts for carousels (TikTok, FB/IG)
     needs_music = Column(Boolean, default=False) # Whether this content needs background music
     user_feedback = Column(String(20), nullable=True) # 'like', 'dislike', or None
+    # Topic-based deduplication fields (CRITICAL - topic is canonical unit)
+    topic = Column(Text, nullable=False) # Topic in format "Problema → Solución" (NOT NULL after migration)
+    problem_identified = Column(Text, nullable=True) # Problem description from strategy phase
+    topic_hash = Column(String(64), nullable=False, index=True) # SHA256 hash of normalized topic (NOT NULL after migration)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 # Parse the database URL to get the endpoint ID

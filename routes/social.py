@@ -5,12 +5,27 @@ import anthropic
 import os
 import json
 import random
-from datetime import datetime
+from datetime import datetime, date as date_type
 from pathlib import Path
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, text
+from collections import Counter
 from models import get_db, Product, ProductCategory, SocialPost, SupplierProduct
 from auth import verify_google_token
+
+# Import new modules (same directory)
+import sys
+from pathlib import Path
+routes_dir = Path(__file__).parent
+if str(routes_dir) not in sys.path:
+    sys.path.insert(0, str(routes_dir))
+import social_context
+import social_dedupe
+import social_products
+import social_llm
+import social_rate_limit
+import social_logging
+import social_topic
 
 router = APIRouter()
 
@@ -160,6 +175,9 @@ class SocialGenResponse(BaseModel):
     carousel_slides: Optional[List[str]] = None # For TikTok carousels: list of 2-3 image prompts
     needs_music: Optional[bool] = None # Whether this content needs background music
     aspect_ratio: Optional[str] = None # 1:1, 9:16, 4:5
+    # Topic-based deduplication fields (CRITICAL)
+    topic: Optional[str] = None # Topic in format "Problema → Solución" (canonical unit of deduplication)
+    problem_identified: Optional[str] = None # Problem description from strategy phase
 
 # --- Logic ---
 
@@ -252,7 +270,7 @@ def load_durango_context(month: int) -> str:
             # Fallback to hardcoded if files don't exist
             return get_fallback_durango_context(month)
     except Exception as e:
-        print(f"Error loading Durango context: {e}")
+        social_logging.safe_log_error(f"Error loading Durango context: {e}", exc_info=True)
         return get_fallback_durango_context(month)
 
 def extract_key_stats(content: str, sector: str) -> str:
@@ -546,51 +564,7 @@ def get_season_context(date_obj):
     month = date_obj.month
     return SEASON_PATTERNS.get(month, SEASON_PATTERNS[1])
 
-def validate_problem_focused_topic(topic: str) -> dict:
-    """
-    Validates that topic follows problem → solution format.
-    """
-    issues = []
-    
-    # Check for problem indicators
-    problem_indicators = [
-        "causa", "provoca", "genera", "resulta en", "desperdicia",
-        "pierde", "reduce", "afecta", "daña", "mata", "quema"
-    ]
-    has_problem = any(indicator in topic.lower() for indicator in problem_indicators)
-    
-    # Check for solution indicators
-    solution_indicators = [
-        "→", "soluciona", "resuelve", "evita", "previene", "protege",
-        "mejora", "aumenta", "optimiza", "reduce"
-    ]
-    has_solution = any(indicator in topic.lower() for indicator in solution_indicators)
-    
-    # Check format
-    has_arrow = "→" in topic
-    
-    if not has_problem:
-        issues.append("Tema no identifica un problema específico")
-    
-    if not has_solution:
-        issues.append("Tema no propone una solución clara")
-    
-    if not has_arrow:
-        issues.append("Tema no sigue formato 'Problema → Solución'")
-    
-    # Check for vague terms
-    vague_terms = ["mejora", "optimiza", "mejor", "bueno"]
-    vague_count = sum(1 for term in vague_terms if term in topic.lower())
-    if vague_count > 1:
-        issues.append("Tema usa términos vagos en lugar de problemas específicos")
-    
-    return {
-        "is_valid": len(issues) == 0,
-        "issues": issues,
-        "has_problem": has_problem,
-        "has_solution": has_solution,
-        "format_correct": has_arrow
-    }
+# validate_problem_focused_topic removed - use social_topic.validate_topic instead
 
 def identify_agricultural_problems(
     month: int,
@@ -910,7 +884,7 @@ def get_nearby_dates(date_obj):
     month = date_obj.month
     return [d for d in DEFAULT_DATES if d["month"] == month]
 
-def fetch_db_products(db: Session, limit: int = 10) -> List[Dict[str, Any]]:
+def fetch_db_products_old(db: Session, limit: int = 10) -> List[Dict[str, Any]]:
     """
     Fetch random active supplier products from the database with full details for ranking.
     Uses SupplierProduct table which has embeddings for semantic search.
@@ -995,7 +969,7 @@ def search_products(db: Session, query: str, limit: int = 10) -> List[Dict[str, 
     Uses SupplierProduct table which has embeddings for semantic search.
     """
     if not query:
-        return fetch_db_products(db, limit) # Fallback to random if no query
+        return social_products.fetch_db_products(db, limit) # Fallback to random if no query
 
     # Try semantic search with embeddings first
     try:
@@ -1031,7 +1005,7 @@ def search_products(db: Session, query: str, limit: int = 10) -> List[Dict[str, 
                 })
             return catalog
     except Exception as e:
-        print(f"Embedding search failed, falling back to text search: {e}")
+        social_logging.safe_log_warning(f"Embedding search failed, falling back to text search: {e}")
     
     # Fallback to text search (ILIKE) if embeddings fail or no results
     terms = query.split()
@@ -1085,6 +1059,9 @@ class SocialPostSaveRequest(BaseModel):
     carousel_slides: Optional[List[str]] = None  # Array of slide prompts for carousels (TikTok, FB/IG)
     needs_music: Optional[bool] = False
     user_feedback: Optional[str] = None  # 'like', 'dislike', or None
+    # Topic-based deduplication fields (CRITICAL)
+    topic: Optional[str] = None  # Topic in format "Problema → Solución"
+    problem_identified: Optional[str] = None  # Problem description from strategy phase
 
 @router.get("/posts")
 async def get_social_posts(
@@ -1101,11 +1078,19 @@ async def get_social_posts(
     try:
         query = db.query(SocialPost)
         
-        # Filter by date range if provided
+        # Filter by date range if provided (FIXED: Use DATE comparison, not string)
         if start_date:
-            query = query.filter(SocialPost.date_for >= start_date)
+            try:
+                start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+                query = query.filter(SocialPost.date_for >= start_date_obj)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid start_date format: {start_date}. Expected YYYY-MM-DD")
         if end_date:
-            query = query.filter(SocialPost.date_for <= end_date)
+            try:
+                end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+                query = query.filter(SocialPost.date_for <= end_date_obj)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid end_date format: {end_date}. Expected YYYY-MM-DD")
         
         # Filter by status if provided
         if status:
@@ -1131,6 +1116,8 @@ async def get_social_posts(
                     "carousel_slides": p.carousel_slides,
                     "needs_music": p.needs_music,
                     "user_feedback": p.user_feedback,
+                    "topic": p.topic,
+                    "problem_identified": p.problem_identified,
                     "created_at": p.created_at.isoformat() if p.created_at else None
                 }
                 for p in posts
@@ -1149,8 +1136,13 @@ async def get_social_posts_by_date(
     Get all posts for a specific date (YYYY-MM-DD).
     """
     try:
+        # FIXED: Use DATE comparison, not string
+        try:
+            date_obj = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid date format: {date}. Expected YYYY-MM-DD")
         posts = db.query(SocialPost).filter(
-            SocialPost.date_for == date
+            SocialPost.date_for == date_obj
         ).order_by(SocialPost.created_at.desc()).all()
         
         return {
@@ -1171,6 +1163,8 @@ async def get_social_posts_by_date(
                     "carousel_slides": p.carousel_slides,
                     "needs_music": p.needs_music,
                     "user_feedback": p.user_feedback,
+                    "topic": p.topic,
+                    "problem_identified": p.problem_identified,
                     "created_at": p.created_at.isoformat() if p.created_at else None
                 }
                 for p in posts
@@ -1186,69 +1180,105 @@ async def save_social_post(
     user: dict = Depends(verify_google_token) # Optional auth
 ):
     """Save or update a generated/approved post to the backend history (shared across all users).
-    If a post with the same formatted_content.id exists, it will be updated instead of creating a new one.
+    If a post with the same external_id exists, it will be updated instead of creating a new one.
     """
     try:
         # Validate user_feedback if provided
         if payload.user_feedback and payload.user_feedback not in ['like', 'dislike']:
             raise HTTPException(status_code=400, detail="user_feedback must be 'like', 'dislike', or None")
         
-        # Check if post already exists (by formatted_content.id or DB ID)
-        existing_post = None
+        # Extract external_id from formatted_content.id if present
+        external_id = None
         if payload.formatted_content and payload.formatted_content.get('id'):
-            target_id = payload.formatted_content.get('id')
-            
+            external_id = str(payload.formatted_content.get('id'))
+        
+        # Check if post already exists by external_id (indexed lookup - O(1) instead of O(n))
+        existing_post = None
+        if external_id:
             # First, try to extract DB ID if format is "db-{id}"
-            db_id_match = None
-            if isinstance(target_id, str) and target_id.startswith('db-'):
+            if external_id.startswith('db-'):
                 try:
-                    db_id_match = int(target_id.replace('db-', ''))
-                    # Try to find by DB ID first (most reliable)
+                    db_id_match = int(external_id.replace('db-', ''))
                     existing_post = db.query(SocialPost).filter(SocialPost.id == db_id_match).first()
                 except ValueError:
                     pass
             
-            # If not found by DB ID, search by formatted_content.id in JSON field
+            # If not found by DB ID, use indexed external_id lookup
             if not existing_post:
-                posts = db.query(SocialPost).filter(
-                    SocialPost.formatted_content.isnot(None)
-                ).all()
-                for p in posts:
-                    if p.formatted_content and isinstance(p.formatted_content, dict):
-                        if p.formatted_content.get('id') == target_id:
-                            existing_post = p
-                            break
+                existing_post = db.query(SocialPost).filter(SocialPost.external_id == external_id).first()
+            
+            # Fallback: If external_id column doesn't exist yet (during migration), use JSONB query
+            if not existing_post:
+                # PostgreSQL JSONB expression query (indexed if migration ran)
+                from sqlalchemy import text
+                existing_post = db.query(SocialPost).filter(
+                    text("formatted_content->>'id' = :target_id")
+                ).params(target_id=external_id).first()
+        
+        # Parse date_for to DATE type (handle both string and date)
+        from datetime import date as date_type
+        if isinstance(payload.date_for, str):
+            try:
+                date_for_obj = datetime.strptime(payload.date_for, "%Y-%m-%d").date()
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid date format: {payload.date_for}. Expected YYYY-MM-DD")
+        else:
+            date_for_obj = payload.date_for
+        
+        # Extract topic and compute hash (CRITICAL for deduplication)
+        topic = payload.topic
+        if not topic:
+            # Try to extract from formatted_content as fallback
+            if payload.formatted_content and isinstance(payload.formatted_content, dict):
+                topic = payload.formatted_content.get('topic', '')
+            # If still no topic, use placeholder (should not happen in normal flow)
+            if not topic:
+                topic = "sin tema → sin solución"
+        
+        # Normalize and hash topic
+        normalized_topic = social_topic.normalize_topic(topic)
+        topic_hash = social_topic.compute_topic_hash(normalized_topic)
         
         if existing_post:
             # Update existing post
-            existing_post.date_for = payload.date_for
+            existing_post.date_for = date_for_obj
             existing_post.caption = payload.caption
             existing_post.image_prompt = payload.image_prompt
             existing_post.post_type = payload.post_type
             existing_post.status = payload.status
             existing_post.selected_product_id = payload.selected_product_id
             existing_post.formatted_content = payload.formatted_content
+            existing_post.external_id = external_id  # Update external_id
             existing_post.channel = payload.channel
             existing_post.carousel_slides = payload.carousel_slides
             existing_post.needs_music = payload.needs_music
             existing_post.user_feedback = payload.user_feedback
+            # Update topic fields
+            existing_post.topic = normalized_topic
+            existing_post.topic_hash = topic_hash
+            existing_post.problem_identified = payload.problem_identified
             db.commit()
             db.refresh(existing_post)
             return {"status": "success", "id": existing_post.id, "updated": True}
         else:
             # Create new post
             new_post = SocialPost(
-                date_for=payload.date_for,
+                date_for=date_for_obj,
                 caption=payload.caption,
                 image_prompt=payload.image_prompt,
                 post_type=payload.post_type,
                 status=payload.status,
                 selected_product_id=payload.selected_product_id,
                 formatted_content=payload.formatted_content,
+                external_id=external_id,  # Set external_id for efficient lookups
                 channel=payload.channel,
                 carousel_slides=payload.carousel_slides,
                 needs_music=payload.needs_music,
-                user_feedback=payload.user_feedback
+                user_feedback=payload.user_feedback,
+                # Topic fields (CRITICAL)
+                topic=normalized_topic,
+                topic_hash=topic_hash,
+                problem_identified=payload.problem_identified
             )
             db.add(new_post)
             db.commit()
@@ -1298,12 +1328,20 @@ async def update_post_feedback(
 @router.post("/generate", response_model=SocialGenResponse)
 async def generate_social_copy(
     payload: SocialGenRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token)  # Add auth
 ):
     """
     Agentic Generation Workflow with DB History.
     """
+    # Rate limiting
+    user_id = user.get("user_id", "anonymous")
+    allowed, error_msg = social_rate_limit.check_rate_limit(user_id, "/generate")
+    if not allowed:
+        raise HTTPException(status_code=429, detail=error_msg)
+    
     if not claude_api_key:
+        social_logging.safe_log_error("CLAUDE_API_KEY not configured", user_id=user_id)
         raise HTTPException(status_code=500, detail="CLAUDE_API_KEY not configured")
 
     client = anthropic.Client(api_key=claude_api_key)
@@ -1311,173 +1349,69 @@ async def generate_social_copy(
     # --- 0. CONTEXT INIT (needed for history query) ---
     try:
         dt = datetime.strptime(payload.date, "%Y-%m-%d")
+        target_date = dt.date()  # Convert to date object for proper comparison
     except ValueError:
+        social_logging.safe_log_warning(f"Invalid date format: {payload.date}, using today", user_id=user_id)
         dt = datetime.now()
+        target_date = dt.date()
     
     # --- 0. FETCH HISTORY (BACKEND) ---
     # Fetch last 20 posts from last 10 days to avoid repetition
-    from datetime import timedelta
-    ten_days_ago = dt - timedelta(days=10)
-    recent_posts = db.query(SocialPost).filter(
-        SocialPost.date_for >= ten_days_ago.strftime("%Y-%m-%d"),
-        SocialPost.date_for <= payload.date
-    ).order_by(SocialPost.created_at.desc()).limit(20).all()
+    # FIXED: Use proper DATE comparison instead of string comparison
+    recent_posts = social_dedupe.fetch_recent_posts(db, dt, days_back=10, limit=20)
     
     # Build comprehensive history with post_type, channel, topic, and product
-    history_items = []
-    for p in recent_posts:
-        # Extract topic from caption (first line or first 40 chars)
-        topic_hint = p.caption.split('\n')[0][:40] if p.caption else "Sin tema"
-        if len(topic_hint) < 10:
-            topic_hint = p.caption[:40] if p.caption else "Sin tema"
-        
-        # Build history entry with all relevant info
-        entry_parts = []
-        if p.post_type:
-            entry_parts.append(f"Tipo: {p.post_type}")
-        if p.channel:
-            entry_parts.append(f"Canal: {p.channel}")
-        entry_parts.append(f"Tema: {topic_hint}...")
-        if p.selected_product_id:
-            entry_parts.append(f"Producto ID: {p.selected_product_id}")
-        
-        history_items.append(" | ".join(entry_parts))
-    
-    # Add batch history if present (posts generated just now in this session)
-    if payload.batch_generated_history:
-        history_items.extend(payload.batch_generated_history)
-
-    recent_history = "\n- ".join(history_items) if history_items else "Sin historial previo."
+    recent_history = social_dedupe.build_history_summary(
+        recent_posts,
+        batch_generated_history=payload.batch_generated_history
+    )
     
     # Extract deduplication info from recent posts
-    recent_product_ids = set()
-    recent_categories = set()
-    for p in recent_posts:
-        if p.selected_product_id:
-            recent_product_ids.add(str(p.selected_product_id))
-        if p.formatted_content and isinstance(p.formatted_content, dict):
-            products = p.formatted_content.get('products', [])
-            for prod in products:
-                if isinstance(prod, dict):
-                    if prod.get('id'):
-                        recent_product_ids.add(str(prod['id']))
-                    if prod.get('category'):
-                        recent_categories.add(prod['category'])
-    
-    # Also use dedup context from frontend if provided (more comprehensive)
-    if payload.dedupContext:
-        recent_product_ids.update(str(pid) for pid in payload.dedupContext.get('recent_product_ids', []))
-        recent_categories.update(payload.dedupContext.get('recent_categories', []))
-    
-    # Check for products used in current batch (to avoid duplicates in same generation)
-    used_in_batch_ids = set()
-    used_in_batch_categories = set()
-    if payload.used_in_batch:
-        used_in_batch_ids.update(str(pid) for pid in payload.used_in_batch.get('product_ids', []))
-        used_in_batch_categories.update(payload.used_in_batch.get('categories', []))
+    (
+        recent_product_ids,
+        recent_categories,
+        recent_channels,
+        recent_topics,
+        recent_topic_keywords,
+        used_in_batch_ids,
+        used_in_batch_categories
+    ) = social_dedupe.extract_deduplication_sets(
+        recent_posts,
+        dedup_context=payload.dedupContext,
+        used_in_batch=payload.used_in_batch
+    )
 
     # --- 1. SEASON CONTEXT ---
     sales_context = get_season_context(dt)
     important_dates = str([d["name"] for d in get_nearby_dates(dt)])
     
     # Load Durango context early (needed for problem identification)
-    durango_context = load_durango_context(month=dt.month)
+    # Use summarized version to reduce token bloat
+    durango_context = social_context.load_durango_context(month=dt.month, use_summary=True)
     
     # Calculate variety metrics for post_type, channel, and topics
-    recent_types = [p.post_type for p in recent_posts if p.post_type]
-    recent_channels = [p.channel for p in recent_posts if p.channel]
-    recent_topics = []  # Extract topics from captions
-    recent_topic_keywords = set()  # Extract keywords from topics for better deduplication
-    for p in recent_posts:
-        if p.caption:
-            # Try to extract topic (first line or first meaningful phrase)
-            topic = p.caption.split('\n')[0].strip()
-            if len(topic) > 10 and len(topic) < 100:
-                recent_topics.append(topic.lower())
-                # Extract keywords (remove emojis, common words)
-                import re
-                topic_clean = re.sub(r'[^\w\s]', ' ', topic.lower())
-                keywords = [w for w in topic_clean.split() if len(w) > 4 and w not in ['para', 'con', 'del', 'las', 'los', 'una', 'uno', 'este', 'esta', 'estos', 'estas']]
-                recent_topic_keywords.update(keywords)
-    
-    # Count promos and analyze post type variety
-    db_promo_count = sum(1 for t in recent_types if t and ('promo' in t.lower() or 'venta' in t.lower() or 'promoción' in t.lower() or 'promoción puntual' in t.lower()))
-    batch_promo_count = 0
-    if payload.batch_generated_history:
-        batch_promo_count = sum(1 for item in payload.batch_generated_history if 'promo' in item.lower() or 'venta' in item.lower() or 'promoción' in item.lower())
-
-    total_recent = len(recent_types) + (len(payload.batch_generated_history) if payload.batch_generated_history else 0)
-    promo_count = db_promo_count + batch_promo_count
-    
-    # More strict: penalize if > 20% are promos OR if last 2 posts were promos
-    last_two_are_promo = len(recent_types) >= 2 and all(
-        t and ('promo' in t.lower() or 'venta' in t.lower() or 'promoción' in t.lower()) 
-        for t in recent_types[-2:]
+    variety_metrics = social_dedupe.analyze_variety_metrics(
+        recent_posts,
+        batch_generated_history=payload.batch_generated_history
     )
-    penalize_promo = (total_recent > 0 and (promo_count / total_recent) > 0.2) or last_two_are_promo
     
-    # Analyze post type distribution
-    from collections import Counter
-    type_counter = Counter([t.lower() for t in recent_types if t])
-    most_common_type = type_counter.most_common(1)[0][0] if type_counter else None
-    most_common_count = type_counter.most_common(1)[0][1] if type_counter else 0
-    
-    # If same type used 2+ times in recent posts, warn
-    type_repetition_warning = ""
-    if most_common_count >= 2 and total_recent >= 2:
-        type_repetition_warning = f"⛔ ALERTA: El tipo '{most_common_type}' se ha usado {most_common_count} veces recientemente. ELIGE UN TIPO DIFERENTE hoy.\n"
-    
-    # Also check if last 2-3 posts are the same type
-    if len(recent_types) >= 2:
-        last_two_types = [t.lower() if t else '' for t in recent_types[-2:]]
-        if last_two_types[0] == last_two_types[1] and last_two_types[0] != '':
-            type_repetition_warning += f"⛔ ALERTA: Los últimos 2 posts fueron del tipo '{last_two_types[0]}'. ESTÁ PROHIBIDO usar este tipo hoy.\n"
-    
-    # Analyze channel variety
-    channel_counts = {}
-    for ch in recent_channels:
-        channel_counts[ch] = channel_counts.get(ch, 0) + 1
-    
-    # Analyze topic variety (check for repeated topics)
-    topic_counts = {}
-    for topic in recent_topics:
-        # Normalize topic (remove common words)
-        normalized = ' '.join([w for w in topic.split() if len(w) > 4])
-        if normalized:
-            topic_counts[normalized] = topic_counts.get(normalized, 0) + 1
-
-    # --- 2. STRATEGY PHASE ---
-    # Check if we're over-focusing on a single topic (e.g., calefacción)
-    # Use both topics and keywords for better detection
-    calefaccion_count = sum(1 for t in recent_topics if 'calefacc' in t or 'calefacción' in t)
-    calefaccion_count += sum(1 for k in recent_topic_keywords if 'calefacc' in k)
-    heladas_count = sum(1 for t in recent_topics if 'helada' in t)
-    heladas_count += sum(1 for k in recent_topic_keywords if 'helada' in k)
-    invernadero_count = sum(1 for t in recent_topics if 'invernader' in t)
-    invernadero_count += sum(1 for k in recent_topic_keywords if 'invernader' in k)
-    mantenimiento_count = sum(1 for t in recent_topics if 'mantenimiento' in t)
-    mantenimiento_count += sum(1 for k in recent_topic_keywords if 'mantenimiento' in k)
-    
-    # Also check in captions for more comprehensive detection
-    for p in recent_posts:
-        if p.caption:
-            caption_lower = p.caption.lower()
-            if 'calefacc' in caption_lower or 'calefacción' in caption_lower:
-                calefaccion_count += 0.5  # Partial match
-            if 'helada' in caption_lower:
-                heladas_count += 0.5
-            if 'invernader' in caption_lower:
-                invernadero_count += 0.5
-    
-    over_focus_warning = ""
-    if calefaccion_count >= 2:
-        over_focus_warning = f"⛔ ALERTA CRÍTICA: Ya se han generado {int(calefaccion_count)} posts sobre calefacción recientemente. ESTÁ PROHIBIDO usar este tema hoy. Busca otros temas relevantes para la temporada.\n"
-    if heladas_count >= 3:
-        over_focus_warning += f"⛔ ALERTA CRÍTICA: Ya se han generado {int(heladas_count)} posts sobre heladas recientemente. ESTÁ PROHIBIDO usar este tema hoy. Elige un tema completamente diferente.\n"
-    if mantenimiento_count >= 3:
-        over_focus_warning += f"⛔ ALERTA: Ya se han generado {int(mantenimiento_count)} posts sobre mantenimiento recientemente. Varía el tema significativamente.\n"
-    if invernadero_count >= 5:
-        over_focus_warning += f"⛔ ALERTA: Ya se han generado {int(invernadero_count)} posts sobre invernaderos recientemente. Considera otros temas agrícolas (campo abierto, ganadería, forestal, etc.).\n"
+    # Extract metrics for use in prompts
+    recent_types = variety_metrics["recent_types"]
+    recent_channels = variety_metrics["recent_channels"]
+    recent_topics = variety_metrics["recent_topics"]
+    recent_topic_keywords = variety_metrics["recent_topic_keywords"]
+    type_counter = Counter(variety_metrics["recent_types"])
+    channel_counts = variety_metrics["channel_counts"]
+    topic_counts = variety_metrics["topic_counts"]
+    promo_count = variety_metrics["promo_count"]
+    total_recent = variety_metrics["total_recent"]
+    penalize_promo = variety_metrics["penalize_promo"]
+    type_repetition_warning = variety_metrics["type_repetition_warning"]
+    over_focus_warning = variety_metrics["over_focus_warning"]
+    calefaccion_count = variety_metrics["calefaccion_count"]
+    heladas_count = variety_metrics["heladas_count"]
+    invernadero_count = variety_metrics["invernadero_count"]
+    mantenimiento_count = variety_metrics["mantenimiento_count"]
     
     # Suggest alternative topics for December
     alternative_topics_december = [
@@ -1691,107 +1625,78 @@ async def generate_social_copy(
     strategy_prompt += '  "search_keywords": "términos de búsqueda para embeddings SOLO si search_needed=true (ej. arado, fertilizante inicio, protección heladas). Si no hay producto, deja vacío"\n'
     strategy_prompt += "}"
     
-    try:
-        strat_resp = client.messages.create(
-            model="claude-sonnet-4-5-20250929",
-            max_tokens=300,
-            temperature=0.5,
-            system="Eres un cerebro estratégico. Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional antes o después. No incluyas explicaciones, solo el JSON.",
-            messages=[{"role": "user", "content": strategy_prompt}]
+    # Use new LLM module with strict JSON parsing and retry
+    # This will raise HTTPException if topic validation fails
+    strat_response = social_llm.call_strategy_llm(client, strategy_prompt)
+    strat_data = {
+        "problem_identified": strat_response.problem_identified,
+        "topic": strat_response.topic,
+        "post_type": strat_response.post_type,
+        "channel": strat_response.channel,
+        "preferred_category": strat_response.preferred_category or "",
+        "search_needed": strat_response.search_needed,
+        "search_keywords": strat_response.search_keywords or ""
+    }
+    
+    # Check for topic duplicate (HARD RULE: no same topic_hash within 10 days)
+    is_duplicate, existing_post = social_dedupe.check_topic_duplicate(
+        db,
+        strat_data["topic"],
+        target_date,
+        days_back=10
+    )
+    if is_duplicate:
+        social_logging.safe_log_warning(
+            f"Topic duplicate detected: {strat_data['topic']}",
+            existing_post_id=existing_post.id if existing_post else None,
+            user_id=user_id
         )
-        response_text = strat_resp.content[0].text
-        cleaned_json = clean_json_text(response_text)
-        strat_data = json.loads(cleaned_json)
-        
-        # Validate topic is problem-focused
-        topic_validation = validate_problem_focused_topic(strat_data.get("topic", ""))
-        if not topic_validation["is_valid"]:
-            print(f"⚠️ Topic validation issues: {topic_validation['issues']}")
-            # Log but don't block - allow generation to continue
-            # Could regenerate or flag for review in future
-    except json.JSONDecodeError as e:
-        print(f"Strategy JSON Parse Error: {e}")
-        print(f"Response text: {strat_resp.content[0].text[:200] if 'strat_resp' in locals() else 'No response'}")
-        # Fallback Strategy
-        strat_data = {"problem_identified": "", "topic": "General", "post_type": "Infografías", "channel": "fb-post", "preferred_category": "", "search_needed": True, "search_keywords": ""}
-    except Exception as e:
-        print(f"Strategy Error: {e}")
-        # Fallback Strategy
-        strat_data = {"problem_identified": "", "topic": "General", "post_type": "Infografías", "channel": "fb-post", "preferred_category": "", "search_needed": True, "search_keywords": ""}
+        raise HTTPException(
+            status_code=409,
+            detail=f"Topic already used recently: '{strat_data['topic']}'. Please choose a different topic."
+        )
+    
+    # Check for problem duplicate (SOFT RULE: same problem with different solution within 3 days)
+    is_problem_dup, existing_problem_post = social_dedupe.check_problem_duplicate(
+        db,
+        strat_data["topic"],
+        target_date,
+        days_back=3
+    )
+    if is_problem_dup:
+        social_logging.safe_log_warning(
+            f"Problem duplicate detected: {strat_data['topic']}",
+            existing_post_id=existing_problem_post.id if existing_problem_post else None,
+            user_id=user_id
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=f"Similar problem already addressed recently. Please choose a different problem or wait a few days."
+        )
 
     # --- 3. PRODUCT SELECTION PHASE (using embeddings) ---
     selected_product_id = None
     selected_category = None
+    product_details = None
     
     if strat_data.get("search_needed"):
         search_query = strat_data.get("search_keywords", "") or strat_data.get("topic", "")
         preferred_category = strat_data.get("preferred_category", "")
         
-        # Use semantic search with embeddings
+        # Use new product selection module
         try:
-            from rag_system_moved.embeddings import generate_embeddings
-            query_embedding = generate_embeddings([search_query])[0]
-            
-            # Build query for supplier products with embeddings
-            product_query = db.query(SupplierProduct).join(
-                ProductCategory, SupplierProduct.category_id == ProductCategory.id
-            ).filter(
-                SupplierProduct.is_active == True,
-                SupplierProduct.archived_at == None,
-                SupplierProduct.embedding != None
+            selected_product_id, selected_category, product_details = social_products.select_product_for_post(
+                db,
+                search_query,
+                preferred_category=preferred_category if preferred_category else None,
+                recent_product_ids=recent_product_ids,
+                recent_categories=recent_categories,
+                used_in_batch_ids=used_in_batch_ids,
+                used_in_batch_categories=used_in_batch_categories
             )
-            
-            # Filter by preferred category if specified
-            if preferred_category:
-                product_query = product_query.filter(
-                    ProductCategory.name.ilike(f"%{preferred_category}%")
-                )
-            
-            # Get top products by vector similarity
-            candidate_products = product_query.order_by(
-                SupplierProduct.embedding.cosine_distance(query_embedding)
-            ).limit(30).all()
-            
-            # Filter out recently used products
-            filtered_candidates = []
-            for sp in candidate_products:
-                sp_id_str = str(sp.id)
-                # Skip if used recently
-                if sp_id_str in recent_product_ids or sp_id_str in used_in_batch_ids:
-                    continue
-                # Skip if category was heavily used
-                cat_name = sp.category.name if sp.category else (sp.product.category.name if sp.product and sp.product.category else "General")
-                category_count = sum(1 for cat in recent_categories if cat.lower() == cat_name.lower())
-                if category_count >= 3:
-                    continue
-                filtered_candidates.append(sp)
-            
-            # If filtering removed everything, allow some repeats
-            if not filtered_candidates:
-                for sp in candidate_products[:10]:
-                    sp_id_str = str(sp.id)
-                    if sp_id_str not in used_in_batch_ids:
-                        filtered_candidates.append(sp)
-                        break
-            
-            # Select the best product (first in similarity-ordered list after filtering)
-            if filtered_candidates:
-                selected_sp = filtered_candidates[0]
-                selected_product_id = str(selected_sp.id)
-                selected_category = selected_sp.category.name if selected_sp.category else (selected_sp.product.category.name if selected_sp.product and selected_sp.product.category else "General")
-            
         except Exception as e:
-            print(f"Embedding-based product selection failed: {e}")
-            # Fallback to text search
-            keywords = strat_data.get("search_keywords", "") or strat_data.get("topic", "")
-            found_products = search_products(db, keywords, limit=10)
-            
-            # Filter and select
-            for p in found_products:
-                if p['id'] not in recent_product_ids and p['id'] not in used_in_batch_ids:
-                    selected_product_id = p['id']
-                    selected_category = p['category']
-                    break
+            social_logging.safe_log_error(f"Product selection failed: {e}", exc_info=True, user_id=user_id)
+            # Continue without product - content can be educational without specific product
 
     # --- 4. CONTENT GENERATION PHASE ---
     # Fetch selected product details if a product was selected
@@ -1821,7 +1726,7 @@ async def generate_social_copy(
                     f"Enfócate en el valor educativo y el interés del producto para generar contenido atractivo.\n"
                 )
         except Exception as e:
-            print(f"Error fetching product details: {e}")
+            social_logging.safe_log_error(f"Error fetching product details: {e}", exc_info=True, user_id=user_id)
             selected_product_info = f"\nProducto seleccionado ID: {selected_product_id}\n"
 
     # Build deduplication context for AI (includes products, categories, channels, topics)
@@ -1856,6 +1761,7 @@ async def generate_social_copy(
         f"ACTÚA COMO: Social Media Manager especializado en contenido agrícola.\n\n"
         f"ESTRATEGIA DEFINIDA:\n"
         f"- TEMA: {strat_data.get('topic')}\n"
+        f"- PROBLEMA IDENTIFICADO: {strat_data.get('problem_identified', '')}\n"
         f"- TIPO DE POST: {strat_data.get('post_type')}\n"
         f"- CANAL: {strat_data.get('channel')}\n"
         f"{selected_product_info}\n"
@@ -2104,6 +2010,7 @@ ESTRUCTURA: Infografía educativa multi-panel
         '  "selected_category": "...",\n'
         '  "selected_product_id": "...",\n'
         f'  "channel": "{strat_data.get("channel", "fb-post")}",\n'
+        f'  "topic": "{strat_data.get("topic")}",\n'
         '  "caption": "... (RESPETA: wa-status/stories/tiktok/reels = MUY CORTO, fb-post = puede ser largo)",\n'
         '  "image_prompt": "... (SOLO si es post de 1 imagen. Para stories/status debe ser autoexplicativa)",\n'
         '  "carousel_slides": ["Slide 1 CON TEXTO GRANDE...", "Slide 2 CON TEXTO...", ...] (SOLO si es carrusel: TikTok 2-3, FB/IG 2-10),\n'
@@ -2122,148 +2029,35 @@ ESTRUCTURA: Infografía educativa multi-panel
         "6. NO uses descripciones genéricas - sé específico sobre el producto y su uso en agricultura/ganadería/forestal de Durango."
     )
 
-    try:
-        final_resp = client.messages.create(
-            model="claude-sonnet-4-5-20250929",
-            max_tokens=2000,
-            temperature=0.7,
-            system="""Eres un Social Media Manager profesional. CRÍTICO: Debes responder ÚNICAMENTE con un objeto JSON válido y bien formateado.
-
-REGLAS ESTRICTAS DE JSON:
-1. Todos los strings deben estar entre comillas dobles y CERRADOS correctamente
-2. Si un string contiene un salto de línea, debes usar \\n (dos caracteres: backslash seguido de n)
-3. Si un string contiene comillas, debes escaparlas como \\"
-4. Si un string contiene backslash, debes escaparlo como \\\\
-5. NUNCA dejes un string sin cerrar - cada " de apertura debe tener su " de cierre
-6. El JSON debe ser válido y parseable por json.loads()
-
-EJEMPLO de string con saltos de línea:
-"caption": "Línea 1\\n\\nLínea 2"
-
-NO hagas esto (incorrecto):
-"caption": "Línea 1
-
-Línea 2"
-
-Responde SOLO con el JSON, sin explicaciones ni texto adicional.""",
-            messages=[{"role": "user", "content": creation_prompt}]
+    # Use new LLM module with strict JSON parsing and retry
+    # This will raise HTTPException on failure (no silent fallback)
+    content_response = social_llm.call_content_llm(client, creation_prompt)
+    
+    # Verify topic matches strategy phase (content phase must echo same topic)
+    content_topic = content_response.topic or strat_data.get("topic", "")
+    if content_topic != strat_data.get("topic", ""):
+        social_logging.safe_log_warning(
+            f"Topic mismatch: strategy={strat_data.get('topic')}, content={content_topic}",
+            user_id=user_id
         )
-        content = final_resp.content[0].text
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Creation Error: {str(e)}")
+        # Use strategy topic (canonical)
+        content_topic = strat_data.get("topic", "")
+    
+    data = {
+        "selected_category": content_response.selected_category or "",
+        "selected_product_id": content_response.selected_product_id or "",
+        "channel": content_response.channel,
+        "caption": content_response.caption,
+        "image_prompt": content_response.image_prompt,
+        "carousel_slides": content_response.carousel_slides,
+        "needs_music": content_response.needs_music,
+        "posting_time": content_response.posting_time,
+        "notes": content_response.notes or "",
+        "topic": content_topic  # Use canonical topic from strategy phase
+    }
 
-    # 5. Final Parse with multiple fallback strategies
-    data = {}
-    try:
-        cleaned_json = clean_json_text(content)
-        data = json.loads(cleaned_json)
-    except json.JSONDecodeError as e:
-        print(f"Creation JSON Parse Error: {e}")
-        print(f"Response text (first 500 chars): {content[:500]}")
-        
-        # Fallback 1: Try to repair and parse again
-        try:
-            repaired = repair_json_string(cleaned_json)
-            data = json.loads(repaired)
-            print("Successfully repaired JSON")
-        except:
-            # Fallback 2: Try to extract fields using regex (last resort)
-            import re
-            try:
-                # Extract selected_category
-                cat_match = re.search(r'"selected_category":\s*"([^"]*)"', content)
-                if cat_match:
-                    data["selected_category"] = cat_match.group(1)
-                
-                # Extract selected_product_id
-                prod_match = re.search(r'"selected_product_id":\s*"([^"]*)"', content)
-                if prod_match:
-                    data["selected_product_id"] = prod_match.group(1)
-                
-                # Extract caption (this is the tricky one - might be unterminated)
-                caption_match = re.search(r'"caption":\s*"([^"]*(?:\\.[^"]*)*)"', content, re.DOTALL)
-                if not caption_match:
-                    # Try to find caption even if unterminated - look for "caption": " and take until next " or }
-                    caption_match = re.search(r'"caption":\s*"([^"]*(?:\\.[^"]*)*)', content, re.DOTALL)
-                    if caption_match:
-                        # Extract until we find a closing " or }
-                        caption_text = caption_match.group(1)
-                        # Remove any trailing incomplete parts
-                        caption_text = caption_text.rstrip().rstrip('"').rstrip(',')
-                        data["caption"] = caption_text
-                else:
-                    data["caption"] = caption_match.group(1).replace('\\n', '\n')
-                
-                # Extract image_prompt
-                prompt_match = re.search(r'"image_prompt":\s*"([^"]*(?:\\.[^"]*)*)"', content, re.DOTALL)
-                if not prompt_match:
-                    prompt_match = re.search(r'"image_prompt":\s*"([^"]*(?:\\.[^"]*)*)', content, re.DOTALL)
-                    if prompt_match:
-                        prompt_text = prompt_match.group(1).rstrip().rstrip('"').rstrip(',')
-                        data["image_prompt"] = prompt_text
-                else:
-                    data["image_prompt"] = prompt_match.group(1).replace('\\n', '\n')
-                
-                # Extract posting_time
-                time_match = re.search(r'"posting_time":\s*"([^"]*)"', content)
-                if time_match:
-                    data["posting_time"] = time_match.group(1)
-                
-                # Extract notes
-                notes_match = re.search(r'"notes":\s*"([^"]*(?:\\.[^"]*)*)"', content, re.DOTALL)
-                if not notes_match:
-                    notes_match = re.search(r'"notes":\s*"([^"]*(?:\\.[^"]*)*)', content, re.DOTALL)
-                    if notes_match:
-                        notes_text = notes_match.group(1).rstrip().rstrip('"').rstrip(',')
-                        data["notes"] = notes_text
-                else:
-                    data["notes"] = notes_match.group(1).replace('\\n', '\n')
-                
-                # If we extracted at least caption, consider it a partial success
-                if "caption" in data:
-                    print("Partially extracted JSON fields using regex fallback")
-                else:
-                    raise Exception("Could not extract any fields")
-            except Exception as regex_error:
-                print(f"Regex extraction also failed: {regex_error}")
-                # Final fallback: return minimal data
-                data = {
-                    "caption": content[:500] if len(content) > 500 else content,
-                    "notes": f"JSON Parse Error: {str(e)}. Could not extract structured data.",
-                    "image_prompt": ""
-                }
-    except Exception as e:
-        print(f"Creation Parse Error: {e}")
-        data = {
-            "caption": content[:500] if len(content) > 500 else content,
-            "notes": f"Parse Error: {str(e)}",
-            "image_prompt": ""
-        }
-
-    # --- 6. FETCH SELECTED PRODUCT DETAILS (Back to Frontend) ---
-    product_details = None
-    if data.get("selected_product_id"):
-        try:
-             pid = int(data["selected_product_id"])
-             sp_obj = db.query(SupplierProduct).filter(SupplierProduct.id == pid).first()
-             if sp_obj:
-                 cat_name = sp_obj.category.name if sp_obj.category else (sp_obj.product.category.name if sp_obj.product and sp_obj.product.category else "General")
-                 # Calculate price from supplier cost + shipping + margin
-                 cost = float(sp_obj.cost or 0)
-                 shipping = float(sp_obj.shipping_cost_direct or 0)
-                 margin = float(sp_obj.default_margin or 0.30)  # Default 30% margin
-                 price = (cost + shipping) / (1 - margin) if margin < 1 else cost + shipping
-                 
-                 product_details = {
-                     "id": str(sp_obj.id),
-                     "name": sp_obj.name or (sp_obj.product.name if sp_obj.product else "Unknown"),
-                     "category": cat_name,
-                     "sku": sp_obj.sku or (sp_obj.product.sku if sp_obj.product else ""),
-                     "inStock": sp_obj.stock > 0 if sp_obj.stock is not None else False,
-                     "price": price
-                 }
-        except:
-            pass # Use string ID or invalid ID, ignore
+    # Product details already fetched in product selection phase
+    # Use product_details from selection phase if available
 
     # Include problem_identified in notes if available
     notes_with_problem = data.get("notes", "")
@@ -2271,6 +2065,9 @@ Responde SOLO con el JSON, sin explicaciones ni texto adicional.""",
         problem_note = f"Problema identificado: {strat_data.get('problem_identified')}"
         notes_with_problem = f"{problem_note}\n\n{notes_with_problem}" if notes_with_problem else problem_note
 
+    # Record successful request for rate limiting
+    social_rate_limit.record_request(user_id, "/generate")
+    
     return SocialGenResponse(
         caption=data.get("caption", ""),
         image_prompt=data.get("image_prompt", ""),
@@ -2280,11 +2077,13 @@ Responde SOLO con el JSON, sin explicaciones ni texto adicional.""",
         cta=data.get("cta"),
         selected_product_id=selected_product_id or str(data.get("selected_product_id", "")),  # Use from product selection phase
         selected_category=selected_category or data.get("selected_category"),  # Use from product selection phase
-        selected_product_details=product_details,
+        selected_product_details=product_details,  # From product selection phase
         post_type=strat_data.get("post_type"),  # From strategy phase
         channel=strat_data.get("channel") or data.get("channel"),  # From strategy phase, fallback to content phase
         carousel_slides=data.get("carousel_slides"),
-        needs_music=data.get("needs_music")
+        needs_music=data.get("needs_music"),
+        topic=data.get("topic", strat_data.get("topic", "")),  # Canonical topic from strategy phase
+        problem_identified=strat_data.get("problem_identified", "")  # From strategy phase
     )
 
 
