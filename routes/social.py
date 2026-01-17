@@ -1743,7 +1743,6 @@ async def generate_social_copy(
             dedup_info += "  → VARÍA el canal: no uses el mismo que ayer. Alterna entre wa-status, fb-post, tiktok, reels.\n"
         if recent_topics:
             # Show most common topics to avoid
-            from collections import Counter
             topic_counter = Counter(recent_topics)
             top_topics = [t for t, _ in topic_counter.most_common(3)]
             dedup_info += f"- Topics/temas recientes: {', '.join([t[:30] for t in top_topics])}\n"

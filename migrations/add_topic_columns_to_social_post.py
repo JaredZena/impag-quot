@@ -71,8 +71,91 @@ def run_migration():
     with engine.connect() as conn:
         trans = conn.begin()
         try:
-            # Step 1: Add columns (nullable initially for backfill)
-            print("Step 1: Adding topic, problem_identified, and topic_hash columns...")
+            # Step 0: Check and add prerequisite columns if missing
+            print("Step 0: Checking prerequisite columns...")
+            
+            # Check for external_id (from previous migration)
+            check_external_id = text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'social_post' 
+                AND column_name = 'external_id'
+            """)
+            result = conn.execute(check_external_id)
+            if result.fetchone() is None:
+                print("  Adding missing 'external_id' column...")
+                conn.execute(text("""
+                    ALTER TABLE social_post 
+                    ADD COLUMN external_id VARCHAR(255) NULL
+                """))
+                print("  ✓ Added 'external_id' column")
+            else:
+                print("  ✓ 'external_id' column exists")
+            
+            # Check for channel, carousel_slides, needs_music (from previous migration)
+            check_channel = text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'social_post' 
+                AND column_name = 'channel'
+            """)
+            result = conn.execute(check_channel)
+            if result.fetchone() is None:
+                print("  Adding missing 'channel' column...")
+                conn.execute(text("""
+                    ALTER TABLE social_post 
+                    ADD COLUMN channel VARCHAR(50) NULL
+                """))
+                print("  ✓ Added 'channel' column")
+            
+            check_carousel = text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'social_post' 
+                AND column_name = 'carousel_slides'
+            """)
+            result = conn.execute(check_carousel)
+            if result.fetchone() is None:
+                print("  Adding missing 'carousel_slides' column...")
+                conn.execute(text("""
+                    ALTER TABLE social_post 
+                    ADD COLUMN carousel_slides JSON NULL
+                """))
+                print("  ✓ Added 'carousel_slides' column")
+            
+            check_music = text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'social_post' 
+                AND column_name = 'needs_music'
+            """)
+            result = conn.execute(check_music)
+            if result.fetchone() is None:
+                print("  Adding missing 'needs_music' column...")
+                conn.execute(text("""
+                    ALTER TABLE social_post 
+                    ADD COLUMN needs_music BOOLEAN DEFAULT FALSE
+                """))
+                print("  ✓ Added 'needs_music' column")
+            
+            # Check for user_feedback (from previous migration)
+            check_feedback = text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'social_post' 
+                AND column_name = 'user_feedback'
+            """)
+            result = conn.execute(check_feedback)
+            if result.fetchone() is None:
+                print("  Adding missing 'user_feedback' column...")
+                conn.execute(text("""
+                    ALTER TABLE social_post 
+                    ADD COLUMN user_feedback VARCHAR(20) NULL
+                """))
+                print("  ✓ Added 'user_feedback' column")
+            
+            # Step 1: Add topic columns (nullable initially for backfill)
+            print("\nStep 1: Adding topic, problem_identified, and topic_hash columns...")
             conn.execute(text("""
                 ALTER TABLE social_post 
                 ADD COLUMN IF NOT EXISTS topic TEXT,
