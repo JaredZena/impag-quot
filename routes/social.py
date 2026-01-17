@@ -178,6 +178,7 @@ class SocialGenResponse(BaseModel):
     # Topic-based deduplication fields (CRITICAL)
     topic: Optional[str] = None # Topic in format "Problema → Solución" (canonical unit of deduplication)
     problem_identified: Optional[str] = None # Problem description from strategy phase
+    saved_post_id: Optional[int] = None # ID of the automatically saved post in database
 
 # --- Logic ---
 
@@ -1060,7 +1061,7 @@ class SocialPostSaveRequest(BaseModel):
     needs_music: Optional[bool] = False
     user_feedback: Optional[str] = None  # 'like', 'dislike', or None
     # Topic-based deduplication fields (CRITICAL)
-    topic: Optional[str] = None  # Topic in format "Problema → Solución"
+    topic: str  # Topic in format "Problema → Solución" (REQUIRED - comes from LLM or must be provided)
     problem_identified: Optional[str] = None  # Problem description from strategy phase
 
 @router.get("/posts")
@@ -1179,8 +1180,10 @@ async def save_social_post(
     db: Session = Depends(get_db),
     user: dict = Depends(verify_google_token) # Optional auth
 ):
-    """Save or update a generated/approved post to the backend history (shared across all users).
-    If a post with the same external_id exists, it will be updated instead of creating a new one.
+    """Update an existing post (status, user_feedback, etc.).
+    
+    NOTE: New posts are automatically saved by /generate endpoint.
+    This endpoint is primarily for updating existing posts.
     """
     try:
         # Validate user_feedback if provided
@@ -1225,15 +1228,16 @@ async def save_social_post(
         else:
             date_for_obj = payload.date_for
         
-        # Extract topic and compute hash (CRITICAL for deduplication)
+        # Topic is REQUIRED - it should come from the LLM or be provided explicitly
+        # No extraction logic needed - the AI returns it, or it's provided by the frontend
+        if not payload.topic:
+            raise HTTPException(
+                status_code=400,
+                detail="topic is required. Posts generated via /generate are automatically saved. "
+                       "If updating an existing post, provide the topic explicitly."
+            )
+        
         topic = payload.topic
-        if not topic:
-            # Try to extract from formatted_content as fallback
-            if payload.formatted_content and isinstance(payload.formatted_content, dict):
-                topic = payload.formatted_content.get('topic', '')
-            # If still no topic, use placeholder (should not happen in normal flow)
-            if not topic:
-                topic = "sin tema → sin solución"
         
         # Normalize and hash topic
         normalized_topic = social_topic.normalize_topic(topic)
@@ -2067,6 +2071,89 @@ ESTRUCTURA: Infografía educativa multi-panel
     # Record successful request for rate limiting
     social_rate_limit.record_request(user_id, "/generate")
     
+    # AUTOMATICALLY SAVE THE POST (backend has all the data, no need for frontend to send it back)
+    # Normalize and hash topic
+    canonical_topic = data.get("topic", strat_data.get("topic", ""))
+    if not canonical_topic:
+        canonical_topic = "sin tema → sin solución"
+        social_logging.safe_log_warning(
+            f"No topic in generate response, using placeholder",
+            user_id=user_id
+        )
+    
+    normalized_topic = social_topic.normalize_topic(canonical_topic)
+    topic_hash = social_topic.compute_topic_hash(normalized_topic)
+    
+    # Build formatted_content for storage
+    formatted_content = {
+        "id": None,  # Will be set after save
+        "postType": strat_data.get("post_type"),
+        "channels": [strat_data.get("channel") or data.get("channel")],
+        "hook": "Tendencias agrícolas",  # Default hook
+        "hookType": "seasonality",
+        "products": [product_details] if product_details else [],
+        "tags": [],
+        "instructions": notes_with_problem,
+        "postingTime": data.get("posting_time"),
+        "generationSource": "llm",
+        "strategyNotes": notes_with_problem,
+        "carouselSlides": data.get("carousel_slides"),
+        "needsMusic": data.get("needs_music", False),
+        "generatedContext": {
+            "monthPhase": "germinacion",  # Default, can be enhanced later if needed
+            "nearbyDates": [],
+            "selectedCategories": [selected_category] if selected_category else []
+        }
+    }
+    
+    # Check if post already exists by topic_hash and date (avoid duplicates)
+    existing_post = db.query(SocialPost).filter(
+        SocialPost.topic_hash == topic_hash,
+        SocialPost.date_for == target_date
+    ).first()
+    
+    if existing_post:
+        # Update existing post with new content
+        existing_post.caption = data.get("caption", "")
+        existing_post.image_prompt = data.get("image_prompt")
+        existing_post.post_type = strat_data.get("post_type")
+        existing_post.selected_product_id = selected_product_id or data.get("selected_product_id")
+        existing_post.channel = strat_data.get("channel") or data.get("channel")
+        existing_post.carousel_slides = data.get("carousel_slides")
+        existing_post.needs_music = data.get("needs_music", False)
+        existing_post.formatted_content = formatted_content
+        existing_post.topic = normalized_topic
+        existing_post.topic_hash = topic_hash
+        existing_post.problem_identified = strat_data.get("problem_identified", "")
+        db.commit()
+        db.refresh(existing_post)
+        saved_post_id = existing_post.id
+    else:
+        # Create new post
+        new_post = SocialPost(
+            date_for=target_date,
+            caption=data.get("caption", ""),
+            image_prompt=data.get("image_prompt"),
+            post_type=strat_data.get("post_type"),
+            status="planned",
+            selected_product_id=selected_product_id or data.get("selected_product_id"),
+            formatted_content=formatted_content,
+            channel=strat_data.get("channel") or data.get("channel"),
+            carousel_slides=data.get("carousel_slides"),
+            needs_music=data.get("needs_music", False),
+            topic=normalized_topic,
+            topic_hash=topic_hash,
+            problem_identified=strat_data.get("problem_identified", "")
+        )
+        db.add(new_post)
+        db.commit()
+        db.refresh(new_post)
+        saved_post_id = new_post.id
+        # Update formatted_content with actual ID
+        formatted_content["id"] = str(saved_post_id)
+        new_post.formatted_content = formatted_content
+        db.commit()
+    
     return SocialGenResponse(
         caption=data.get("caption", ""),
         image_prompt=data.get("image_prompt") or None,  # Allow None for carousel posts
@@ -2081,8 +2168,9 @@ ESTRUCTURA: Infografía educativa multi-panel
         channel=strat_data.get("channel") or data.get("channel"),  # From strategy phase, fallback to content phase
         carousel_slides=data.get("carousel_slides"),
         needs_music=data.get("needs_music"),
-        topic=data.get("topic", strat_data.get("topic", "")),  # Canonical topic from strategy phase
-        problem_identified=strat_data.get("problem_identified", "")  # From strategy phase
+        topic=canonical_topic,  # Canonical topic from strategy phase
+        problem_identified=strat_data.get("problem_identified", ""),  # From strategy phase
+        saved_post_id=saved_post_id  # Return the saved post ID
     )
 
 
