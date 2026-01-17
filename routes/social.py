@@ -161,7 +161,7 @@ class SocialGenRequest(BaseModel):
 
 class SocialGenResponse(BaseModel):
     caption: str
-    image_prompt: str
+    image_prompt: Optional[str] = None  # Optional - carousel posts use carousel_slides instead
     posting_time: Optional[str] = None
     notes: Optional[str] = None
     format: Optional[str] = None
@@ -2069,7 +2069,7 @@ ESTRUCTURA: Infografía educativa multi-panel
     
     return SocialGenResponse(
         caption=data.get("caption", ""),
-        image_prompt=data.get("image_prompt", ""),
+        image_prompt=data.get("image_prompt") or None,  # Allow None for carousel posts
         posting_time=data.get("posting_time"),
         notes=notes_with_problem,
         format=data.get("format"),
