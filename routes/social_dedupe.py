@@ -108,13 +108,15 @@ def check_topic_duplicate(
     normalized = normalize_topic(topic)
     topic_hash = compute_topic_hash(normalized)
     
-    cutoff_date = date_obj - timedelta(days=days_back)
+    # Check both backwards AND forwards (important for batch generation with different date_for values)
+    start_date = date_obj - timedelta(days=days_back)
+    end_date = date_obj + timedelta(days=days_back)
     
     # Use indexed query on topic_hash
     existing = db.query(SocialPost).filter(
         SocialPost.topic_hash == topic_hash,
-        SocialPost.date_for >= cutoff_date,
-        SocialPost.date_for <= date_obj
+        SocialPost.date_for >= start_date,
+        SocialPost.date_for <= end_date
     ).first()
     
     if existing:
@@ -149,13 +151,15 @@ def check_problem_duplicate(
         # Problem too short, skip soft check
         return False, None
     
-    cutoff_date = date_obj - timedelta(days=days_back)
+    # Check both backwards AND forwards (important for batch generation with different date_for values)
+    start_date = date_obj - timedelta(days=days_back)
+    end_date = date_obj + timedelta(days=days_back)
     
     # Query posts in date range and check problem part
     # Use DB query to extract problem from topic
     recent_posts = db.query(SocialPost).filter(
-        SocialPost.date_for >= cutoff_date,
-        SocialPost.date_for <= date_obj
+        SocialPost.date_for >= start_date,
+        SocialPost.date_for <= end_date
     ).all()
     
     # Check each post's problem part (normalize and compare)

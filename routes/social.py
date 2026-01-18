@@ -158,6 +158,14 @@ class SocialGenRequest(BaseModel):
     used_in_batch: Optional[Dict[str, Any]] = None
     batch_generated_history: Optional[List[str]] = None # New field for real-time batch awareness
     suggested_topic: Optional[str] = None # User-suggested topic for the post
+    selected_categories: Optional[List[str]] = None # Categories selected by frontend (will be moved to backend)
+
+class SocialGenBatchRequest(BaseModel):
+    date: str # YYYY-MM-DD
+    min_count: int = 1
+    max_count: int = 3
+    suggested_topic: Optional[str] = None
+    category_override: Optional[str] = None # Optional category preference
 
 class SocialGenResponse(BaseModel):
     caption: str
@@ -179,6 +187,11 @@ class SocialGenResponse(BaseModel):
     topic: Optional[str] = None # Topic in format "Problema → Solución" (canonical unit of deduplication)
     problem_identified: Optional[str] = None # Problem description from strategy phase
     saved_post_id: Optional[int] = None # ID of the automatically saved post in database
+
+class SocialGenBatchResponse(BaseModel):
+    posts: List[SocialGenResponse]
+    selected_categories: List[str] # Categories selected by backend
+    metadata: Dict[str, Any] # Month phase, important dates, etc.
 
 # --- Logic ---
 
@@ -2172,6 +2185,211 @@ ESTRUCTURA: Infografía educativa multi-panel
         problem_identified=strat_data.get("problem_identified", ""),  # From strategy phase
         saved_post_id=saved_post_id  # Return the saved post ID
     )
+
+
+@router.post("/generate-batch", response_model=SocialGenBatchResponse)
+async def generate_social_batch(
+    payload: SocialGenBatchRequest,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token)
+):
+    """
+    Generate multiple social posts for a date in a single batch.
+    Handles category selection, batch tracking, and deduplication internally.
+    """
+    import random
+    
+    user_id = user.get("user_id", "anonymous")
+    
+    # Rate limiting
+    allowed, error_msg = social_rate_limit.check_rate_limit(user_id, "/generate-batch")
+    if not allowed:
+        raise HTTPException(status_code=429, detail=error_msg)
+    
+    # Parse date
+    try:
+        dt = datetime.strptime(payload.date, "%Y-%m-%d")
+        target_date = dt.date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid date format: {payload.date}. Expected YYYY-MM-DD")
+    
+    # Get season context and important dates
+    sales_context = get_season_context(dt)
+    nearby_dates_list = get_nearby_dates(dt)
+    
+    # Fetch recent posts for deduplication and category selection
+    recent_posts = social_dedupe.fetch_recent_posts(db, dt, days_back=10, limit=20)
+    
+    # Select categories (backend logic - moved from frontend)
+    selected_categories = _select_categories_backend(
+        dt.month,
+        nearby_dates_list,
+        recent_posts,
+        payload.category_override
+    )
+    
+    # Determine count
+    count = random.randint(payload.min_count, payload.max_count)
+    
+    # Internal batch tracking
+    used_in_batch = {
+        "product_ids": set(),
+        "categories": set()
+    }
+    batch_generated_history = []
+    
+    # Generate posts
+    generated_posts = []
+    for i in range(count):
+        # 60% chance to use a category, 40% for general educational content
+        use_category = random.random() < 0.6
+        preferred_category = None
+        if use_category and selected_categories:
+            preferred_category = selected_categories[i % len(selected_categories)]
+        
+        # Build request for single post generation
+        single_request = SocialGenRequest(
+            date=payload.date,
+            category=preferred_category,
+            suggested_topic=payload.suggested_topic,
+            used_in_batch={
+                "product_ids": list(used_in_batch["product_ids"]),
+                "categories": list(used_in_batch["categories"])
+            },
+            batch_generated_history=batch_generated_history,
+            selected_categories=selected_categories
+        )
+        
+        try:
+            # Generate single post by calling the generate function directly
+            # We already have db and user, so we can call it directly (Depends is just for FastAPI injection)
+            post_response = await generate_social_copy(single_request, db, user)
+            generated_posts.append(post_response)
+            
+            # Track what we used
+            if post_response.selected_product_id:
+                used_in_batch["product_ids"].add(post_response.selected_product_id)
+            if post_response.selected_category:
+                used_in_batch["categories"].add(post_response.selected_category)
+            
+            # Add to batch history
+            batch_generated_history.append(f"{post_response.caption[:50]}... [{post_response.post_type}]")
+            
+        except HTTPException as e:
+            # If duplicate (409), skip this post
+            if e.status_code == 409:
+                social_logging.safe_log_warning(
+                    f"Duplicate post detected in batch, skipping. Attempt {i+1}/{count}",
+                    user_id=user_id
+                )
+                continue
+            # Re-raise other HTTP exceptions
+            raise
+        except Exception as e:
+            social_logging.safe_log_error(
+                f"Failed to generate post {i+1}/{count} in batch: {e}",
+                exc_info=True,
+                user_id=user_id
+            )
+            # Continue with other posts even if one fails
+            continue
+    
+    # Record successful batch request
+    social_rate_limit.record_request(user_id, "/generate-batch")
+    
+    return SocialGenBatchResponse(
+        posts=generated_posts,
+        selected_categories=selected_categories,
+        metadata={
+            "monthPhase": sales_context["phase"],
+            "monthName": sales_context["name"],
+            "importantDates": [d["name"] for d in nearby_dates_list],
+            "generatedCount": len(generated_posts),
+            "requestedCount": count
+        }
+    )
+
+
+def _select_categories_backend(
+    month: int,
+    nearby_dates: List[Dict[str, Any]],
+    recent_posts: List[SocialPost],
+    category_override: Optional[str] = None
+) -> List[str]:
+    """
+    Select categories for post generation (moved from frontend).
+    Uses month pattern, important dates, and recent history.
+    """
+    # Get month pattern categories
+    month_pattern = SEASON_PATTERNS.get(month, SEASON_PATTERNS[1])
+    
+    # Category weights from month actions
+    category_scores = {}
+    
+    # Map month actions to categories
+    action_to_category = {
+        "riego": "riego",
+        "acolchado": "acolchado",
+        "charolas": "charolas",
+        "semillas": "vivero",
+        "sustratos": "vivero",
+        "anti-heladas": "antiheladas",
+        "manta térmica": "antiheladas",
+        "mallasombra": "mallasombra",
+        "plásticos": "plasticos",
+    }
+    
+    # Score categories based on month actions
+    for action in month_pattern.get("actions", []):
+        action_lower = action.lower()
+        for key, cat in action_to_category.items():
+            if key in action_lower:
+                category_scores[cat] = category_scores.get(cat, 0) + 1.0
+    
+    # Boost categories from important dates (if they have relatedCategories)
+    # Note: DEFAULT_DATES doesn't have relatedCategories, but we can add logic if needed
+    
+    # Penalize recently used categories
+    recent_category_usage = Counter()
+    for post in recent_posts:
+        if post.formatted_content and isinstance(post.formatted_content, dict):
+            products = post.formatted_content.get("products", [])
+            for product in products:
+                if isinstance(product, dict) and product.get("category"):
+                    recent_category_usage[product["category"]] += 1
+        # Also check selected_category field
+        if post.selected_product_id:
+            # Would need product lookup - for now skip
+            pass
+    
+    # Apply penalty
+    for cat, count in recent_category_usage.items():
+        if cat in category_scores:
+            category_scores[cat] *= (0.7 ** count)  # Penalty multiplier
+    
+    # Sort and select top 3 categories
+    sorted_categories = sorted(
+        category_scores.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )[:3]
+    
+    selected = [cat for cat, score in sorted_categories if score > 0]
+    
+    # If override provided, prioritize it
+    if category_override:
+        if category_override not in selected:
+            selected.insert(0, category_override)
+        else:
+            # Move to front
+            selected.remove(category_override)
+            selected.insert(0, category_override)
+    
+    # Fallback to default if empty
+    if not selected:
+        selected = ["vivero"]  # Default category
+    
+    return selected[:3]  # Return max 3 categories
 
 
 
