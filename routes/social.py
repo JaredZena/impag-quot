@@ -592,7 +592,7 @@ def identify_agricultural_problems(
     """
     # Problem database by month/phase
     problem_map = {
-        # Enero (Germinación)
+        # Enero (Germinación + Planificación)
         1: {
             "urgent": [
                 {
@@ -605,16 +605,43 @@ def identify_agricultural_problems(
                     "common_mistake": "No proteger charolas en invernadero sin calefacción"
                 },
                 {
+                    "problem": "Falta de planificación causa pérdidas económicas en ciclo primavera-verano",
+                    "symptoms": "Compras apresuradas, pérdida de ventanas de siembra, menor rendimiento",
+                    "impact": "Reducción 20-30% en rentabilidad, desabasto de insumos",
+                    "solution_category": "general",
+                    "urgency": "high",
+                    "time_window": "Enero-Febrero",
+                    "common_mistake": "Iniciar ciclo sin plan de siembra ni presupuesto"
+                },
+                {
+                    "problem": "Descontrol de gastos impide conocer rentabilidad real",
+                    "symptoms": "No se sabe cuánto se gastó, qué fue rentable, qué no",
+                    "impact": "Decisiones sin datos, repetición de errores costosos",
+                    "solution_category": "general",
+                    "urgency": "high",
+                    "time_window": "Todo el año",
+                    "common_mistake": "No registrar gastos ni resultados por ciclo"
+                }
+            ],
+            "preventive": [
+                {
                     "problem": "Sustrato seco en charolas causa germinación desigual",
                     "symptoms": "Algunas cavidades germinan, otras no",
                     "impact": "Plántulas desuniformes, pérdida de tiempo",
                     "solution_category": "riego",
-                    "urgency": "high",
+                    "urgency": "medium",
                     "time_window": "Enero-Marzo",
                     "common_mistake": "Regar después de llenar en lugar de antes"
-                }
-            ],
-            "preventive": [
+                },
+                {
+                    "problem": "Suelo no preparado reduce rendimiento 20-40% en ciclo primavera-verano",
+                    "symptoms": "Raíces débiles, plantas atrofiadas, menor producción",
+                    "impact": "Reducción significativa en rendimiento y rentabilidad",
+                    "solution_category": "acolchado",
+                    "urgency": "medium",
+                    "time_window": "Enero-Febrero",
+                    "common_mistake": "Sembrar sin preparar suelo adecuadamente"
+                },
                 {
                     "problem": "Charolas sucias transmiten enfermedades a nuevas siembras",
                     "symptoms": "Damping-off, pudrición de raíces",
@@ -1353,31 +1380,48 @@ async def generate_social_copy(
     """
     # Rate limiting
     user_id = user.get("user_id", "anonymous")
+    social_logging.safe_log_info(
+        "[STEP 0] Starting post generation",
+        user_id=user_id,
+        date=payload.date,
+        category=payload.category,
+        has_suggested_topic=bool(payload.suggested_topic)
+    )
+    
     allowed, error_msg = social_rate_limit.check_rate_limit(user_id, "/generate")
     if not allowed:
+        social_logging.safe_log_warning(f"[STEP 0] Rate limit exceeded", user_id=user_id)
         raise HTTPException(status_code=429, detail=error_msg)
     
     if not claude_api_key:
-        social_logging.safe_log_error("CLAUDE_API_KEY not configured", user_id=user_id)
+        social_logging.safe_log_error("[STEP 0] CLAUDE_API_KEY not configured", user_id=user_id)
         raise HTTPException(status_code=500, detail="CLAUDE_API_KEY not configured")
 
     client = anthropic.Client(api_key=claude_api_key)
 
     # --- 0. CONTEXT INIT (needed for history query) ---
+    social_logging.safe_log_info("[STEP 1] Parsing date and initializing context", user_id=user_id)
     try:
         dt = datetime.strptime(payload.date, "%Y-%m-%d")
         target_date = dt.date()  # Convert to date object for proper comparison
     except ValueError:
-        social_logging.safe_log_warning(f"Invalid date format: {payload.date}, using today", user_id=user_id)
+        social_logging.safe_log_warning(f"[STEP 1] Invalid date format: {payload.date}, using today", user_id=user_id)
         dt = datetime.now()
         target_date = dt.date()
     
     # --- 0. FETCH HISTORY (BACKEND) ---
+    social_logging.safe_log_info("[STEP 2] Fetching recent posts for deduplication", user_id=user_id, target_date=str(target_date))
     # Fetch last 20 posts from last 10 days to avoid repetition
     # FIXED: Use proper DATE comparison instead of string comparison
     recent_posts = social_dedupe.fetch_recent_posts(db, dt, days_back=10, limit=20)
+    social_logging.safe_log_info(
+        "[STEP 2] Recent posts fetched",
+        user_id=user_id,
+        recent_posts_count=len(recent_posts)
+    )
     
     # Build comprehensive history with post_type, channel, topic, and product
+    social_logging.safe_log_info("[STEP 3] Building history summary and extracting deduplication sets", user_id=user_id)
     recent_history = social_dedupe.build_history_summary(
         recent_posts,
         batch_generated_history=payload.batch_generated_history
@@ -1397,19 +1441,40 @@ async def generate_social_copy(
         dedup_context=payload.dedupContext,
         used_in_batch=payload.used_in_batch
     )
+    social_logging.safe_log_info(
+        "[STEP 3] Deduplication sets extracted",
+        user_id=user_id,
+        recent_topics_count=len(recent_topics),
+        recent_products_count=len(recent_product_ids),
+        recent_categories_count=len(recent_categories)
+    )
 
     # --- 1. SEASON CONTEXT ---
+    social_logging.safe_log_info("[STEP 4] Loading season context and Durango context", user_id=user_id, month=dt.month)
     sales_context = get_season_context(dt)
     important_dates = str([d["name"] for d in get_nearby_dates(dt)])
     
     # Load Durango context early (needed for problem identification)
     # Use summarized version to reduce token bloat
     durango_context = social_context.load_durango_context(month=dt.month, use_summary=True)
+    social_logging.safe_log_info(
+        "[STEP 4] Context loaded",
+        user_id=user_id,
+        phase=sales_context.get('phase'),
+        important_dates_count=len(get_nearby_dates(dt))
+    )
     
     # Calculate variety metrics for post_type, channel, and topics
+    social_logging.safe_log_info("[STEP 5] Calculating variety metrics", user_id=user_id)
     variety_metrics = social_dedupe.analyze_variety_metrics(
         recent_posts,
         batch_generated_history=payload.batch_generated_history
+    )
+    social_logging.safe_log_info(
+        "[STEP 5] Variety metrics calculated",
+        user_id=user_id,
+        total_recent=variety_metrics.get("total_recent", 0),
+        promo_count=variety_metrics.get("promo_count", 0)
     )
     
     # Extract metrics for use in prompts
@@ -1430,21 +1495,8 @@ async def generate_social_copy(
     invernadero_count = variety_metrics["invernadero_count"]
     mantenimiento_count = variety_metrics["mantenimiento_count"]
     
-    # Suggest alternative topics for December
-    alternative_topics_december = [
-        "Planificación del ciclo primavera 2026",
-        "Optimización de recursos y costos",
-        "Preparación de suelo para próximo ciclo",
-        "Análisis de resultados del año",
-        "Nuevas tecnologías y tendencias",
-        "Gestión de inventario y almacén",
-        "Capacitación y educación agrícola",
-        "Sustentabilidad y buenas prácticas",
-        "Optimización de riego",
-        "Manejo de cultivos de frío (avena, trigo, alfalfa)"
-    ]
-    
     # Identify real problems first
+    social_logging.safe_log_info("[STEP 6] Identifying agricultural problems", user_id=user_id)
     nearby_dates_list = get_nearby_dates(dt)
     problems_data = identify_agricultural_problems(
         dt.month,
@@ -1452,27 +1504,34 @@ async def generate_social_copy(
         nearby_dates_list,
         durango_context
     )
+    social_logging.safe_log_info(
+        "[STEP 6] Problems identified",
+        user_id=user_id,
+        urgent_count=len(problems_data.get("most_urgent", [])),
+        high_priority_count=len(problems_data.get("high_priority", []))
+    )
     
     # Build problem-focused strategy prompt
+    social_logging.safe_log_info("[STEP 7] Building strategy prompt", user_id=user_id)
     strategy_prompt = f"ACTÚA COMO: Ingeniero Agrónomo Experto con 15+ años en campo Durango.\n"
     strategy_prompt += f"Tu trabajo diario es VISITAR PARCELAS, IDENTIFICAR PROBLEMAS REALES y SOLUCIONARLOS.\n\n"
     strategy_prompt += f"FECHA: {payload.date}\n"
     strategy_prompt += f"FASE AGRÍCOLA: {sales_context['phase']} ({sales_context['name']})\n"
     strategy_prompt += f"CONTEXTO REGIONAL: {durango_context[:500]}...\n\n"
     
-    # Add urgent problems
+    # Add urgent problems (but de-emphasize to encourage variety)
     if problems_data["most_urgent"]:
         strategy_prompt += "🔴 PROBLEMAS CRÍTICOS (URGENTE - RESOLVER HOY):\n"
-        for i, prob in enumerate(problems_data["most_urgent"][:3], 1):
+        strategy_prompt += "⚠️ IMPORTANTE: Estos son problemas importantes, pero NO estás obligado a elegirlos.\n"
+        strategy_prompt += "Puedes elegir CUALQUIER problema agrícola relevante - no solo los de esta lista.\n"
+        strategy_prompt += "VARÍA los temas: si ya generaste posts sobre estos problemas, elige algo DIFERENTE.\n\n"
+        for i, prob in enumerate(problems_data["most_urgent"][:2], 1):  # Show only 2, not 3
             strategy_prompt += f"""
 {i}. PROBLEMA: {prob['problem']}
-   Síntomas: {prob.get('symptoms', 'N/A')}
    Impacto: {prob.get('impact', 'N/A')}
-   Error común: {prob.get('common_mistake', 'N/A')}
-   Categoría solución: {prob.get('solution_category', 'general')}
-   Ventana de tiempo: {prob.get('time_window', 'Inmediato')}
+   Categoría: {prob.get('solution_category', 'general')}
 """
-        strategy_prompt += "\n💡 PRIORIZA CONTENIDO QUE RESUELVA ESTOS PROBLEMAS CRÍTICOS.\n\n"
+        strategy_prompt += "\n💡 Considera estos problemas, pero PRIORIZA VARIEDAD sobre repetir temas similares.\n\n"
 
     if problems_data["high_priority"]:
         strategy_prompt += "🟡 PROBLEMAS DE ALTA PRIORIDAD:\n"
@@ -1490,21 +1549,27 @@ async def generate_social_copy(
     strategy_prompt += "Puedes generar contenido educativo sobre CUALQUIER tema agrícola valioso (técnicas, gestión, planificación, etc.).\n\n"
     
     strategy_prompt += "TU MENTALIDAD COMO INGENIERO EXPERTO:\n\n"
-    strategy_prompt += "1. PROBLEMA PRIMERO, PRODUCTO DESPUÉS\n"
+    strategy_prompt += "1. VARIEDAD PRIMERO - REVISAR HISTORIAL ANTES DE DECIDIR\n"
+    strategy_prompt += "   - PRIMERO: Lee el historial reciente arriba y identifica qué temas ya cubriste\n"
+    strategy_prompt += "   - SEGUNDO: Elige un tema COMPLETAMENTE DIFERENTE a los temas recientes\n"
+    strategy_prompt += "   - TERCERO: Identifica un problema relevante para ese tema nuevo\n"
+    strategy_prompt += "   - REGLA DE ORO: Si los últimos 2-3 posts son sobre 'X', elige algo sobre 'Y' (diferente)\n"
+    strategy_prompt += "   - La VARIEDAD es más importante que seguir exactamente la fase agrícola\n\n"
+    strategy_prompt += "2. PROBLEMA PRIMERO, PRODUCTO DESPUÉS\n"
     strategy_prompt += "   - NO pienses '¿Qué producto promociono hoy?'\n"
     strategy_prompt += "   - SÍ piensa '¿Qué problema real está enfrentando el agricultor HOY?'\n"
     strategy_prompt += "   - Luego: '¿Qué solución técnica resuelve este problema?'\n\n"
-    strategy_prompt += "2. IDENTIFICA SÍNTOMAS, NO SOLO PROBLEMAS\n"
+    strategy_prompt += "3. IDENTIFICA SÍNTOMAS, NO SOLO PROBLEMAS\n"
     strategy_prompt += "   - Los agricultores ven síntomas (hojas amarillas, plantas muertas)\n"
     strategy_prompt += "   - Tú como experto identificas la causa raíz\n"
     strategy_prompt += "   - El contenido debe conectar síntoma → causa → solución\n\n"
-    strategy_prompt += "3. ERRORES COMUNES SON OPORTUNIDADES DE EDUCACIÓN\n"
+    strategy_prompt += "4. ERRORES COMUNES SON OPORTUNIDADES DE EDUCACIÓN\n"
     strategy_prompt += "   - Si un error común causa el problema, edúcales sobre cómo evitarlo\n"
     strategy_prompt += "   - Ejemplo: 'Error común: No proteger charolas → Solución: Sistema antiheladas'\n\n"
-    strategy_prompt += "4. IMPACTO MEDIBLE GENERA URGENCIA\n"
+    strategy_prompt += "5. IMPACTO MEDIBLE GENERA URGENCIA\n"
     strategy_prompt += "   - 'Pérdida 30-50% de germinación' es más urgente que 'mejora la germinación'\n"
     strategy_prompt += "   - Usa números concretos del impacto del problema\n\n"
-    strategy_prompt += "5. VENTANA DE TIEMPO CREA URGENCIA\n"
+    strategy_prompt += "6. VENTANA DE TIEMPO CREA URGENCIA\n"
     strategy_prompt += "   - 'Enero-Febrero' es más urgente que 'durante el año'\n"
     strategy_prompt += "   - Si estamos en la ventana, el problema es INMEDIATO\n\n"
     
@@ -1516,18 +1581,20 @@ async def generate_social_copy(
     if over_focus_warning:
         strategy_prompt += f"{over_focus_warning}\n"
     
-    # Continue building the prompt
-    strategy_prompt += "HISTORIAL RECIENTE (TUS ÚLTIMAS DECISIONES):\n"
+    # Continue building the prompt - PUT HISTORY FIRST so AI considers it before deciding
+    strategy_prompt += "HISTORIAL RECIENTE (TUS ÚLTIMAS DECISIONES - REVISA ESTO PRIMERO):\n"
     strategy_prompt += f"- {recent_history or 'Sin historial previo.'}\n\n"
-    
-    # Add alternative topics if needed
-    if over_focus_warning and dt.month == 12:
-        alt_topics = ', '.join(alternative_topics_december[:5]) + '...'
-        strategy_prompt += f"💡 TEMAS ALTERNATIVOS SUGERIDOS (para evitar repetición): {alt_topics}\n"
-    
-    if dt.month == 12 and (calefaccion_count >= 1 or heladas_count >= 2):
-        alt_topics_full = ', '.join(alternative_topics_december)
-        strategy_prompt += f"📋 TEMAS ALTERNATIVOS PARA DICIEMBRE (si necesitas ideas): {alt_topics_full}\n"
+    strategy_prompt += "⚠️⚠️⚠️ CRÍTICO - LEE EL HISTORIAL ARRIBA ANTES DE DECIDIR ⚠️⚠️⚠️:\n"
+    strategy_prompt += "1. Revisa los temas recientes en el historial\n"
+    strategy_prompt += "2. Identifica qué temas/áreas ya cubriste (ej: germinación, riego, planificación)\n"
+    strategy_prompt += "3. Elige un tema COMPLETAMENTE DIFERENTE a los temas recientes\n"
+    strategy_prompt += "4. Si los últimos 2-3 posts son sobre 'X', elige algo sobre 'Y' (diferente área)\n"
+    strategy_prompt += "5. Ejemplos de variedad:\n"
+    strategy_prompt += "   - Si últimos posts: germinación/vivero → Elige: planificación/gestión/costos\n"
+    strategy_prompt += "   - Si últimos posts: riego → Elige: organización/inventario/ROI\n"
+    strategy_prompt += "   - Si últimos posts: planificación → Elige: técnicas/prácticas/casos de éxito\n"
+    strategy_prompt += "   - Si últimos posts: productos específicos → Elige: educación general/gestión\n"
+    strategy_prompt += "La VARIEDAD es más importante que seguir exactamente la fase agrícola.\n\n"
     
     strategy_prompt += "REGLAS DE VARIEDAD (CRÍTICO - SÍGUELAS O FALLARÁ LA ESTRATEGIA):\n"
     
@@ -1656,6 +1723,7 @@ async def generate_social_copy(
     }
     
     # Check for topic duplicate (HARD RULE: no same topic_hash within 10 days)
+    social_logging.safe_log_info("[STEP 9] Checking topic duplicate (hard rule)", user_id=user_id)
     is_duplicate, existing_post = social_dedupe.check_topic_duplicate(
         db,
         strat_data["topic"],
@@ -1664,7 +1732,8 @@ async def generate_social_copy(
     )
     if is_duplicate:
         social_logging.safe_log_warning(
-            f"Topic duplicate detected: {strat_data['topic']}",
+            "[STEP 9] Topic duplicate detected (hard rule)",
+            topic=strat_data['topic'],
             existing_post_id=existing_post.id if existing_post else None,
             user_id=user_id
         )
@@ -1672,8 +1741,10 @@ async def generate_social_copy(
             status_code=409,
             detail=f"Topic already used recently: '{strat_data['topic']}'. Please choose a different topic."
         )
+    social_logging.safe_log_info("[STEP 9] Topic duplicate check passed", user_id=user_id)
     
     # Check for problem duplicate (SOFT RULE: same problem with different solution within 3 days)
+    social_logging.safe_log_info("[STEP 10] Checking problem duplicate (soft rule)", user_id=user_id)
     is_problem_dup, existing_problem_post = social_dedupe.check_problem_duplicate(
         db,
         strat_data["topic"],
@@ -1682,7 +1753,8 @@ async def generate_social_copy(
     )
     if is_problem_dup:
         social_logging.safe_log_warning(
-            f"Problem duplicate detected: {strat_data['topic']}",
+            "[STEP 10] Problem duplicate detected (soft rule)",
+            topic=strat_data['topic'],
             existing_post_id=existing_problem_post.id if existing_problem_post else None,
             user_id=user_id
         )
@@ -1690,8 +1762,14 @@ async def generate_social_copy(
             status_code=409,
             detail=f"Similar problem already addressed recently. Please choose a different problem or wait a few days."
         )
+    social_logging.safe_log_info("[STEP 10] Problem duplicate check passed", user_id=user_id)
 
     # --- 3. PRODUCT SELECTION PHASE (using embeddings) ---
+    social_logging.safe_log_info(
+        "[STEP 11] Starting product selection",
+        user_id=user_id,
+        search_needed=strat_data.get("search_needed", False)
+    )
     selected_product_id = None
     selected_category = None
     product_details = None
@@ -1711,14 +1789,24 @@ async def generate_social_copy(
                 used_in_batch_ids=used_in_batch_ids,
                 used_in_batch_categories=used_in_batch_categories
             )
+            social_logging.safe_log_info(
+                "[STEP 11] Product selected",
+                user_id=user_id,
+                product_id=selected_product_id,
+                category=selected_category
+            )
         except Exception as e:
-            social_logging.safe_log_error(f"Product selection failed: {e}", exc_info=True, user_id=user_id)
+            social_logging.safe_log_error("[STEP 11] Product selection failed", exc_info=True, user_id=user_id, error=str(e))
             # Continue without product - content can be educational without specific product
+    else:
+        social_logging.safe_log_info("[STEP 11] Product selection skipped (search_needed=false)", user_id=user_id)
 
     # --- 4. CONTENT GENERATION PHASE ---
+    social_logging.safe_log_info("[STEP 12] Starting content generation phase", user_id=user_id)
     # Fetch selected product details if a product was selected
     selected_product_info = ""
     if selected_product_id:
+        social_logging.safe_log_info("[STEP 12] Fetching product details", user_id=user_id, product_id=selected_product_id)
         try:
             pid = int(selected_product_id)
             sp_obj = db.query(SupplierProduct).filter(SupplierProduct.id == pid).first()
@@ -1742,9 +1830,12 @@ async def generate_social_copy(
                     f"Investiga mentalmente: ¿Para qué se usa este producto? ¿En qué cultivos? ¿Qué problema resuelve? ¿Cómo se instala/usa?\n"
                     f"Enfócate en el valor educativo y el interés del producto para generar contenido atractivo.\n"
                 )
+                social_logging.safe_log_info("[STEP 12] Product details fetched", user_id=user_id, product_name=product_name if 'product_name' in locals() else None)
         except Exception as e:
-            social_logging.safe_log_error(f"Error fetching product details: {e}", exc_info=True, user_id=user_id)
+            social_logging.safe_log_error("[STEP 12] Error fetching product details", exc_info=True, user_id=user_id, error=str(e))
             selected_product_info = f"\nProducto seleccionado ID: {selected_product_id}\n"
+    else:
+        social_logging.safe_log_info("[STEP 12] No product selected, skipping product details", user_id=user_id)
 
     # Build deduplication context for AI (includes products, categories, channels, topics)
     dedup_info = ""
@@ -1773,6 +1864,7 @@ async def generate_social_copy(
     
     # durango_context already loaded earlier for problem identification
 
+    social_logging.safe_log_info("[STEP 12] Building content generation prompt", user_id=user_id)
     creation_prompt = (
         f"ACTÚA COMO: Social Media Manager especializado en contenido agrícola.\n\n"
         f"ESTRATEGIA DEFINIDA:\n"
@@ -2047,7 +2139,15 @@ ESTRUCTURA: Infografía educativa multi-panel
 
     # Use new LLM module with strict JSON parsing and retry
     # This will raise HTTPException on failure (no silent fallback)
+    social_logging.safe_log_info("[STEP 13] Calling content LLM", user_id=user_id)
     content_response = social_llm.call_content_llm(client, creation_prompt)
+    social_logging.safe_log_info(
+        "[STEP 13] Content LLM response received",
+        user_id=user_id,
+        has_caption=bool(content_response.caption),
+        has_image_prompt=bool(content_response.image_prompt),
+        has_carousel=bool(content_response.carousel_slides)
+    )
     
     # Verify topic matches strategy phase (content phase must echo same topic)
     content_topic = content_response.topic or strat_data.get("topic", "")
@@ -2120,6 +2220,7 @@ ESTRUCTURA: Infografía educativa multi-panel
     }
     
     # Check if post already exists by topic_hash and date (avoid duplicates)
+    social_logging.safe_log_info("[STEP 15] Checking for existing post by topic_hash", user_id=user_id)
     existing_post = db.query(SocialPost).filter(
         SocialPost.topic_hash == topic_hash,
         SocialPost.date_for == target_date
@@ -2127,6 +2228,11 @@ ESTRUCTURA: Infografía educativa multi-panel
     
     if existing_post:
         # Update existing post with new content
+        social_logging.safe_log_info(
+            "[STEP 15] Existing post found, updating",
+            user_id=user_id,
+            existing_post_id=existing_post.id
+        )
         existing_post.caption = data.get("caption", "")
         existing_post.image_prompt = data.get("image_prompt")
         existing_post.post_type = strat_data.get("post_type")
@@ -2141,8 +2247,14 @@ ESTRUCTURA: Infografía educativa multi-panel
         db.commit()
         db.refresh(existing_post)
         saved_post_id = existing_post.id
+        social_logging.safe_log_info(
+            "[STEP 15] Post updated successfully",
+            user_id=user_id,
+            post_id=saved_post_id
+        )
     else:
         # Create new post
+        social_logging.safe_log_info("[STEP 15] Creating new post", user_id=user_id)
         new_post = SocialPost(
             date_for=target_date,
             caption=data.get("caption", ""),
@@ -2166,6 +2278,11 @@ ESTRUCTURA: Infografía educativa multi-panel
         formatted_content["id"] = str(saved_post_id)
         new_post.formatted_content = formatted_content
         db.commit()
+        social_logging.safe_log_info(
+            "[STEP 15] Post created successfully",
+            user_id=user_id,
+            post_id=saved_post_id
+        )
     
     return SocialGenResponse(
         caption=data.get("caption", ""),
