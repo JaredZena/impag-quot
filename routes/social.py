@@ -2064,7 +2064,12 @@ ESTRUCTURA: Infografía educativa multi-panel
         "- Si un string contiene comillas, escápalas como \\\"\n"
         "- NUNCA dejes strings sin cerrar - cada \" debe tener su \" de cierre\n"
         "- El JSON debe ser válido y parseable\n"
-        "- IMPORTANTE PARA CARRUSELES: Si el canal es 'tiktok' o 'fb-post' con carrusel, usa 'carousel_slides' en lugar de 'image_prompt'\n\n"
+        "⚠️⚠️⚠️ REGLA CRÍTICA PARA image_prompt ⚠️⚠️⚠️:\n"
+        "- Si el post NO es carrusel (no tiene carousel_slides), DEBES proporcionar 'image_prompt' (NO puede ser null ni vacío)\n"
+        "- Si el post ES carrusel (tiene carousel_slides), entonces 'image_prompt' puede ser null\n"
+        "- Para wa-status, stories, tiktok (sin carrusel), fb-post, ig-post: SIEMPRE proporciona 'image_prompt'\n"
+        "- El 'image_prompt' DEBE ser detallado, técnico, y seguir el formato IMPAG especificado arriba\n"
+        "- NUNCA dejes 'image_prompt' vacío o null a menos que sea un carrusel\n\n"
         "EJEMPLO CORRECTO (post normal con producto):\n"
         "{\n"
         '  "selected_category": "riego",\n'
@@ -2120,8 +2125,8 @@ ESTRUCTURA: Infografía educativa multi-panel
         f'  "channel": "{strat_data.get("channel", "fb-post")}",\n'
         f'  "topic": "{strat_data.get("topic")}",\n'
         '  "caption": "... (RESPETA: wa-status/stories/tiktok/reels = MUY CORTO, fb-post = puede ser largo)",\n'
-        '  "image_prompt": "... (SOLO si es post de 1 imagen. Para stories/status debe ser autoexplicativa)",\n'
-        '  "carousel_slides": ["Slide 1 CON TEXTO GRANDE...", "Slide 2 CON TEXTO...", ...] (SOLO si es carrusel: TikTok 2-3, FB/IG 2-10),\n'
+        '  "image_prompt": "PROMPT DETALLADO OBLIGATORIO para generación de imagen (SOLO si NO es carrusel). Para stories/status debe ser autoexplicativa con texto grande visible. SIEMPRE incluye logos IMPAG y dimensiones correctas (1080×1920 para vertical, 1080×1080 para cuadrado).",\n'
+        '  "carousel_slides": ["Slide 1 CON TEXTO GRANDE...", "Slide 2 CON TEXTO...", ...] (SOLO si es carrusel: TikTok 2-3, FB/IG 2-10. Si usas carousel_slides, image_prompt debe ser null),\n'
         '  "needs_music": true/false,\n'
         '  "posting_time": "...",\n'
         '  "notes": "..."\n'
@@ -2159,12 +2164,27 @@ ESTRUCTURA: Infografía educativa multi-panel
         # Use strategy topic (canonical)
         content_topic = strat_data.get("topic", "")
     
+    # Validate that image_prompt is provided for non-carousel posts
+    is_carousel = bool(content_response.carousel_slides and len(content_response.carousel_slides) > 0)
+    if not is_carousel and not content_response.image_prompt:
+        social_logging.safe_log_warning(
+            "[STEP 13] Missing image_prompt for non-carousel post",
+            user_id=user_id,
+            channel=content_response.channel,
+            post_type=strat_data.get("post_type")
+        )
+        # This is a critical error - non-carousel posts MUST have image_prompt
+        raise HTTPException(
+            status_code=500,
+            detail="LLM failed to generate image_prompt for non-carousel post. This is required."
+        )
+    
     data = {
         "selected_category": content_response.selected_category or "",
         "selected_product_id": content_response.selected_product_id or "",
         "channel": content_response.channel,
         "caption": content_response.caption,
-        "image_prompt": content_response.image_prompt,
+        "image_prompt": content_response.image_prompt if not is_carousel else None,  # Only set if not carousel
         "carousel_slides": content_response.carousel_slides,
         "needs_music": content_response.needs_music,
         "posting_time": content_response.posting_time,
