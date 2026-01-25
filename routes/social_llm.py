@@ -21,9 +21,16 @@ class StrategyResponse(BaseModel):
     topic: str  # Must be in format "Problema → Solución"
     post_type: str
     channel: str
+    content_tone: str  # Content tone: Motivational, Promotional, Technical, Educational, Problem-Solving, Seasonal, Humorous, etc. (REQUIRED, non-empty)
     preferred_category: Optional[str] = ""
     search_needed: bool = True
     search_keywords: Optional[str] = ""
+    
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Ensure content_tone is never empty (validation)
+        if not self.content_tone or not self.content_tone.strip():
+            raise ValueError("content_tone cannot be empty")
 
 
 class ContentResponse(BaseModel):
@@ -199,7 +206,7 @@ def call_strategy_llm(
         response_text = response.content[0].text
         
         # Parse with retry
-        retry_prompt = "Fix the JSON. Output only valid JSON matching this schema: {problem_identified: string, topic: string (MUST be in format 'Problema → Solución' with arrow →), post_type: string, channel: string, preferred_category: string (optional), search_needed: boolean, search_keywords: string (optional)}"
+        retry_prompt = "Fix the JSON. Output only valid JSON matching this schema: {problem_identified: string, topic: string (MUST be in format 'Problema → Solución' with arrow →), post_type: string, channel: string, content_tone: string (one of: Motivational, Promotional, Technical, Educational, Problem-Solving, Seasonal, Humorous, Informative, Inspirational), preferred_category: string (optional), search_needed: boolean, search_keywords: string (optional)}"
         
         validated_response = parse_json_with_retry(
             client,

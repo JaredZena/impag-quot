@@ -5,10 +5,23 @@ Provides logging with redaction of sensitive data.
 
 import logging
 import re
+import sys
 from typing import Any, Dict
 
 # Configure structured logging
 logger = logging.getLogger(__name__)
+
+# Set up handler if not already configured
+if not logger.handlers:
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 # Patterns for redaction (sensitive data)
 REDACTION_PATTERNS = [
@@ -41,7 +54,15 @@ def safe_log_info(message: str, **kwargs):
     """
     redacted_message = redact_sensitive_data(message)
     redacted_kwargs = {k: redact_sensitive_data(str(v)) if isinstance(v, str) else v for k, v in kwargs.items()}
-    logger.info(redacted_message, extra=redacted_kwargs)
+    
+    # Format message with kwargs for better readability
+    if redacted_kwargs:
+        kwargs_str = " ".join([f"{k}={v}" for k, v in redacted_kwargs.items()])
+        formatted_message = f"{redacted_message} | {kwargs_str}"
+    else:
+        formatted_message = redacted_message
+    
+    logger.info(formatted_message)
 
 
 def safe_log_warning(message: str, **kwargs):
@@ -50,7 +71,15 @@ def safe_log_warning(message: str, **kwargs):
     """
     redacted_message = redact_sensitive_data(message)
     redacted_kwargs = {k: redact_sensitive_data(str(v)) if isinstance(v, str) else v for k, v in kwargs.items()}
-    logger.warning(redacted_message, extra=redacted_kwargs)
+    
+    # Format message with kwargs for better readability
+    if redacted_kwargs:
+        kwargs_str = " ".join([f"{k}={v}" for k, v in redacted_kwargs.items()])
+        formatted_message = f"{redacted_message} | {kwargs_str}"
+    else:
+        formatted_message = redacted_message
+    
+    logger.warning(formatted_message)
 
 
 def safe_log_error(message: str, exc_info: bool = False, **kwargs):
@@ -59,7 +88,15 @@ def safe_log_error(message: str, exc_info: bool = False, **kwargs):
     """
     redacted_message = redact_sensitive_data(message)
     redacted_kwargs = {k: redact_sensitive_data(str(v)) if isinstance(v, str) else v for k, v in kwargs.items()}
-    logger.error(redacted_message, exc_info=exc_info, extra=redacted_kwargs)
+    
+    # Format message with kwargs for better readability
+    if redacted_kwargs:
+        kwargs_str = " ".join([f"{k}={v}" for k, v in redacted_kwargs.items()])
+        formatted_message = f"{redacted_message} | {kwargs_str}"
+    else:
+        formatted_message = redacted_message
+    
+    logger.error(formatted_message, exc_info=exc_info)
 
 
 def log_llm_request(endpoint: str, model: str, token_count: int = None, **kwargs):
