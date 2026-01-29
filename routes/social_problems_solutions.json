@@ -1,0 +1,297 @@
+{
+  "problem_categories": [
+    {
+      "id": "A",
+      "name": "Water Scarcity & Inefficient Use",
+      "problems": [
+        "Over-irrigation and water waste",
+        "Uneven water distribution",
+        "Low pressure / poor hydraulic design",
+        "High energy cost per m³ pumped"
+      ],
+      "value_delivered": [
+        "Higher irrigation uniformity (EU%)",
+        "Reduced water use per ton of crop",
+        "Improved root oxygenation",
+        "Lower pumping hours"
+      ],
+      "scientific_basis": [
+        "Soil–water–plant continuum",
+        "Hydraulic head loss (Darcy–Weisbach)",
+        "Field capacity vs. wilting point",
+        "Evapotranspiration (ET₀, ETc)"
+      ],
+      "related_products": [
+        "riego",
+        "mangueras",
+        "conectores",
+        "emitters",
+        "micro-irrigation",
+        "sistemas riego"
+      ],
+      "related_keywords": [
+        "riego",
+        "agua",
+        "goteo",
+        "aspersión",
+        "presión",
+        "uniformidad",
+        "eficiencia hídrica"
+      ]
+    },
+    {
+      "id": "B",
+      "name": "Energy Cost, Reliability & Access",
+      "problems": [
+        "Diesel dependency",
+        "Unstable grid supply",
+        "High operating costs",
+        "Carbon footprint pressure"
+      ],
+      "value_delivered": [
+        "Predictable energy cost (LCOE ↓)",
+        "Autonomous pumping systems",
+        "Lower CO₂ emissions",
+        "Energy availability in remote zones"
+      ],
+      "scientific_basis": [
+        "Photovoltaic conversion efficiency",
+        "Pump affinity laws",
+        "Power–head–flow relationships",
+        "Battery depth-of-discharge & cycle life"
+      ],
+      "related_products": [
+        "bombas solares",
+        "paneles solares",
+        "sistemas fotovoltaicos",
+        "energía solar"
+      ],
+      "related_keywords": [
+        "energía",
+        "solar",
+        "bomba",
+        "electricidad",
+        "costo energético",
+        "autonomía"
+      ]
+    },
+    {
+      "id": "C",
+      "name": "Yield Losses from Poor Crop Establishment",
+      "problems": [
+        "Uneven germination",
+        "Seedling mortality",
+        "Poor root architecture",
+        "Substrate saturation"
+      ],
+      "value_delivered": [
+        "Uniform emergence",
+        "Faster crop cycles",
+        "Higher transplant survival",
+        "Reduced seed waste"
+      ],
+      "scientific_basis": [
+        "Oxygen diffusion in substrates",
+        "Capillary rise dynamics",
+        "Temperature–germination curves",
+        "Root zone aeration"
+      ],
+      "related_products": [
+        "charolas",
+        "sustratos",
+        "germinación",
+        "viveros",
+        "semillas"
+      ],
+      "related_keywords": [
+        "germinación",
+        "plántulas",
+        "sustrato",
+        "charola",
+        "raíz",
+        "vivero"
+      ]
+    },
+    {
+      "id": "D",
+      "name": "Weed Pressure & Soil Degradation",
+      "problems": [
+        "Weed competition",
+        "Soil erosion",
+        "Moisture loss",
+        "Herbicide dependence"
+      ],
+      "value_delivered": [
+        "Weed suppression without chemicals",
+        "Soil temperature moderation",
+        "Moisture conservation",
+        "Cleaner harvests"
+      ],
+      "scientific_basis": [
+        "Light exclusion (PAR blocking)",
+        "Soil evaporation physics",
+        "Microclimate modification",
+        "Weed seed germination triggers"
+      ],
+      "related_products": [
+        "mallasombra",
+        "acolchados",
+        "mulch",
+        "geomembranas",
+        "cubiertas"
+      ],
+      "related_keywords": [
+        "maleza",
+        "malla",
+        "sombra",
+        "acolchado",
+        "suelo",
+        "protección"
+      ]
+    },
+    {
+      "id": "E",
+      "name": "Labor Inefficiency & Operational Losses",
+      "problems": [
+        "High manual labor costs",
+        "Slow post-harvest handling",
+        "Inconsistent packing",
+        "Product damage"
+      ],
+      "value_delivered": [
+        "Labor time reduction",
+        "Throughput consistency",
+        "Reduced post-harvest losses",
+        "Standardized operations"
+      ],
+      "scientific_basis": [
+        "Ergonomics & time–motion studies",
+        "Post-harvest physiology",
+        "Mechanical stress thresholds"
+      ],
+      "related_products": [
+        "herramientas",
+        "cajas",
+        "empaque",
+        "equipos",
+        "maquinaria"
+      ],
+      "related_keywords": [
+        "trabajo",
+        "mano de obra",
+        "cosecha",
+        "empaque",
+        "eficiencia",
+        "herramientas"
+      ]
+    },
+    {
+      "id": "F",
+      "name": "Water Storage & Infrastructure Risk",
+      "problems": [
+        "Seasonal water shortage",
+        "Canal leakage",
+        "Poor storage hygiene",
+        "Emergency water loss"
+      ],
+      "value_delivered": [
+        "Flexible water reserves",
+        "Reduced seepage",
+        "Rapid deployment",
+        "Improved system resilience"
+      ],
+      "scientific_basis": [
+        "Permeability & seepage control",
+        "UV degradation resistance",
+        "Hydrostatic pressure behavior"
+      ],
+      "related_products": [
+        "almacenamiento",
+        "tanques",
+        "geomembranas",
+        "reservorios",
+        "cisternas"
+      ],
+      "related_keywords": [
+        "almacenamiento",
+        "agua",
+        "tanque",
+        "reserva",
+        "infraestructura",
+        "fuga"
+      ]
+    }
+  ],
+  "product_upgrades": {
+    "irrigation_emitters": {
+      "current_use": "Standard irrigation",
+      "upgrade_ideas": [
+        "Fertigation optimization kits",
+        "Zoning by crop phenology",
+        "Pressure-compensated retrofits"
+      ],
+      "customer_outcome": [
+        "+10–25% nutrient efficiency",
+        "Reduced clogging",
+        "More uniform canopy development"
+      ],
+      "related_category": "riego"
+    },
+    "solar_pumping": {
+      "current_use": "Water extraction",
+      "upgrade_ideas": [
+        "Hybrid solar + grid systems",
+        "Storage tanks + gravity irrigation",
+        "Data-based pumping schedules"
+      ],
+      "customer_outcome": [
+        "Near-zero marginal pumping cost",
+        "Reduced mechanical wear",
+        "Energy independence narrative"
+      ],
+      "related_category": "energía"
+    },
+    "nursery_trays": {
+      "current_use": "Seedling production",
+      "upgrade_ideas": [
+        "Crop-specific cavity volumes",
+        "Root-air-pruning systems",
+        "Capillary irrigation integration"
+      ],
+      "customer_outcome": [
+        "Stronger transplants",
+        "Faster field establishment",
+        "Reduced transplant shock"
+      ],
+      "related_category": "viveros"
+    },
+    "ground_cover": {
+      "current_use": "Weed control or lining",
+      "upgrade_ideas": [
+        "Temperature-managed mulching",
+        "Rainwater harvesting integration",
+        "Multi-season planning layouts"
+      ],
+      "customer_outcome": [
+        "Multi-cycle ROI",
+        "Reduced chemical inputs",
+        "Soil health preservation"
+      ],
+      "related_category": "mallasombra"
+    },
+    "water_storage": {
+      "current_use": "Emergency reserve",
+      "upgrade_ideas": [
+        "Modular storage expansion",
+        "Filtration + reuse loops",
+        "Integration with solar pumping"
+      ],
+      "customer_outcome": [
+        "Drought resilience",
+        "Risk mitigation",
+        "Production continuity"
+      ],
+      "related_category": "almacenamiento"
+    }
+  }
+}

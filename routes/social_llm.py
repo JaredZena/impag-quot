@@ -1,10 +1,11 @@
 """
 Social Media LLM Module
 Handles LLM calls with strict JSON parsing, retry logic, and validation.
-Topic validation is CRITICAL - topic must be in format "Problema → Solución".
+Topic validation is CRITICAL - topic must be in format "Error → Daño concreto → Solución" (preferred) or "Problema → Solución" (backward compatible).
 """
 
 import json
+import re
 import anthropic
 import logging
 from typing import Dict, Any, Optional
@@ -15,10 +16,91 @@ from routes.social_topic import validate_topic
 logger = logging.getLogger(__name__)
 
 
+def repair_json_string(raw: str) -> str:
+    """
+    Attempt to fix common LLM JSON output errors before parsing.
+    - Removes trailing commas before } or ]
+    - Escapes unescaped newlines inside double-quoted strings (replaces \\n with literal \\n in output)
+    - Escapes unescaped double quotes inside double-quoted strings
+    """
+    if not raw or not raw.strip():
+        return raw
+    
+    # 1. Remove trailing commas before } or ] (invalid in JSON)
+    repaired = re.sub(r',(\s*[}\]])', r'\1', raw)
+    
+    # 2. Inside double-quoted strings: escape literal newlines and unescaped double quotes
+    result = []
+    i = 0
+    in_string = False
+    escape_next = False
+    quote_char = '"'
+    
+    while i < len(repaired):
+        c = repaired[i]
+        
+        if escape_next:
+            result.append(c)
+            escape_next = False
+            i += 1
+            continue
+        
+        if c == '\\' and in_string:
+            result.append(c)
+            escape_next = True
+            i += 1
+            continue
+        
+        if c == quote_char and not escape_next:
+            if in_string:
+                in_string = False
+                result.append(c)
+                i += 1
+                continue
+            else:
+                in_string = True
+                result.append(c)
+                i += 1
+                continue
+        
+        if in_string:
+            if c == '\n':
+                result.append('\\n')
+                i += 1
+                continue
+            if c == '\r':
+                result.append('\\r')
+                i += 1
+                continue
+            if c == '\t':
+                result.append('\\t')
+                i += 1
+                continue
+            if c == quote_char:
+                # Unescaped quote inside string (should not happen if we track escape_next)
+                result.append('\\"')
+                i += 1
+                continue
+        
+        result.append(c)
+        i += 1
+    
+    return ''.join(result)
+
+
+class ViralAngleResponse(BaseModel):
+    """Strict schema for viral angle generation phase response."""
+    hook_type: str  # "shock|curiosity|loss|authority|contrast"
+    primary_trigger: str  # "fear|curiosity|greed|simplicity|ego"
+    hook_sentence: str
+    visual_concept: str
+    curiosity_gap: str
+
+
 class StrategyResponse(BaseModel):
     """Strict schema for strategy phase response."""
     problem_identified: str
-    topic: str  # Must be in format "Problema → Solución"
+    topic: str  # Must be in format "Error → Daño concreto → Solución" (preferred) or "Problema → Solución" (backward compatible)
     post_type: str
     channel: str
     content_tone: str  # Content tone: Motivational, Promotional, Technical, Educational, Problem-Solving, Seasonal, Humorous, etc. (REQUIRED, non-empty)
@@ -130,21 +212,27 @@ def parse_json_with_retry(
     
     for attempt in range(max_retries + 1):
         try:
-            data = json.loads(cleaned_json)
+            # Try parsing; on first attempt also try repaired JSON if raw fails
+            try:
+                data = json.loads(cleaned_json)
+            except json.JSONDecodeError:
+                repaired = repair_json_string(cleaned_json)
+                data = json.loads(repaired)
             # Validate with Pydantic
             validated = schema_class(**data)
             return validated
         except json.JSONDecodeError as e:
             if attempt < max_retries and retry_prompt:
                 logger.warning(f"JSON parse error (attempt {attempt + 1}): {e}. Retrying...")
-                # Retry with fix prompt
+                # Retry with fix prompt (include enough context for content LLM; schema_class hint for length)
+                snippet_len = 2000 if schema_class.__name__ == "ContentResponse" else 500
                 retry_response = client.messages.create(
                     model="claude-sonnet-4-5-20250929",
-                    max_tokens=500,
+                    max_tokens=500 if schema_class.__name__ != "ContentResponse" else 2500,
                     temperature=0.3,
-                    system="You are a JSON formatter. Fix the JSON and output ONLY valid JSON, no other text.",
+                    system="You are a JSON formatter. Fix the JSON and output ONLY valid JSON, no other text. Inside strings use \\n for newlines and \\\" for quotes. No trailing commas.",
                     messages=[
-                        {"role": "user", "content": f"{retry_prompt}\n\nInvalid JSON received:\n{cleaned_json[:500]}\n\nError: {str(e)}\n\nFix the JSON and output only valid JSON."}
+                        {"role": "user", "content": f"{retry_prompt}\n\nInvalid JSON received:\n{cleaned_json[:snippet_len]}\n\nError: {str(e)}\n\nFix the JSON and output only valid JSON."}
                     ]
                 )
                 cleaned_json = clean_json_text(retry_response.content[0].text)
@@ -154,14 +242,14 @@ def parse_json_with_retry(
         except ValidationError as e:
             if attempt < max_retries and retry_prompt:
                 logger.warning(f"Validation error (attempt {attempt + 1}): {e}. Retrying...")
-                # Retry with fix prompt
+                snippet_len = 2000 if schema_class.__name__ == "ContentResponse" else 500
                 retry_response = client.messages.create(
                     model="claude-sonnet-4-5-20250929",
-                    max_tokens=500,
+                    max_tokens=500 if schema_class.__name__ != "ContentResponse" else 2500,
                     temperature=0.3,
-                    system="You are a JSON formatter. Fix the JSON to match the required schema and output ONLY valid JSON, no other text.",
+                    system="You are a JSON formatter. Fix the JSON to match the required schema and output ONLY valid JSON, no other text. Inside strings use \\n for newlines and \\\" for quotes.",
                     messages=[
-                        {"role": "user", "content": f"{retry_prompt}\n\nInvalid JSON structure:\n{cleaned_json[:500]}\n\nValidation errors: {str(e)}\n\nFix the JSON to match the required schema and output only valid JSON."}
+                        {"role": "user", "content": f"{retry_prompt}\n\nInvalid JSON structure:\n{cleaned_json[:snippet_len]}\n\nValidation errors: {str(e)}\n\nFix the JSON to match the required schema and output only valid JSON."}
                     ]
                 )
                 cleaned_json = clean_json_text(retry_response.content[0].text)
@@ -174,6 +262,47 @@ def parse_json_with_retry(
     
     # Should never reach here, but just in case
     raise ValueError("Failed to parse JSON after all retries")
+
+
+def call_viral_angle_llm(
+    client: anthropic.Client,
+    prompt: str
+) -> ViralAngleResponse:
+    """
+    Call LLM for viral angle generation phase with strict JSON parsing.
+    
+    This phase generates hooks and psychological triggers to maximize
+    scroll stop, retention, and engagement.
+    
+    Returns:
+        Validated ViralAngleResponse
+    """
+    try:
+        response = client.messages.create(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=400,
+            temperature=0.8,
+            system="Eres un Growth Hacker especializado en viralización de contenido agrícola. Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional antes o después. No incluyas explicaciones, solo el JSON.",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        response_text = response.content[0].text
+        
+        # Parse with retry
+        retry_prompt = "Fix the JSON. Output only valid JSON matching this schema: {hook_type: string (one of: shock, curiosity, loss, authority, contrast), primary_trigger: string (one of: fear, curiosity, greed, simplicity, ego), hook_sentence: string, visual_concept: string, curiosity_gap: string}"
+        
+        return parse_json_with_retry(
+            client,
+            response_text,
+            ViralAngleResponse,
+            retry_prompt=retry_prompt,
+            max_retries=1
+        )
+    except Exception as e:
+        logger.error(f"Viral angle LLM call failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate viral angle: {str(e)}"
+        )
 
 
 def call_strategy_llm(
@@ -200,13 +329,13 @@ def call_strategy_llm(
             model="claude-sonnet-4-5-20250929",
             max_tokens=300,
             temperature=0.5,
-            system="Eres un cerebro estratégico. Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional antes o después. No incluyas explicaciones, solo el JSON. El campo 'topic' DEBE seguir el formato exacto: 'Problema → Solución' (con flecha →).",
+            system="Eres un cerebro estratégico. Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional antes o después. No incluyas explicaciones, solo el JSON. El campo 'topic' DEBE seguir el formato: 'Error → Daño concreto → Solución' (con 2 flechas →). Ejemplo: 'Regar por surco → Pierdes 40% de agua → Riego por goteo presurizado'.",
             messages=[{"role": "user", "content": prompt}]
         )
         response_text = response.content[0].text
         
         # Parse with retry
-        retry_prompt = "Fix the JSON. Output only valid JSON matching this schema: {problem_identified: string, topic: string (MUST be in format 'Problema → Solución' with arrow →), post_type: string, channel: string, content_tone: string (one of: Motivational, Promotional, Technical, Educational, Problem-Solving, Seasonal, Humorous, Informative, Inspirational), preferred_category: string (optional), search_needed: boolean, search_keywords: string (optional)}"
+        retry_prompt = "Fix the JSON. Output only valid JSON matching this schema: {problem_identified: string, topic: string (MUST be in format 'Error → Daño concreto → Solución' with 2 arrows →, e.g., 'Regar por surco → Pierdes 40% de agua → Riego por goteo presurizado'), post_type: string, channel: string, content_tone: string (one of: Motivational, Promotional, Technical, Educational, Problem-Solving, Seasonal, Humorous, Informative, Inspirational), preferred_category: string (optional), search_needed: boolean, search_keywords: string (optional)}"
         
         validated_response = parse_json_with_retry(
             client,
@@ -221,7 +350,7 @@ def call_strategy_llm(
         if not is_valid:
             # Retry ONCE with topic validation instruction
             logger.warning(f"Topic validation failed: {error_msg}. Retrying with fix instruction...")
-            fix_prompt = f"Fix topic format and return valid JSON only. The topic '{validated_response.topic}' is invalid: {error_msg}. Topic MUST be in format 'Problema → Solución' with problem >= 10 chars and solution >= 8 chars. Return only valid JSON."
+            fix_prompt = f"Fix topic format and return valid JSON only. The topic '{validated_response.topic}' is invalid: {error_msg}. Topic MUST be in format 'Error → Daño concreto → Solución' with 2 arrows →. Example: 'Regar por surco → Pierdes 40% de agua → Riego por goteo presurizado'. Error >= 8 chars, Damage >= 10 chars (must include concrete numbers/percentages), Solution >= 8 chars. Return only valid JSON."
             
             retry_response = client.messages.create(
                 model="claude-sonnet-4-5-20250929",
@@ -304,14 +433,14 @@ Responde SOLO con el JSON, sin explicaciones ni texto adicional.""",
         )
         response_text = response.content[0].text
         
-        # Parse with retry
-        retry_prompt = "Fix the JSON. Output only valid JSON matching this schema: {selected_category: string (optional), selected_product_id: string (optional), channel: string, caption: string, image_prompt: string (optional), carousel_slides: array of strings (optional), needs_music: boolean, posting_time: string (optional), notes: string (optional)}"
+        # Parse with retry (2 retries = 3 total attempts; content often has newlines/quotes in strings)
+        retry_prompt = "Fix the JSON. Output only valid JSON. CRITICAL: Inside string values, use \\n for newlines (never real line breaks), and \\\" for quotes. No trailing commas before } or ]. Schema: {selected_category, selected_product_id, channel, caption, image_prompt, carousel_slides, needs_music, posting_time, notes, topic}."
         return parse_json_with_retry(
             client,
             response_text,
             ContentResponse,
             retry_prompt=retry_prompt,
-            max_retries=1
+            max_retries=2
         )
     except Exception as e:
         logger.error(f"Content LLM call failed: {e}", exc_info=True)
@@ -320,7 +449,3 @@ Responde SOLO con el JSON, sin explicaciones ni texto adicional.""",
             status_code=500,
             detail="Failed to generate content. Please try again."
         )
-
-
-from fastapi import HTTPException
-

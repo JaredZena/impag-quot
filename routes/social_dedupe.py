@@ -145,7 +145,8 @@ def check_problem_duplicate(
         Tuple of (is_duplicate, existing_post)
     """
     normalized = normalize_topic(topic)
-    problem, _ = split_topic(normalized)
+        error, _, solution = split_topic(normalized)
+        problem = error  # For backward compatibility, use 'error' as 'problem'
     
     if not problem or len(problem) < 10:
         # Problem too short, skip soft check
@@ -168,14 +169,14 @@ def check_problem_duplicate(
             continue
         
         post_normalized = normalize_topic(post.topic)
-        post_problem, _ = split_topic(post_normalized)
+        post_error, _, post_solution = split_topic(post_normalized)
+        post_problem = post_error  # For backward compatibility
         
         # Compare normalized problems (simple string comparison)
         # For more sophisticated matching, could use similarity, but keeping it simple for now
         if post_problem == problem:
             # Same problem found - check if solution is different
-            _, post_solution = split_topic(post_normalized)
-            _, new_solution = split_topic(normalized)
+            _, _, new_solution = split_topic(normalized)
             
             if post_solution != new_solution:
                 # Same problem, different solution - block

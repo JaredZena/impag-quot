@@ -88,37 +88,56 @@ def compute_topic_hash(topic: str) -> str:
     return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
 
 
-def split_topic(topic: str) -> Tuple[str, str]:
+def split_topic(topic: str) -> Tuple[str, str, Optional[str]]:
     """
-    Split topic into problem and solution parts.
+    Split topic into error, damage, and solution parts.
+    
+    Supports both formats:
+    - Old: "Problema → Solución" (2 parts)
+    - New: "Error → Daño concreto → Solución" (3 parts)
     
     Args:
-        topic: Topic string in format "Problema → Solución"
+        topic: Topic string in format "Error → Daño concreto → Solución" or "Problema → Solución"
         
     Returns:
-        Tuple of (problem, solution) - both normalized
+        Tuple of (error/problem, damage/consequence, solution) - all normalized
+        If old format (2 parts), damage will be None
     """
     normalized = normalize_topic(topic)
     
     if '→' not in normalized:
-        # If no arrow, treat entire string as problem, empty solution
-        return normalized, ""
+        # If no arrow, treat entire string as error, empty damage and solution
+        return normalized, None, ""
     
-    parts = normalized.split('→', 1)
-    problem = parts[0].strip() if len(parts) > 0 else ""
-    solution = parts[1].strip() if len(parts) > 1 else ""
+    # Count arrows to determine format
+    arrow_count = normalized.count('→')
     
-    return problem, solution
+    if arrow_count >= 2:
+        # New format: "Error → Daño concreto → Solución"
+        parts = normalized.split('→', 2)
+        error = parts[0].strip() if len(parts) > 0 else ""
+        damage = parts[1].strip() if len(parts) > 1 else ""
+        solution = parts[2].strip() if len(parts) > 2 else ""
+        return error, damage, solution
+    else:
+        # Old format: "Problema → Solución" (backward compatibility)
+        parts = normalized.split('→', 1)
+        problem = parts[0].strip() if len(parts) > 0 else ""
+        solution = parts[1].strip() if len(parts) > 1 else ""
+        return problem, None, solution
 
 
 def validate_topic(topic: str) -> Tuple[bool, Optional[str]]:
     """
     Validate topic format and content.
     
+    Preferred format: "Error → Daño concreto → Solución"
+    Also accepts (backward compatibility): "Problema → Solución"
+    
     Validation rules:
-    - topic must contain →
-    - problem part >= 10 chars
-    - solution part >= 8 chars
+    - topic must contain at least one →
+    - For 3-part format: error >= 8 chars, damage >= 10 chars, solution >= 8 chars
+    - For 2-part format: problem >= 10 chars, solution >= 8 chars
     - reject vague topics ("mejora", "optimiza" alone)
     
     Args:
@@ -134,31 +153,70 @@ def validate_topic(topic: str) -> Tuple[bool, Optional[str]]:
     
     # Must contain arrow
     if '→' not in normalized:
-        return False, "Topic must contain → (arrow) separating problem and solution"
+        return False, "Topic must contain → (arrow). Format: 'Error → Daño concreto → Solución' or 'Problema → Solución'"
     
-    # Split into problem and solution
-    problem, solution = split_topic(normalized)
+    # Split into parts
+    error, damage, solution = split_topic(normalized)
     
-    # Problem must be at least 10 chars
-    if len(problem) < 10:
-        return False, f"Problem part too short ({len(problem)} chars, minimum 10): '{problem}'"
+    # Determine format based on damage presence
+    is_3_part = damage is not None
     
-    # Solution must be at least 8 chars
-    if len(solution) < 8:
-        return False, f"Solution part too short ({len(solution)} chars, minimum 8): '{solution}'"
-    
-    # Check for vague terms (if topic is ONLY vague terms, reject)
-    vague_terms = ['mejora', 'optimiza', 'mejor', 'bueno', 'buena']
-    problem_words = set(problem.lower().split())
-    solution_words = set(solution.lower().split())
-    
-    # If problem is only vague terms, reject
-    if problem_words.issubset(set(vague_terms)):
-        return False, f"Problem part is too vague (only contains generic terms): '{problem}'"
-    
-    # If solution is only vague terms, reject
-    if solution_words.issubset(set(vague_terms)):
-        return False, f"Solution part is too vague (only contains generic terms): '{solution}'"
+    if is_3_part:
+        # New format: "Error → Daño concreto → Solución"
+        # Error must be at least 8 chars
+        if len(error) < 8:
+            return False, f"Error part too short ({len(error)} chars, minimum 8): '{error}'"
+        
+        # Damage must be at least 10 chars (this is the emotional hook)
+        if len(damage) < 10:
+            return False, f"Damage part too short ({len(damage)} chars, minimum 10): '{damage}'. This should show concrete consequences (e.g., 'Pierdes 40% de agua', 'Reduce producción 30%')"
+        
+        # Solution must be at least 8 chars
+        if len(solution) < 8:
+            return False, f"Solution part too short ({len(solution)} chars, minimum 8): '{solution}'"
+        
+        # Check for vague terms
+        vague_terms = ['mejora', 'optimiza', 'mejor', 'bueno', 'buena']
+        error_words = set(error.lower().split())
+        damage_words = set(damage.lower().split())
+        solution_words = set(solution.lower().split())
+        
+        # Damage should contain concrete numbers or specific consequences
+        has_concrete_damage = any(char.isdigit() for char in damage) or any(word in damage.lower() for word in ['pierdes', 'pierde', 'pierden', 'reduce', 'reduces', 'reducen', 'aumenta', 'aumentan', 'causa', 'causan', 'provoca', 'provocan', 'mata', 'matan', 'destruye', 'destruyen', '%', 'porcentaje'])
+        
+        if not has_concrete_damage and len(damage) < 15:
+            return False, f"Damage part should be more concrete. Include numbers, percentages, or specific consequences: '{damage}'. Example: 'Pierdes 40% de agua' or 'Reduce producción 30%'"
+        
+        # If error is only vague terms, reject
+        if error_words.issubset(set(vague_terms)):
+            return False, f"Error part is too vague (only contains generic terms): '{error}'"
+        
+        # If solution is only vague terms, reject
+        if solution_words.issubset(set(vague_terms)):
+            return False, f"Solution part is too vague (only contains generic terms): '{solution}'"
+    else:
+        # Old format: "Problema → Solución" (backward compatibility)
+        problem = error  # In 2-part format, first part is stored in 'error' variable
+        # Problem must be at least 10 chars
+        if len(problem) < 10:
+            return False, f"Problem part too short ({len(problem)} chars, minimum 10): '{problem}'"
+        
+        # Solution must be at least 8 chars
+        if len(solution) < 8:
+            return False, f"Solution part too short ({len(solution)} chars, minimum 8): '{solution}'"
+        
+        # Check for vague terms
+        vague_terms = ['mejora', 'optimiza', 'mejor', 'bueno', 'buena']
+        problem_words = set(problem.lower().split())
+        solution_words = set(solution.lower().split())
+        
+        # If problem is only vague terms, reject
+        if problem_words.issubset(set(vague_terms)):
+            return False, f"Problem part is too vague (only contains generic terms): '{problem}'"
+        
+        # If solution is only vague terms, reject
+        if solution_words.issubset(set(vague_terms)):
+            return False, f"Solution part is too vague (only contains generic terms): '{solution}'"
     
     return True, None
 
