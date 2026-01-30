@@ -4,16 +4,6 @@ import os
 import fitz  # PyMuPDF
 import anthropic
 import copy
-from PIL import Image
-
-# OCR using Tesseract
-try:
-    import pytesseract
-    HAS_OCR = True
-    print("✅ Tesseract imported successfully")
-except ImportError:
-    HAS_OCR = False
-    print("❌ Tesseract not available")
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional
 from models import (
@@ -234,21 +224,6 @@ Return only the extracted text, without any additional commentary or analysis.""
             
         except Exception as e:
             print(f"❌ Error with Claude Vision: {str(e)}")
-            # Fallback to pytesseract if available
-            if HAS_OCR:
-                print("🔄 Falling back to Tesseract OCR...")
-                try:
-                    from PIL import Image
-                    image = Image.open(image_path)
-                    custom_config = r'-l eng+spa --psm 6'
-                    extracted_text = pytesseract.image_to_string(image, config=custom_config)
-                    extracted_text = extracted_text.strip()
-                    if extracted_text:
-                        print(f"✅ Tesseract fallback completed successfully")
-                        return extracted_text
-                except Exception as fallback_error:
-                    print(f"❌ Tesseract fallback also failed: {str(fallback_error)}")
-            
             raise Exception(f"Error extracting text from image with Claude Vision: {str(e)}")
     
     def extract_text_from_txt(self, file_path: str) -> str:

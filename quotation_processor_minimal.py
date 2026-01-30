@@ -3,7 +3,6 @@ import json
 import os
 import anthropic
 import copy
-from PIL import Image
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional
 
