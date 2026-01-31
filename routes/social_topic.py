@@ -151,9 +151,17 @@ def validate_topic(topic: str) -> Tuple[bool, Optional[str]]:
     
     normalized = normalize_topic(topic)
     
-    # Must contain arrow
+    # Short-title format (no arrow): allow if >= 15 chars and not only vague terms — §11 topic diversity
     if '→' not in normalized:
-        return False, "Topic must contain → (arrow). Format: 'Error → Daño concreto → Solución' or 'Problema → Solución'"
+        if len(normalized) < 15:
+            return False, f"Short-title topic too short ({len(normalized)} chars, minimum 15): '{normalized}'"
+        vague_terms = ['mejora', 'optimiza', 'mejor', 'bueno', 'buena']
+        words = set(normalized.lower().split())
+        if words.issubset(set(vague_terms)):
+            return False, f"Short-title topic is too vague (only generic terms): '{normalized}'"
+        return True, None
+    
+    # Must contain arrow for viral/2-part formats (handled below)
     
     # Split into parts
     error, damage, solution = split_topic(normalized)

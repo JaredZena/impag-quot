@@ -64,6 +64,298 @@ DEFAULT_DATES = [
     {"month": 5, "day": 15, "name": "Día del Agricultor"},
 ]
 
+# Topic examples for broad-topic days (Wed/Sat/Sun) — inspiration only, §11
+BROAD_TOPIC_EXAMPLES_EXTRA = (
+    # Plagas, enfermedades y manejo integrado (40)
+    "Trampas de feromona vs trampas cromáticas: cuándo usar cada una",
+    "Insecticidas de contacto vs sistémicos: ventajas y riesgos",
+    "Rotación de ingredientes activos: cómo evitar resistencia",
+    "Manejo de trips en chile: diagnóstico y control por etapa",
+    "Manejo de mosca blanca en jitomate: umbrales y acciones",
+    "Gusano cogollero en maíz: detección temprana y control",
+    "Araña roja en berries: signos y control sin quemar el cultivo",
+    "Pulgones en hortalizas: control biológico con crisopas y catarinas",
+    "Minador de la hoja: cómo identificar galerías y reducir daño",
+    "Nematodos: cuándo sospecharlos y cómo confirmarlos",
+    "Damping-off en semilleros: causas, prevención y qué hacer",
+    "Fusarium vs Phytophthora: diferencias clave en raíces",
+    "Oídio vs mildiu: cómo distinguirlos en campo",
+    "Mancha bacteriana vs mancha fúngica en chile: guía rápida",
+    "Tizón temprano vs tardío en papa: señales y manejo",
+    "Roya en frijol: manejo preventivo en temporal",
+    "Carbón de la espiga en maíz: prevención y manejo de semilla",
+    "Antracnosis en mango: calendario de control por floración",
+    "Moniliasis en cacao: prácticas culturales que sí funcionan",
+    "Sigatoka en plátano: control cultural + químico correcto",
+    "Broca del café: trampas y control integrado",
+    "Picudo del algodón: monitoreo y control regional",
+    "Mosca de la fruta en cítricos: trampas, atrayentes y ventanas",
+    "Pudrición apical en jitomate: calcio vs riego (qué es real)",
+    "\"Quemado\" por herbicidas: síntomas y recuperación",
+    "Manejo de malezas resistentes: glifosato ya no basta",
+    "Preemergentes vs postemergentes: elección según cultivo",
+    "Control de zacate Johnson: estrategias por temporada",
+    "Control de conyza (rama negra): errores comunes",
+    "Control de cuscuta: prevención en alfalfa",
+    "MIP en invernadero: rutina semanal que evita desastres",
+    "Bioplaguicidas: compatibilidades y mezclas peligrosas",
+    "Jabón potásico vs aceite neem: cuándo sí y cuándo no",
+    "Trichoderma: dónde funciona y dónde es puro marketing",
+    "Bacillus subtilis vs cobre: prevención de enfermedades foliares",
+    "Extractos vegetales: eficacia real y limitaciones",
+    "Barreras vivas contra plagas: cómo diseñarlas",
+    "Manejo de plagas nocturnas: monitoreo con lámparas y trampas",
+    "Reingreso al lote tras aplicación: seguridad y práctica",
+    "Cómo leer una etiqueta de agroquímicos sin regarla",
+    # Suelo, nutrición y diagnósticos (35)
+    "Prueba de pH con tiras vs medidor: precisión y costo",
+    "Muestreo de suelo correcto: profundidad, zigzag y errores comunes",
+    "Textura del suelo con \"prueba del frasco\": interpretación práctica",
+    "Materia orgánica: cómo subirla sin arruinarte",
+    "CEC (capacidad de intercambio catiónico): qué te dice de verdad",
+    "Salinidad (EC): síntomas en plantas y correcciones viables",
+    "Sodicidad: por qué tu suelo \"se hace plástico\" y cómo arreglarlo",
+    "Cal agrícola vs yeso: cuándo usar cada uno",
+    "Azufre elemental vs ácido: bajar pH sin matar el suelo",
+    "Nitrógeno ureico vs amoniacal: comportamiento en suelo",
+    "Fósforo bloqueado: causas y cómo liberarlo",
+    "Potasio: deficiencia vs \"consumo oculto\"",
+    "Calcio vs magnesio: equilibrio y síntomas parecidos",
+    "Micronutrientes: boro, zinc, hierro (síntomas clave)",
+    "Quelatos vs sales: cuándo convienen",
+    "Fertilización de arranque vs mantenimiento: estrategia por cultivo",
+    "Fertirriego vs aplicación al voleo: eficiencia real",
+    "Enmiendas orgánicas: compost maduro vs inmaduro",
+    "Gallinaza vs estiércol bovino: nutrientes y riesgos sanitarios",
+    "Lixiviación: cómo pierdes fertilizante sin darte cuenta",
+    "Nitrificación: por qué el N \"desaparece\"",
+    "Curva de absorción de nutrientes por etapa fenológica",
+    "Interpretación básica de un análisis de suelo (sin química pesada)",
+    "Interpretación básica de análisis foliar",
+    "Cómo detectar toxicidad por sales antes del colapso",
+    "Biochar: cuándo sí mejora el suelo y cuándo es humo",
+    "Mulch orgánico vs plástico: impacto en suelo y malezas",
+    "Compactación por maquinaria: cómo medirla y reducirla",
+    "Labranza mínima vs convencional: efectos en rendimiento",
+    "Coberturas verdes en temporal: especies y fechas recomendadas",
+    "Manejo de suelos calizos: hierro, zinc y bloqueos",
+    "Suelos arenosos: cómo retener agua y fertilizante",
+    "Suelos arcillosos: cómo mejorar infiltración y aireación",
+    "Cómo calcular dosis de fertilizante según objetivo de rendimiento",
+    "Errores comunes al mezclar fertilizantes en tanque",
+    # Riego, hidráulica y agua (35)
+    "Riego por goteo superficial vs subterráneo: pros y contras",
+    "Cintilla vs manguera con gotero integrado: cuál conviene",
+    "Presión nominal vs presión real en campo: cómo medir",
+    "Pérdida de carga: por qué tu final de línea riega menos",
+    "Filtración: malla vs disco vs arena (cuándo usar cada una)",
+    "Lavado de líneas: rutina para evitar taponamientos",
+    "Cloración en riego: dosis segura y señales de exceso",
+    "Ácidos para limpiar riego: riesgos y alternativas",
+    "pH del agua de riego: cómo afecta fertilizantes y goteros",
+    "Bicarbonatos altos: síntomas y manejo",
+    "Riego en suelos pesados: cómo evitar asfixia radicular",
+    "Riego en suelos ligeros: pulsos cortos vs riegos largos",
+    "Riego nocturno vs diurno: evaporación y enfermedad",
+    "Riego por aspersión: cuándo genera más enfermedades",
+    "Microaspersión en frutales: uniformidad y manejo",
+    "Uniformidad de riego: cómo evaluarla sin laboratorio",
+    "Cálculo de caudal total del sistema: método rápido",
+    "Cómo seleccionar bomba según caudal y altura dinámica",
+    "Energía solar para bombeo: dimensionamiento básico",
+    "Variadores de frecuencia en bombas: cuándo valen la pena",
+    "Programación de riego por evapotranspiración (ET) simplificada",
+    "Sensores de humedad: calibración por tipo de suelo",
+    "Tensiometros vs capacitivos: cuál conviene en hortalizas",
+    "Riego deficitario en vid: cuándo mejora calidad",
+    "Riego deficitario en mango: riesgos en floración",
+    "Manejo de riego en papa: etapa crítica y humedad objetivo",
+    "Riego en alfalfa: frecuencia por temporada",
+    "Diseño de camas elevadas con cinta: distancias óptimas",
+    "Geomembrana en bordos: instalación y errores típicos",
+    "Captación de lluvia: cálculo de volumen y tamaño de bordo",
+    "Canales y zanjas de infiltración: control de escorrentía",
+    "Drenaje parcelario: cuándo es indispensable en lluvias",
+    "Reuso de agua tratada: riesgos y buenas prácticas",
+    "Calidad de agua para ganado: sales y efectos en consumo",
+    "Riego y heladas: estrategias de protección (qué sí funciona)",
+    # Cultivos específicos por región/temporada (40)
+    "Maíz de temporal en Durango/Zacatecas: manejo por lluvia errática",
+    "Frijol en altiplano: ventana de siembra y control de malezas",
+    "Chile seco (guajillo/ancho): secado, manejo y pérdidas típicas",
+    "Chile jalapeño: manejo de floración y caída por calor",
+    "Jitomate campo abierto: tutorado vs rastrero (costos y rendimiento)",
+    "Tomatillo: control de virosis y manejo de vectores",
+    "Cebolla: manejo de bulbo y prevención de \"cuello grueso\"",
+    "Ajo: vernalización y selección de semilla",
+    "Papa: aporque, humedad, y control de tizones",
+    "Zanahoria: suelos ideales y deformaciones por compactación",
+    "Lechuga: tip burn y manejo de calcio/temperatura",
+    "Pepino: amarre y manejo de polinización",
+    "Calabaza: polinización y cuajado (abejas vs manual)",
+    "Sandía: manejo de cuajado y control de oídio",
+    "Melón: calidad, grados brix y riego en maduración",
+    "Fresa: establecimiento, acolchado y control de pudriciones",
+    "Arándano: acidificación de suelo y agua (mitos vs realidad)",
+    "Vid: poda, brotación y manejo de canopia",
+    "Mango: floración, alternancia y nutrición",
+    "Aguacate: raíz, Phytophthora y drenaje",
+    "Limón: manejo de brotes y control de psílido",
+    "Naranja: manejo de fruta chica vs raleo",
+    "Plátano: fertilización y control de sigatoka",
+    "Café: sombra vs sol y productividad real",
+    "Cacao: manejo de sombra y moniliasis",
+    "Sorgo: tolerancia a sequía y fertilización",
+    "Trigo: densidad, macollaje y manejo de riego",
+    "Avena forrajera: corte óptimo para calidad",
+    "Alfalfa: manejo de corona y persistencia",
+    "Pastos mejorados: establecimiento en temporal",
+    "Nopal: densidad, plagas y usos comerciales",
+    "Maguey: plantación, manejo y proyección a mezcal",
+    "Amaranto: manejo básico y mercado nicho",
+    "Cártamo: manejo en zonas secas y comercialización",
+    "Girasol: densidad, plagas y mercado",
+    "Cebada: manejo para malta vs forraje",
+    "Hortalizas de invierno en Bajío: calendario y riesgos",
+    "Hortalizas en trópico húmedo: manejo de exceso de agua",
+    "Siembra tardía: riesgos y cómo reducir pérdidas",
+    "Cultivos de ciclo corto para \"caja rápida\" en 60–90 días",
+    # Forestal, silvopastoril y recursos naturales (25)
+    "Encino vs pino: diferencias de establecimiento y crecimiento",
+    "Pinus patula: plagas y enfermedades comunes",
+    "Pinus greggii: ventajas en reforestación productiva",
+    "Pinus arizonica: sanidad y manejo en norte de México",
+    "Plantación de eucalipto: manejo hídrico y controversias",
+    "Producción de carbón vegetal: costos, permisos y mercado",
+    "Resina de pino: técnicas de extracción y rentabilidad",
+    "Manejo de leña: corte sostenible vs depredación",
+    "Control de incendios: brechas corta fuego y mantenimiento",
+    "Restauración de suelos erosionados con barreras vivas",
+    "Reforestación con nativas: tasa de supervivencia realista",
+    "Vivero forestal: sustratos, riego y sanidad",
+    "Micorrizas en reforestación: cuándo ayudan de verdad",
+    "Sistemas silvopastoriles con mezquite: sombra + forraje",
+    "Cercos vivos: especies útiles por región",
+    "Captura de carbono en sistemas agroforestales: humo vs realidad",
+    "Manejo de agostadero: carga animal y recuperación",
+    "Pastoreo rotacional: diseño de potreros y agua",
+    "Bancos de proteína (leucaena): beneficios y riesgos",
+    "Manejo de maleza en reforestación: químico vs manual",
+    "Aprovechamiento de piñón: manejo y mercado",
+    "Plantación de nogal pecanero: agua, suelo y retorno de inversión",
+    "Manejo de plagas descortezadoras: prevención y monitoreo",
+    "Enfermedades en encinos (seca): signos y respuesta",
+    "Permisos forestales: lo básico para no meterte en broncas",
+    # Ganadería (razas, sistemas, números) (25)
+    "Beefmaster vs Brahman vs Angus: cuál conviene en calor",
+    "Charolais vs Limousin: engorda y rendimiento en canal",
+    "Ganado doble propósito: cruces comunes y resultados",
+    "Producción de leche: Holstein vs Jersey vs Pardo Suizo",
+    "Sombra y agua en ganado: impacto en ganancia diaria",
+    "Destete temprano vs tradicional: costos y beneficios",
+    "Suplementación en sequía: qué dar y cuánto",
+    "Sales minerales: formulación básica por región",
+    "Parásitos internos: desparasitación estratégica",
+    "Garrapata: control integrado y rotación de productos",
+    "Mastitis: prevención en ordeña pequeña",
+    "Calidad de leche: bacterias, enfriamiento y pérdidas",
+    "Pastoreo rotacional: cálculos de carga animal",
+    "Producción de becerros: calendario reproductivo anual",
+    "Engorda en corral: dieta base y errores caros",
+    "Ensilaje de maíz vs sorgo: comparación de costos",
+    "Henificación: cuándo conviene vs ensilar",
+    "Gallinas ponedoras: números reales por 100 aves",
+    "Pollo de engorda: ciclo, mortalidad y margen",
+    "Porcino traspatio vs tecnificado: diferencia de rentabilidad",
+    "Razas de cerdo (Yorkshire, Landrace, Duroc): pros y contras",
+    "Borrego Pelibuey vs Katahdin: adaptación y mercado",
+    "Cabra Saanen vs Alpina: producción de leche y manejo",
+    "Queso artesanal: rendimiento por litro (expectativas reales)",
+    "Bioseguridad básica: protocolos simples que sí reducen pérdidas",
+    # Agroindustria, valor agregado y emprendimiento rural (40)
+    "Chile seco: empaque premium vs granel (márgenes)",
+    "Salsa artesanal: costos, vida de anaquel y etiqueta",
+    "Mermeladas de fruta local: mercado y estacionalidad",
+    "Deshidratado solar vs eléctrico: calidad y costo",
+    "Harina de maíz criollo: storytelling + nicho premium",
+    "Tortillería rural: números, permisos y demanda",
+    "Queso fresco vs madurado: inversión y retorno",
+    "Yogurt artesanal: proceso, inocuidad y margen",
+    "Carne seca/machaca: requisitos y mercado regional",
+    "Miel: diferenciación por floración y precio",
+    "Polinización como servicio: cómo cobrar y operar",
+    "Venta directa: canales cortos y logística real",
+    "Cajas \"del huerto\" (CSA): modelo y retención de clientes",
+    "Centro de acopio pequeño: qué equipo sí necesitas",
+    "Empaque y clasificación: cómo sube el precio por calidad",
+    "Marca local: cuándo vale la pena registrar",
+    "Etiquetado NOM: lo básico para no fallar",
+    "Trazabilidad con QR: qué poner y cómo usarlo",
+    "Certificación orgánica: costos y alternativas (Sistemas Participativos)",
+    "Buenas prácticas de manejo (BPM): checklist para agroindustria",
+    "Inocuidad: por qué la gente enferma y cómo evitarlo",
+    "Refrigeración: cuándo se paga sola en perecederos",
+    "Transporte de perecederos: pérdidas por mala logística",
+    "Subproductos: cáscaras, bagazo y compost comercial",
+    "Forraje ensilado como negocio: vender \"bolsas\" por temporada",
+    "Venta de plántula: vivero de hortalizas como emprendimiento",
+    "Servicio de aplicación de riego/fertirriego: cómo cobrar",
+    "Servicio de análisis de suelo \"con interpretación\": paquete rentable",
+    "Paquetes por cultivo: \"kit de establecimiento\" y upsell",
+    "Cómo fijar precios sin competir por lo más barato",
+    "Coyotes vs contrato: negociación y riesgo",
+    "Agricultura por contrato: cuándo conviene",
+    "Seguro agrícola: qué cubre y qué no",
+    "Financiamiento rural: errores que hunden proyectos",
+    "Cooperativa: ventajas reales y trampas comunes",
+    "Almacenamiento de grano: control de plagas y humedad",
+    "Secado de grano: humedad objetivo y pérdidas",
+    "Silos vs bodegas: comparación de inversión",
+    "Agroturismo: granja educativa como negocio",
+    "Producción de semilla certificada: requisitos y mercado",
+    # Tecnología moderna aplicada (AgTech) (40)
+    "Sensores de humedad: dónde colocarlos y cuántos necesitas",
+    "Estación meteo: variables clave para decisiones reales",
+    "Pronóstico hiperlocal vs apps genéricas: cuál confiar",
+    "IA para diagnóstico por foto: cómo evitar falsos positivos",
+    "Drones: mapas NDVI para decidir riego/fertilizante",
+    "Satélite gratuito: cómo interpretarlo sin \"ser ingeniero\"",
+    "Prescripción variable: fertilización por zonas en parcela",
+    "Monitoreo de bombas: consumo eléctrico y fallas",
+    "Válvulas inteligentes: automatización por sector",
+    "Energía solar para bombeo: cálculo rápido de paneles",
+    "Baterías vs sin baterías: diseño de sistema solar de riego",
+    "Filtrado inteligente: sensores de presión diferencial",
+    "Medición de caudal: cómo detectar fugas con datos",
+    "Control de inventario rural con WhatsApp + Sheets",
+    "ERP simple para agrotienda: qué módulos importan",
+    "Trazabilidad digital: del lote al cliente con QR",
+    "Blockchain en alimentos: casos donde sí sirve",
+    "Control de frío con sensores: alertas y pérdidas evitadas",
+    "Diagnóstico de mastitis con pruebas rápidas: qué comprar",
+    "Collares para ganado: celo, rumia y salud (qué sí predicen)",
+    "Básculas inteligentes: control de ganancia diaria",
+    "Cámaras en corrales: detección de cojeras por IA",
+    "Riego basado en ET: automatización con datos meteorológicos",
+    "Modelos de predicción de precios: cómo usarlos sin apostar",
+    "Marketplace rural: vender directo sin intermediario",
+    "Pagos digitales en campo: reducir morosidad",
+    "Microseguros paramétricos: cómo funcionan (lluvia/temperatura)",
+    "Bioinsumos comerciales: cómo elegir proveedores confiables",
+    "Fermentación de bioinsumos en sitio: control de calidad básico",
+    "Control biológico en invernadero: esquema de liberaciones",
+    "Trampas inteligentes: conteo automático de plagas",
+    "Robots agrícolas: qué existe y qué es humo",
+    "Hidroponía básica: cuándo sí es rentable en México",
+    "Sustratos: coco vs perlita vs tezontle (comparativa práctica)",
+    "Invernadero: túnel, macrotúnel, multitúnel (retorno de inversión)",
+    "Riego en invernadero: pulsos, drenaje y salinidad",
+    "Iluminación suplementaria: cuándo vale la pena",
+    "Postcosecha: atmósfera modificada en pequeña escala",
+    "Calidad con sensores: Brix, firmeza y temperatura",
+    "Gestión agrícola (FMIS): qué registrar para que sirva",
+)
+
 POST_TYPES_DEFINITIONS = """
 - Infografías: Explicar rápido (riego, acolchado). Versión resumida para Reels.
 - Fechas importantes: Anclar promos o recordatorios (Día del Agricultor, heladas).
@@ -807,6 +1099,7 @@ async def generate_social_copy(
     weekday_theme = get_weekday_theme(dt)
     is_friday = dt.weekday() == 4
     is_tuesday = dt.weekday() == 1
+    is_broad_topic_day = weekday_theme['day_name'] in ('Wednesday', 'Saturday', 'Sunday')
     needs_sales_context = is_tuesday or is_friday  # Tuesday (Promotion) and Friday (Seasonal) need sales context
     
     # --- 1. SEASON CONTEXT (ONLY on Tuesday and Friday) ---
@@ -1030,6 +1323,37 @@ IMPORTANTE:
     strategy_prompt += "⚠️ IMPORTANTE: Si no hay preferencia de categoría, NO estás limitado a productos.\n"
     strategy_prompt += "Puedes generar contenido educativo sobre CUALQUIER tema agrícola valioso (técnicas, gestión, planificación, etc.).\n\n"
     
+    # Topic diversity: permission + examples (Wed/Sat/Sun) — §11
+    if is_broad_topic_day:
+        strategy_prompt += "🌱 VARIEDAD DE TEMAS (HOY PUEDES ELEGIR CUALQUIER TEMA VALUABLE):\n"
+        strategy_prompt += "NO estás limitado a riego, heladas, fertilizantes, costos o sequía.\n"
+        strategy_prompt += "Puedes elegir CUALQUIER tema agrícola o rural valioso: curiosidades, cultura, variedades, tecnología, prácticas, comercialización, suelo, agua, plagas, mitos, \"sabías que…\", etc.\n\n"
+        strategy_prompt += "Ejemplos solo como INSPIRACIÓN (no te limites a esta lista; puedes inventar temas nuevos en el mismo estilo):\n"
+        strategy_prompt += "- Fases lunares en la agricultura\n"
+        strategy_prompt += "- Cómo funciona un biodigestor\n"
+        strategy_prompt += "- Variedades de frijol o chile en México\n"
+        strategy_prompt += "- Cultivos interesantes para el año\n"
+        strategy_prompt += "- Plantas indicadoras del suelo\n"
+        strategy_prompt += "- Técnicas de control de plagas: químico vs biológico\n"
+        strategy_prompt += "- Manejo de humedad en el cultivo de papa\n"
+        strategy_prompt += "- Cómo realizar prueba del suelo\n"
+        strategy_prompt += "- Cultivo orgánico vs convencional\n"
+        strategy_prompt += "- Siembra en surcos vs siembra en cama elevada\n"
+        strategy_prompt += "- Riego por goteo vs riego por aspersión\n"
+        strategy_prompt += "- Macronutrientes vs micronutrientes\n"
+        strategy_prompt += "- Densidad de siembra: cuándo \"más plantas\" reduce el rendimiento\n"
+        strategy_prompt += "- Umbral económico de plagas: cuándo sí fumigar\n"
+        strategy_prompt += "- Alimentación básica para bovinos de engorda\n"
+        strategy_prompt += "- Drones en agricultura: usos reales vs marketing\n"
+        strategy_prompt += "- Bioinsumos de nueva generación\n"
+        strategy_prompt += "- Qué sembrar en el norte de México con menos de 400 mm de lluvia\n"
+        strategy_prompt += "- Transformación de leche en queso artesanal: números reales\n"
+        strategy_prompt += "- Sensores de humedad de suelo: cómo funcionan y cuándo valen la pena\n"
+        for t in BROAD_TOPIC_EXAMPLES_EXTRA:
+            strategy_prompt += f"- {t}\n"
+        strategy_prompt += "- (y cualquier otro tema agrícola o rural específico, útil y valioso)\n\n"
+        strategy_prompt += "Regla de variedad (4:1): En aproximadamente 4 de cada 5 posts, genera un tema NUEVO inspirado por el estilo de los ejemplos (agrícola/rural, específico, útil), pero que no sea copia literal de la lista. En aproximadamente 1 de cada 5 posts, elige un tema directamente de la lista de ejemplos de arriba. Varía: no siempre inventes ni siempre elijas de la lista.\n\n"
+    
     strategy_prompt += "TU MENTALIDAD COMO INGENIERO EXPERTO:\n\n"
     strategy_prompt += "1. VARIEDAD PRIMERO - REVISAR HISTORIAL ANTES DE DECIDIR\n"
     strategy_prompt += "   - PRIMERO: Lee el historial reciente arriba y identifica qué temas ya cubriste\n"
@@ -1059,7 +1383,7 @@ IMPORTANTE:
     problems_solutions_section = get_problems_solutions_for_prompt(weekday_theme['day_name'])
     if problems_solutions_section:
         strategy_prompt += problems_solutions_section
-    
+
     # Add suggested topic if provided
     if payload.suggested_topic:
         strategy_prompt += f"💡 TEMA SUGERIDO POR EL USUARIO: {payload.suggested_topic}\n⚠️ USA ESTE TEMA COMO BASE, pero puedes adaptarlo o expandirlo según sea necesario.\n\n"
@@ -1178,9 +1502,15 @@ IMPORTANTE:
     strategy_prompt += "⚠️ Puedes usar Humorous cuando el tema lo permita, incluso en días técnicos.\n"
     strategy_prompt += "⚠️ El tono debe ser consistente con el tipo de post (ej: Memes/tips rápidos puede ser Humorous).\n\n"
 
-    strategy_prompt += "FORMATO DE TEMA (OBLIGATORIO - FORMATO VIRAL):\n"
-    strategy_prompt += "El tema DEBE seguir este formato: 'Error → Daño concreto → Solución'\n"
-    strategy_prompt += "Este formato triplica el impacto emocional al mostrar el daño específico.\n\n"
+    # On Wed/Sat/Sun allow short-title format; other days require viral format
+    if is_broad_topic_day:
+        strategy_prompt += "FORMATO DE TEMA (HOY TIENES DOS OPCIONES):\n"
+        strategy_prompt += "(A) Formato viral: 'Error → Daño concreto → Solución' (igual que otros días).\n"
+        strategy_prompt += "(B) Título corto descriptivo: cuando el contenido es educativo/broad sin problema-solución concreto (ej. 'Fases lunares en la agricultura', 'Cómo funciona un biodigestor', 'Variedades de frijol en México'). Si usas (B), search_needed puede ser false y search_keywords vacío.\n\n"
+    else:
+        strategy_prompt += "FORMATO DE TEMA (OBLIGATORIO - FORMATO VIRAL):\n"
+        strategy_prompt += "El tema DEBE seguir este formato: 'Error → Daño concreto → Solución'\n"
+        strategy_prompt += "Este formato triplica el impacto emocional al mostrar el daño específico.\n\n"
     strategy_prompt += "Ejemplos CORRECTOS (formato viral):\n"
     strategy_prompt += "- 'Regar por surco → Pierdes 40% de agua → Riego por goteo presurizado'\n"
     strategy_prompt += "- 'No proteger plántulas de heladas → Mueren 50% de plántulas → Sistema antiheladas con mantas térmicas'\n"
@@ -1226,7 +1556,10 @@ IMPORTANTE:
     else:
         strategy_prompt += "   - Considera problemas de: riego, fertilización, control de plagas, planificación, costos, gestión, organización, etc. (problemas que ocurren todo el año)\n"
         strategy_prompt += "   - NO menciones problemas estacionales o dependientes de época del año\n"
-    strategy_prompt += "2. Formula el tema como 'Error → Daño concreto → Solución' (formato exacto requerido)\n"
+    if is_broad_topic_day:
+        strategy_prompt += "2. Formula el tema como (A) 'Error → Daño concreto → Solución' O (B) un título corto descriptivo (ej: 'Fases lunares en la agricultura', 'Cómo funciona un biodigestor'). Si eliges (B), search_needed puede ser false.\n"
+    else:
+        strategy_prompt += "2. Formula el tema como 'Error → Daño concreto → Solución' (formato exacto requerido)\n"
     strategy_prompt += "   - El ERROR debe ser una acción o práctica incorrecta específica (ej: 'Regar por surco', 'No proteger de heladas')\n"
     strategy_prompt += "   - El DAÑO CONCRETO debe incluir números, porcentajes o consecuencias medibles (ej: 'Pierdes 40% de agua', 'Mueren 50% de plántulas', 'Reduce producción 30%')\n"
     strategy_prompt += "   - La SOLUCIÓN debe ser técnica, específica y accionable (ej: 'Riego por goteo presurizado', 'Sistema antiheladas con mantas térmicas')\n"
@@ -1273,8 +1606,11 @@ IMPORTANTE:
     strategy_prompt += "- Puedes generar contenido educativo SIN producto asociado si el tema lo requiere.\n\n"
     strategy_prompt += "RESPONDE SOLO CON EL JSON:\n"
     strategy_prompt += "{\n"
-    strategy_prompt += '  "problem_identified": "Descripción del problema real que el agricultor enfrenta HOY",\n'
-    strategy_prompt += '  "topic": "Error → Daño concreto → Solución (formato exacto como en ejemplos) - DEBE SER DIFERENTE a temas recientes",\n'
+    strategy_prompt += '  "problem_identified": "Descripción del problema real que el agricultor enfrenta HOY (o del tema educativo si es título corto)",\n'
+    if is_broad_topic_day:
+        strategy_prompt += '  "topic": "Error → Daño → Solución O un título corto descriptivo (ej. Fases lunares en la agricultura). DEBE SER DIFERENTE a temas recientes",\n'
+    else:
+        strategy_prompt += '  "topic": "Error → Daño concreto → Solución (formato exacto como en ejemplos) - DEBE SER DIFERENTE a temas recientes",\n'
     strategy_prompt += '  "post_type": "Escribe EXACTAMENTE el nombre del tipo (ej. Infografías, Memes/tips rápidos, Kits, etc.)",\n'
     strategy_prompt += '  "channel": "wa-status|wa-broadcast|fb-post|fb-reel|ig-post|ig-reel|tiktok (elige uno, DIFERENTE al usado ayer)",\n'
     strategy_prompt += '  "content_tone": "Elige UNO de los tonos disponibles (Motivational, Promotional, Technical, Educational, Problem-Solving, Seasonal, Humorous, Informative, Inspirational) que mejor se adapte al tema y tipo de post",\n'
