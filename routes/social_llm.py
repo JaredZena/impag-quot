@@ -127,6 +127,7 @@ class ContentResponse(BaseModel):
     posting_time: Optional[str] = None
     notes: Optional[str] = ""
     topic: Optional[str] = ""  # Must echo the same topic from strategy phase
+    suggested_hashtags: Optional[list[str]] = None  # §5: 5-8 hashtags in Spanish
 
 
 def clean_json_text(text: str) -> str:
@@ -434,7 +435,7 @@ Responde SOLO con el JSON, sin explicaciones ni texto adicional.""",
         response_text = response.content[0].text
         
         # Parse with retry (2 retries = 3 total attempts; content often has newlines/quotes in strings)
-        retry_prompt = "Fix the JSON. Output only valid JSON. CRITICAL: Inside string values, use \\n for newlines (never real line breaks), and \\\" for quotes. No trailing commas before } or ]. Schema: {selected_category, selected_product_id, channel, caption, image_prompt, carousel_slides, needs_music, posting_time, notes, topic}."
+        retry_prompt = "Fix the JSON. Output only valid JSON. CRITICAL: Inside string values, use \\n for newlines (never real line breaks), and \\\" for quotes. No trailing commas before } or ]. Schema: {selected_category, selected_product_id, channel, caption, image_prompt, carousel_slides, needs_music, posting_time, notes, topic, suggested_hashtags}."
         return parse_json_with_retry(
             client,
             response_text,

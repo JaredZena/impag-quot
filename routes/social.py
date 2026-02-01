@@ -468,6 +468,7 @@ class SocialGenResponse(BaseModel):
     saved_post_id: Optional[int] = None # ID of the automatically saved post in database
     # Viral angle fields (from pre-strategy phase)
     viral_angle: Optional[Dict[str, str]] = None # Viral hook data: hook_type, primary_trigger, hook_sentence, visual_concept, curiosity_gap
+    suggested_hashtags: Optional[List[str]] = None  # §5: 5-8 hashtags from content phase
 
 # --- Logic ---
 
@@ -1191,6 +1192,7 @@ EJEMPLOS DE HOOK SENTENCES:
 - "Un productor duplicó su producción usando esto (y no es lo que piensas)"
 - "La mayoría de agricultores desperdician 70% de su agua. Aquí está el por qué"
 - "Este truco de $50 pesos puede salvar toda tu cosecha"
+- Títulos en pregunta para problemas/decisiones: ¿Por qué...?, ¿Qué...?, ¿Amigo o enemigo? Alternativa: título afirmativo + beneficio: [Tema]: ¡[Beneficio]! Gap de curiosidad: ej. "Tu suelo te habla", "Elige sabiamente".
 
 IMPORTANTE:
 - El hook debe ser RELEVANTE para agricultura
@@ -1526,7 +1528,14 @@ IMPORTANTE:
     strategy_prompt += "1. ERROR: Acción o práctica incorrecta (ej: 'Regar por surco', 'No proteger de heladas')\n"
     strategy_prompt += "2. DAÑO CONCRETO: Consecuencia medible con números/porcentajes (ej: 'Pierdes 40% de agua', 'Mueren 50% de plántulas')\n"
     strategy_prompt += "3. SOLUCIÓN: Solución técnica específica (ej: 'Riego por goteo presurizado', 'Sistema antiheladas')\n"
-    strategy_prompt += "El daño concreto es CRÍTICO - debe incluir números, porcentajes, o consecuencias específicas.\n\n"
+    strategy_prompt += "El daño concreto es CRÍTICO - debe incluir números, porcentajes, o consecuencias específicas.\n"
+    strategy_prompt += "Cuando el tema sea problema o decisión, considera título en pregunta; alternativa: [Tema]: ¡[Beneficio]!.\n\n"
+    strategy_prompt += "REGLAS DE CONTENIDO (§8 - aplican a todo lo que generes):\n"
+    strategy_prompt += "(1) Números concretos (pérdidas/ahorros/%) con contexto: 'hasta $X dependiendo de...', 'pérdidas que pueden llegar a X% en condiciones típicas'.\n"
+    strategy_prompt += "(2) Beneficios comparativos, no absolutos: 'ahorro vs riego por surco', 'mejor distribución que con X'.\n"
+    strategy_prompt += "(3) No exagerar especificaciones del producto; usar lenguaje preciso.\n"
+    strategy_prompt += "(4) Solución = contexto + producto, no solo producto (práctica correcta + producto).\n"
+    strategy_prompt += "(5) Producto como componente central de la solución, no único héroe.\n\n"
     strategy_prompt += "TU TAREA:\n"
     strategy_prompt += "1. IDENTIFICA un problema agrícola real y relevante para esta fecha y fase\n"
     if needs_durango_context:
@@ -1575,7 +1584,8 @@ IMPORTANTE:
         strategy_prompt += "- Formula el tema como: 'Error → Daño concreto → Solución con nuestro producto'\n"
         strategy_prompt += "- Enfócate en el VALOR ENTREGADO (resultados medibles, beneficios concretos)\n"
         strategy_prompt += "- Formatos ideales: Infografías (problema vs solución), Caso de éxito, Antes/Después\n"
-        strategy_prompt += "- Ejemplo: 'Riego desigual → Pierdes 30% de producción y 40% de agua → Sistema riego por goteo con emisores uniformes'\n\n"
+        strategy_prompt += "- Ejemplo: 'Riego desigual → Pierdes 30% de producción y 40% de agua → Sistema riego por goteo con emisores uniformes'\n"
+        strategy_prompt += "- Si el tema permite comparación (A vs B), prioriza post_type Infografías y formato comparativo: dos columnas, beneficios de un lado y desventajas del otro, con CTA al final.\n\n"
     
     strategy_prompt += "⚠️⚠️⚠️ IMPORTANTE SOBRE TEMAS (CRÍTICO) ⚠️⚠️⚠️:\n"
     strategy_prompt += "- Los temas NO están limitados a categorías de productos que vendemos.\n"
@@ -1612,7 +1622,7 @@ IMPORTANTE:
     else:
         strategy_prompt += '  "topic": "Error → Daño concreto → Solución (formato exacto como en ejemplos) - DEBE SER DIFERENTE a temas recientes",\n'
     strategy_prompt += '  "post_type": "Escribe EXACTAMENTE el nombre del tipo (ej. Infografías, Memes/tips rápidos, Kits, etc.)",\n'
-    strategy_prompt += '  "channel": "wa-status|wa-broadcast|fb-post|fb-reel|ig-post|ig-reel|tiktok (elige uno, DIFERENTE al usado ayer)",\n'
+    strategy_prompt += '  "channel": "wa-status|wa-broadcast|fb-post|fb-reel|ig-post|ig-reel|tiktok (elige uno, DIFERENTE al usado ayer). Si el tema es lista o proceso de 3-5 partes (ej. los 5 mejores, 4 pasos, qué está atacando: hongo/virus/plagas), prefiere fb-post o ig-post y considera carrusel.",\n'
     strategy_prompt += '  "content_tone": "Elige UNO de los tonos disponibles (Motivational, Promotional, Technical, Educational, Problem-Solving, Seasonal, Humorous, Informative, Inspirational) que mejor se adapte al tema y tipo de post",\n'
     # Special guidance for product selection based on weekday
     if weekday_theme['day_name'] == 'Tuesday':
@@ -1926,7 +1936,9 @@ IMPORTANTE:
         "3. CAPTION POR CANAL: wa-status/stories (máx 50 chars), tiktok (máx 150), reels (máx 100), fb-post/ig-post (hasta 2000).\n"
         "   Para wa-status/stories/tiktok/reels: La imagen/video debe ser autoexplicativa, caption mínimo.\n"
         "4. REQUISITOS TÉCNICOS: Usa números exactos ('10-20 cm', '70% ahorro'), colores (Verde=bueno, Rojo=problema), tips en caja azul.\n"
-        "5. Genera el contenido adaptado al canal y tipo de post.\n\n"
+        "5. Genera el contenido adaptado al canal y tipo de post.\n"
+        "6. REGLAS DE CONTENIDO (§8): Números con contexto; beneficios comparativos (vs qué); no exagerar specs; solución = contexto + producto; producto como componente central.\n"
+        "7. Si el tema tiene 3-5 secciones claras (ej. los 5 mejores, 4 pasos, 3 tipos de ataque), genera carousel_slides con un slide por sección (título + 1-2 frases + idea visual). Slide final opcional: CTA o resumen.\n\n"
     )
     
     # Detect structure type based on topic (before building image prompt section)
@@ -1952,6 +1964,7 @@ ESTRUCTURA: Comparativa lado a lado (Error → Daño concreto → Solución)
 - Sección inferior (20% espacio, fondo blanco): Tabla comparativa
   * Columnas: Método | Consumo | Uniformidad | Costo | ROI
   * Filas: Tradicional vs Tecnificado con datos específicos
+- Plantilla simple: un visual fuerte por lado + headline + 2 bullets por lado + footer.
 """
     elif "paso" in topic_lower or "cómo" in topic_lower or "instalación" in topic_lower or "tutorial" in post_type_lower:
         structure_type = "TUTORIAL"
@@ -1979,6 +1992,41 @@ ESTRUCTURA: Diagrama de sistema técnico
   * Dimensiones específicas etiquetadas (ej: "30-50 cm", "1-4 m")
   * Materiales y conexiones visibles
 - Tabla de especificaciones (inferior): Materiales, dimensiones, capacidades
+"""
+    elif any(k in topic_lower for k in ("qué está atacando", "hongo", "virus", "plagas", "diagnóstico", "qué está atacando")):
+        structure_type = "QUICK_GUIDE_3"
+        structure_guide = """
+ESTRUCTURA: Guía rápida diagnóstica (3 paneles horizontales)
+- 3 paneles: uno por tipo de problema (ej. hongo, virus, plagas). Cada panel: subtítulo, ilustración pequeña, 1-2 bullets de síntomas + tip de manejo.
+- Plantilla simple: un visual por panel + headline + 2 bullets por panel + footer.
+"""
+    elif any(k in topic_lower for k in ("planifica", "pasos", "camino al éxito", "4 pasos")):
+        structure_type = "STEP_PATH_4"
+        structure_guide = """
+ESTRUCTURA: Proceso en 4 pasos (cuadrantes unidos por camino)
+- 4 cuadrantes conectados por una ruta; cada uno: número, título, texto corto, icono (ej. suelo, planta, calendario, pala).
+- Plantilla simple: número grande + título + 1-2 frases + icono por paso.
+"""
+    elif any(k in topic_lower for k in ("los 5", "5 mejores", "5 cultivos", "5 errores", "cinco ")):
+        structure_type = "LIST_CIRCULAR_5"
+        structure_guide = """
+ESTRUCTURA: Lista circular (5 ítems)
+- Título central; 5 ítems en círculo con borde/viña; cada ítem: nombre, tagline, 1-2 specs o tips.
+- Plantilla simple: un headline central + 5 bloques con título + 1-2 bullets.
+"""
+    elif any(k in topic_lower for k in ("plantas indicadoras", "tu suelo te habla", "indicador")):
+        structure_type = "INDICATOR_SECTIONS_3"
+        structure_guide = """
+ESTRUCTURA: Secciones por indicador (3 secciones)
+- 3 secciones: cada una = problema (ej. compactación) + 2 plantas indicadoras + solución corta.
+- Plantilla simple: un visual por sección + headline + 2 bullets por sección + footer.
+"""
+    elif any(k in topic_lower for k in ("fases lunares", "luna y agricultura", "luna")):
+        structure_type = "LUNAR_4_COLUMNS"
+        structure_guide = """
+ESTRUCTURA: 4 columnas lunares
+- 4 columnas: Luna nueva, Creciente, Llena, Menguante; cada una: icono luna, lista de actividades, ilustración pequeña.
+- Plantilla simple: 4 columnas con icono + lista + visual.
 """
     else:
         structure_type = "MULTI-PANEL"
@@ -2008,14 +2056,19 @@ ESTRUCTURA: Infografía educativa multi-panel
         "- wa-status/stories/tiktok/reels: Vertical 1080×1920 px\n"
         "- fb-post/ig-post: Cuadrado 1080×1080 px\n"
         "Estilo [flyer técnico/paisaje agrícola/catálogo técnico] IMPAG, con diseño limpio, moderno y profesional.\n"
-        "Mantén siempre la estética corporativa IMPAG: fondo agrícola difuminado, tonos blanco–gris, acentos verde–azul, sombras suaves, tipografías gruesas para títulos y delgadas para texto técnico.\n\n"
+        "Mantén siempre la estética corporativa IMPAG: fondo agrícola difuminado, tonos blanco–gris, acentos verde–azul, sombras suaves, tipografías gruesas para títulos y delgadas para texto técnico.\n"
+    )
+    if (strat_data.get('post_type') or '').lower() in ('infografías', 'infografias'):
+        creation_prompt += (
+            "\nPara este tipo de post usa estilo: infografía educativa ilustrada, trazo amigable, colores tierra/verde/azul, no fotorealista. Iconos claros, viñetas y texto legible. Mantener logos IMPAG.\n"
+            "Para infografías: mensaje principal y 2-3 bullets por panel; especificaciones detalladas en caption si es necesario. Todo texto relevante (títulos, bullets) debe ser legible en móvil; preferir un headline y líneas cortas.\n\n"
+        )
+    creation_prompt += (
         
         "Instrucciones de diseño detalladas:\n"
-        "1. LOGOS (OBLIGATORIO):\n"
-        "   - Logo IMPAG: Colocar el logo oficial de 'IMPAG Agricultura Inteligente' en la esquina superior derecha, sin deformarlo y manteniendo la proporción.\n"
-        "   - Logo 'Todo para el Campo': Si el contexto lo permite, incluir también el logo de 'Todo para el Campo' en la esquina inferior izquierda o derecha (según composición).\n"
-        "   - Ambos logos deben ser visibles, nítidos y con buen contraste sobre el fondo.\n"
-        "   - Los logos son parte esencial de la identidad visual IMPAG - NUNCA los omitas.\n\n"
+        "1. LOGOS (OBLIGATORIO - §7 IMPAG only):\n"
+        "   - Usar SOLO branding IMPAG. Logo oficial 'IMPAG Agricultura Inteligente' en esquina superior derecha, sin deformarlo.\n"
+        "   - No incluir otros nombres ni logos en la imagen (no Todo para el Campo ni otros). Contacto y URL pueden ser los mismos; la identidad visual en la imagen es solo IMPAG.\n\n"
         
         "2. ELEMENTO PRINCIPAL (CON PERSONAS CUANDO APLIQUE):\n"
         "   - Si hay producto: Imagen realista del producto en alta resolución, fotorealista, iluminación de estudio suave o golden hour.\n"
@@ -2049,7 +2102,8 @@ ESTRUCTURA: Infografía educativa multi-panel
         "- Si un string contiene comillas, escápalas como \\\"\n"
         "- NUNCA dejes strings sin cerrar - cada \" debe tener su \" de cierre\n"
         "- El JSON debe ser válido y parseable\n"
-        "⚠️ REGLA CRÍTICA: Si NO es carrusel, DEBES proporcionar 'image_prompt' (NO null). Si ES carrusel, 'image_prompt' puede ser null.\n\n"
+        "⚠️ REGLA CRÍTICA: 'image_prompt' es SIEMPRE OBLIGATORIO (nunca null). Si es carrusel, proporciona el prompt de la imagen de portada o primera slide.\n"
+        "suggested_hashtags: cuando sea útil, incluye 5-8 hashtags en español (ej. #Riego #Agricultura #Campo).\n\n"
         "RESPONDE SOLO CON EL JSON (sin texto adicional):\n"
         "{\n"
         '  "selected_category": "...",\n'
@@ -2057,11 +2111,12 @@ ESTRUCTURA: Infografía educativa multi-panel
         f'  "channel": "{strat_data.get("channel", "fb-post")}",\n'
         f'  "topic": "{strat_data.get("topic")}",\n'
         '  "caption": "... (RESPETA: wa-status/stories/tiktok/reels = MUY CORTO, fb-post = puede ser largo)",\n'
-        '  "image_prompt": "PROMPT DETALLADO OBLIGATORIO para generación de imagen (SOLO si NO es carrusel). Para stories/status debe ser autoexplicativa con texto grande visible. SIEMPRE incluye logos IMPAG y dimensiones correctas (1080×1920 para vertical, 1080×1080 para cuadrado).",\n'
-        '  "carousel_slides": ["Slide 1 CON TEXTO GRANDE...", "Slide 2 CON TEXTO...", ...] (SOLO si es carrusel: TikTok 2-3, FB/IG 2-10. Si usas carousel_slides, image_prompt debe ser null),\n'
+        '  "image_prompt": "PROMPT DETALLADO OBLIGATORIO para generación de imagen (SIEMPRE requerido). Si es carrusel, usa el prompt de la imagen de portada o primera slide. Para stories/status debe ser autoexplicativa con texto grande visible. SIEMPRE incluye logos IMPAG y dimensiones correctas (1080×1920 para vertical, 1080×1080 para cuadrado).",\n'
+        '  "carousel_slides": ["Slide 1 CON TEXTO GRANDE...", "Slide 2 CON TEXTO...", ...] (SOLO si es carrusel: TikTok 2-3, FB/IG 2-10. Si es carrusel, image_prompt debe ser la portada o primera slide),\n'
         '  "needs_music": true/false,\n'
         '  "posting_time": "...",\n'
-        '  "notes": "..."\n'
+        '  "notes": "...",\n'
+        '  "suggested_hashtags": ["#Riego", "#Agricultura", ...] (opcional: 5-8 hashtags en español)\n'
         "}\n\n"
         f"REGLAS FINALES: Producto ID {selected_product_id or 'ninguno'}. Incluye logos IMPAG, personas cuando aplique, sé específico sobre el producto y su uso."
     )
@@ -2088,19 +2143,21 @@ ESTRUCTURA: Infografía educativa multi-panel
         # Use strategy topic (canonical)
         content_topic = strat_data.get("topic", "")
     
-    # Validate that image_prompt is provided for non-carousel posts
+    # image_prompt is always required (for single image or carousel cover/first slide)
     is_carousel = bool(content_response.carousel_slides and len(content_response.carousel_slides) > 0)
-    if not is_carousel and not content_response.image_prompt:
+    image_prompt_value = (content_response.image_prompt or "").strip()
+    if not image_prompt_value and is_carousel and content_response.carousel_slides:
+        image_prompt_value = content_response.carousel_slides[0] or ""
+    if not image_prompt_value:
         social_logging.safe_log_warning(
-            "[STEP 13] Missing image_prompt for non-carousel post",
+            "[STEP 13] Missing image_prompt",
             user_id=user_id,
             channel=content_response.channel,
             post_type=strat_data.get("post_type")
         )
-        # This is a critical error - non-carousel posts MUST have image_prompt
         raise HTTPException(
             status_code=500,
-            detail="LLM failed to generate image_prompt for non-carousel post. This is required."
+            detail="LLM failed to generate image_prompt. image_prompt is required (use cover/first slide prompt for carousel)."
         )
     
     data = {
@@ -2108,12 +2165,13 @@ ESTRUCTURA: Infografía educativa multi-panel
         "selected_product_id": content_response.selected_product_id or "",
         "channel": content_response.channel,
         "caption": content_response.caption,
-        "image_prompt": content_response.image_prompt if not is_carousel else None,  # Only set if not carousel
+        "image_prompt": image_prompt_value,  # Always set (never null)
         "carousel_slides": content_response.carousel_slides,
         "needs_music": content_response.needs_music,
         "posting_time": content_response.posting_time,
         "notes": content_response.notes or "",
-        "topic": content_topic  # Use canonical topic from strategy phase
+        "topic": content_topic,  # Use canonical topic from strategy phase
+        "suggested_hashtags": getattr(content_response, "suggested_hashtags", None)  # §5
     }
 
     # Product details already fetched in product selection phase
@@ -2290,7 +2348,7 @@ ESTRUCTURA: Infografía educativa multi-panel
     
     return SocialGenResponse(
         caption=data.get("caption", ""),
-        image_prompt=data.get("image_prompt") or None,  # Allow None for carousel posts
+        image_prompt=data.get("image_prompt") or "",  # Never null; required from LLM or fallback to first slide
         posting_time=data.get("posting_time"),
         notes=notes_with_problem,
         format=data.get("format"),
@@ -2306,7 +2364,8 @@ ESTRUCTURA: Infografía educativa multi-panel
         topic=canonical_topic,  # Canonical topic from strategy phase
         problem_identified=strat_data.get("problem_identified", ""),  # From strategy phase
         saved_post_id=saved_post_id,  # Return the saved post ID
-        viral_angle=strat_data.get("viral_angle")  # Viral angle from pre-strategy phase
+        viral_angle=strat_data.get("viral_angle"),  # Viral angle from pre-strategy phase
+        suggested_hashtags=data.get("suggested_hashtags")
     )
 
 
