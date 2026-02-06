@@ -24,6 +24,7 @@ import social_llm
 import social_rate_limit
 import social_logging
 import social_topic
+import social_image_prompt
 
 router = APIRouter()
 
@@ -38,31 +39,6 @@ CONTACT_INFO = {
     "social": "@impag.tech",
     "email": "ventas@impag.tech"
 }
-
-SEASON_PATTERNS = {
-    1: {"phase": "germinacion", "name": "Enero", "actions": ["Venta sustratos", "Charolas germinación", "Semillas inicio"]},
-    2: {"phase": "trasplante", "name": "Febrero", "actions": ["Preparación suelo", "Sistemas riego", "Acolchados"]},
-    3: {"phase": "crecimiento", "name": "Marzo", "actions": ["Fertilizantes inicio", "Protección plagas", "Tutoreo"]},
-    4: {"phase": "crecimiento", "name": "Abril", "actions": ["Fertirriego", "Bioestimulantes", "Control preventivo"]},
-    5: {"phase": "cosecha-temprana", "name": "Mayo", "actions": ["Herramientas cosecha", "Empaque", "Logística"]},
-    6: {"phase": "cosecha-alta", "name": "Junio", "actions": ["Cajas plásticas", "Tarimas", "Mantenimiento post-cosecha"]},
-    7: {"phase": "lluvias", "name": "Julio", "actions": ["Fungicidas", "Drenaje", "Protección humedad"]},
-    8: {"phase": "pre-ciclo-oi", "name": "Agosto", "actions": ["Limpieza terreno", "Desinfección", "Planeación O-I"]},
-    9: {"phase": "siembra-oi", "name": "Septiembre", "actions": ["Semilla cebolla/ajo", "Cinta riego", "Acolchado"]},
-    10: {"phase": "desarrollo-oi", "name": "Octubre", "actions": ["Nutrición foliar", "Enraizadores", "Monitoreo"]},
-    11: {"phase": "frio-temprano", "name": "Noviembre", "actions": ["Manta térmica", "Anti-heladas", "Invernaderos"]},
-    12: {"phase": "proteccion-frio", "name": "Diciembre", "actions": ["Calefacción", "Sellado invernadero", "Mantenimiento", "Planificación ciclo 2026", "Preparación suelo", "Análisis resultados"]}
-}
-
-DEFAULT_DATES = [
-    {"month": 12, "day": 12, "name": "Día de la Virgen (México)"},
-    {"month": 12, "day": 24, "name": "Nochebuena"},
-    {"month": 12, "day": 31, "name": "Fin de Año"},
-    {"month": 1, "day": 1, "name": "Año Nuevo"},
-    {"month": 2, "day": 14, "name": "San Valentín (Floricultura)"},
-    {"month": 5, "day": 10, "name": "Día de las Madres (Floricultura)"},
-    {"month": 5, "day": 15, "name": "Día del Agricultor"},
-]
 
 # Topic examples for broad-topic days (Wed/Sat/Sun) — inspiration only, §11
 BROAD_TOPIC_EXAMPLES_EXTRA = (
@@ -472,75 +448,6 @@ class SocialGenResponse(BaseModel):
 
 # --- Logic ---
 
-# Load problems and solutions data for Tuesday/Thursday rotation
-PROBLEMS_SOLUTIONS_FILE = Path(__file__).parent / "social_problems_solutions.json"
-PROBLEMS_SOLUTIONS_DATA = None
-
-def load_problems_solutions_data():
-    """Load problems and solutions data from JSON file."""
-    global PROBLEMS_SOLUTIONS_DATA
-    if PROBLEMS_SOLUTIONS_DATA is None:
-        try:
-            if PROBLEMS_SOLUTIONS_FILE.exists():
-                with open(PROBLEMS_SOLUTIONS_FILE, 'r', encoding='utf-8') as f:
-                    PROBLEMS_SOLUTIONS_DATA = json.load(f)
-                social_logging.safe_log_info("Loaded problems and solutions data", file=str(PROBLEMS_SOLUTIONS_FILE))
-            else:
-                social_logging.safe_log_warning("Problems and solutions file not found", file=str(PROBLEMS_SOLUTIONS_FILE))
-                PROBLEMS_SOLUTIONS_DATA = {"problem_categories": [], "product_upgrades": {}}
-        except Exception as e:
-            social_logging.safe_log_error("Failed to load problems and solutions data", exc_info=True, error=str(e))
-            PROBLEMS_SOLUTIONS_DATA = {"problem_categories": [], "product_upgrades": {}}
-    return PROBLEMS_SOLUTIONS_DATA
-
-def get_problems_solutions_for_prompt(weekday_name: str) -> str:
-    """
-    Get formatted problems and solutions data for Tuesday/Thursday prompts.
-    Returns empty string for other days.
-    """
-    if weekday_name not in ['Tuesday', 'Thursday']:
-        return ""
-    
-    data = load_problems_solutions_data()
-    if not data or not data.get("problem_categories"):
-        return ""
-    
-    prompt_section = "\n📋 PROBLEMAS Y SOLUCIONES QUE OFRECEMOS (ROTACIÓN DE TEMAS/PRODUCTOS):\n"
-    prompt_section += "Estos son los problemas principales que resolvemos para nuestros clientes y las soluciones/productos que ofrecemos.\n"
-    prompt_section += "USA ESTA INFORMACIÓN para rotar entre diferentes problemas y productos, evitando repetir los mismos temas.\n\n"
-    
-    for category in data["problem_categories"]:
-        prompt_section += f"🔹 {category['name']}:\n"
-        prompt_section += "   Problemas:\n"
-        for problem in category['problems']:
-            prompt_section += f"   - {problem}\n"
-        prompt_section += "   Valor que entregamos:\n"
-        for value in category['value_delivered']:
-            prompt_section += f"   - {value}\n"
-        prompt_section += f"   Productos relacionados: {', '.join(category['related_products'])}\n"
-        prompt_section += f"   Palabras clave: {', '.join(category['related_keywords'])}\n\n"
-    
-    prompt_section += "💡 UPGRADES DE PRODUCTOS (para aumentar valor):\n"
-    for product_type, upgrade_info in data.get("product_upgrades", {}).items():
-        prompt_section += f"   - {product_type.replace('_', ' ').title()}:\n"
-        prompt_section += f"     Uso actual: {upgrade_info.get('current_use', 'N/A')}\n"
-        prompt_section += f"     Ideas de upgrade: {', '.join(upgrade_info.get('upgrade_ideas', []))}\n"
-        prompt_section += f"     Resultado para cliente: {', '.join(upgrade_info.get('customer_outcome', []))}\n\n"
-    
-    prompt_section += "⚠️ INSTRUCCIONES DE ROTACIÓN:\n"
-    prompt_section += "- Revisa qué problemas/productos ya has usado recientemente\n"
-    prompt_section += "- Elige un problema DIFERENTE de la lista arriba\n"
-    prompt_section += "- Varía entre las 6 categorías (A-F) para mantener diversidad\n"
-    prompt_section += "- Combina problemas con productos relevantes de la categoría\n"
-    prompt_section += "- Para martes: Enfócate en promocionar productos que resuelvan el problema elegido\n"
-    prompt_section += "- Para jueves: Enfócate en mostrar cómo el producto resuelve el problema (caso de éxito, antes/después)\n\n"
-    
-    return prompt_section
-
-def get_season_context(date_obj):
-    month = date_obj.month
-    return SEASON_PATTERNS.get(month, SEASON_PATTERNS[1])
-
 def identify_agricultural_problems(
     month: Optional[int],
     phase: Optional[str],
@@ -579,11 +486,6 @@ def identify_agricultural_problems(
         "phase": phase,
         "urgency_hints": urgency_hints  # Pass hints to AI for context
     }
-
-def get_nearby_dates(date_obj):
-    # Simple logic: return dates in the same month
-    month = date_obj.month
-    return [d for d in DEFAULT_DATES if d["month"] == month]
 
 def get_saturday_sector(dt: datetime) -> str:
     """
@@ -1101,27 +1003,10 @@ async def generate_social_copy(
     is_friday = dt.weekday() == 4
     is_tuesday = dt.weekday() == 1
     is_broad_topic_day = weekday_theme['day_name'] in ('Wednesday', 'Saturday', 'Sunday')
-    needs_sales_context = is_tuesday or is_friday  # Tuesday (Promotion) and Friday (Seasonal) need sales context
-    
-    # --- 1. SEASON CONTEXT (ONLY on Tuesday and Friday) ---
-    # Load sales context for Tuesday (Promotion day) and Friday (Seasonal day)
+    # Season context skipped: LLM infers seasonal relevance from FECHA (date) and its own knowledge.
+    needs_sales_context = False
     sales_context = None
     important_dates = ""
-    if needs_sales_context:
-        social_logging.safe_log_info(
-            "[STEP 4] Loading sales context",
-            user_id=user_id,
-            weekday=weekday_theme['day_name'],
-            month=dt.month
-        )
-        sales_context = get_season_context(dt)
-        important_dates = str([d["name"] for d in get_nearby_dates(dt)])
-    else:
-        social_logging.safe_log_info(
-            "[STEP 4] Skipping sales context (not Tuesday or Friday)",
-            user_id=user_id,
-            weekday=weekday_theme['day_name']
-        )
     
     # Load Durango context ONLY for Thursday, Friday, Saturday (Problem/Solution, Seasonal Focus, Producer Segment Focus)
     durango_context = ""
@@ -1136,90 +1021,50 @@ async def generate_social_copy(
     social_logging.safe_log_info(
         "[STEP 4] Context loaded",
         user_id=user_id,
-        phase=sales_context.get('phase') if sales_context else "N/A (not Tuesday/Friday)",
-        important_dates_count=len(get_nearby_dates(dt)) if needs_sales_context else 0,
         durango_context_loaded=needs_durango_context,
-        sales_context_loaded=needs_sales_context
     )
-    
-    # PHASE 0: Viral Angle Generation (BEFORE Strategy Phase)
-    social_logging.safe_log_info("[STEP 5] Generating viral angle", user_id=user_id)
-    viral_prompt = """ACTÚA COMO: Growth Hacker especializado en viralización de contenido agrícola.
 
-Tu objetivo NO es educar.
-Tu objetivo es HACER QUE LA GENTE SE DETENGA A VER.
+    # Fetch recent post history to avoid topic repetition
+    # Query by created_at (not date_for) to see recently generated posts even if they're for the same target date
+    social_logging.safe_log_info("[STEP 4.5] Fetching recent post history for topic diversity", user_id=user_id)
+    recent_posts = db.query(SocialPost).order_by(
+        SocialPost.created_at.desc()
+    ).limit(10).all()
 
-FECHA: {date}
-DÍA DE LA SEMANA: {weekday}
-TEMA DEL DÍA: {theme}
+    history_section = ""
+    if recent_posts:
+        history_section = "\n📋 HISTORIAL RECIENTE (últimos 10 posts generados):\n"
+        for post in recent_posts:
+            weekday_name = post.date_for.strftime('%A') if post.date_for else 'N/A'
+            history_section += f"- {post.date_for} ({weekday_name}): {post.topic}"
+            if post.post_type:
+                history_section += f" [Tipo: {post.post_type}]"
+            history_section += "\n"
+        history_section += "\n⚠️ CRÍTICO - EVITA REPETIR ESTOS TEMAS:\n"
+        history_section += "- Si los últimos 2-3 posts hablan de 'X', DEBES elegir un tema sobre 'Y' (completamente diferente)\n"
+        history_section += "- Varía las categorías: si ya hay riego, elige fertilización, plagas, herramientas, post-cosecha, etc.\n"
+        history_section += "- La DIVERSIDAD es más importante que cualquier otro factor\n\n"
+        social_logging.safe_log_info(
+            "[STEP 4.5] Recent history loaded",
+            user_id=user_id,
+            num_recent_posts=len(recent_posts),
+            most_recent_topic=recent_posts[0].topic if recent_posts else None
+        )
+    else:
+        social_logging.safe_log_info("[STEP 4.5] No recent history found", user_id=user_id)
 
-CONTEXTO:
-- Estás generando contenido para productores agrícolas en México
-- El contenido debe ser relevante para agricultura
-- Pero DEBE tener un gancho viral que detenga el scroll
-
-TU TAREA:
-Genera un ángulo viral que maximice:
-1. SCROLL STOP: Que la gente se detenga a ver
-2. RETENTION: Que sigan leyendo/viendo
-3. PSYCHOLOGICAL FRAMING: Que active un trigger emocional
-
-Devuelve:
-{{
-  "hook_type": "shock|curiosity|loss|authority|contrast",
-  "primary_trigger": "fear|curiosity|greed|simplicity|ego",
-  "hook_sentence": "Una frase de gancho que detenga el scroll (máximo 15 palabras)",
-  "visual_concept": "Descripción del concepto visual que acompañará (qué imagen/video captará atención)",
-  "curiosity_gap": "El gap de curiosidad - qué pregunta o misterio dejarás sin resolver para que quieran saber más"
-}}
-
-TIPOS DE HOOK:
-- shock: Algo impactante, inesperado, que rompe expectativas
-- curiosity: Crea una pregunta que DEBEN responder
-- loss: Muestra lo que están perdiendo si no actúan
-- authority: Usa credibilidad, datos, expertos
-- contrast: Comparación dramática (antes/después, correcto/incorrecto)
-
-TRIGGERS PSICOLÓGICOS:
-- fear: Miedo a perder, a fallar, a quedarse atrás
-- curiosity: Necesidad de saber, de resolver el misterio
-- greed: Deseo de ganar más, de tener ventaja
-- simplicity: Atractivo de algo fácil, rápido, sin complicaciones
-- ego: Validación, reconocimiento, sentirse inteligente
-
-EJEMPLOS DE HOOK SENTENCES:
-- "Este error está matando el 40% de tus plántulas y no lo sabes"
-- "Un productor duplicó su producción usando esto (y no es lo que piensas)"
-- "La mayoría de agricultores desperdician 70% de su agua. Aquí está el por qué"
-- "Este truco de $50 pesos puede salvar toda tu cosecha"
-- Títulos en pregunta para problemas/decisiones: ¿Por qué...?, ¿Qué...?, ¿Amigo o enemigo? Alternativa: título afirmativo + beneficio: [Tema]: ¡[Beneficio]! Gap de curiosidad: ej. "Tu suelo te habla", "Elige sabiamente".
-
-IMPORTANTE:
-- El hook debe ser RELEVANTE para agricultura
-- Debe ser VERDADERO (no clickbait falso)
-- Debe crear URGENCIA o CURIOSIDAD genuina
-- El visual_concept debe ser específico y ejecutable""".format(
-        date=payload.date,
-        weekday=weekday_theme['day_name'],
-        theme=weekday_theme['theme']
-    )
-    
-    viral_angle = social_llm.call_viral_angle_llm(client, viral_prompt)
-    social_logging.safe_log_info(
-        "[STEP 5] Viral angle generated",
-        user_id=user_id,
-        hook_type=viral_angle.hook_type,
-        primary_trigger=viral_angle.primary_trigger
-    )
+    # PHASE 0: Viral Angle Generation - REMOVED
+    # Viral angle was causing repetitive topics by biasing strategy phase
+    # Now relying on strategy phase alone with history awareness for diversity
+    social_logging.safe_log_info("[STEP 5] Viral angle generation skipped (removed entirely)", user_id=user_id)
     
     # Identify real problems first
     # Only pass sales context on Tuesday and Friday
     social_logging.safe_log_info("[STEP 6] Identifying agricultural problems", user_id=user_id)
-    nearby_dates_list = get_nearby_dates(dt) if needs_sales_context else []
     problems_data = identify_agricultural_problems(
-        dt.month if needs_sales_context else None,  # Don't pass month on non-Tuesday/Friday
-        sales_context['phase'] if sales_context else None,  # Don't pass phase on non-Tuesday/Friday
-        nearby_dates_list,
+        None,  # Season context skipped; LLM infers from date
+        None,
+        [],
         durango_context if needs_durango_context else ""
     )
     social_logging.safe_log_info(
@@ -1254,22 +1099,11 @@ IMPORTANTE:
     strategy_prompt = f"ACTÚA COMO: Ingeniero Agrónomo Experto con 15+ años en campo Durango.\n"
     strategy_prompt += f"Tu trabajo diario es VISITAR PARCELAS, IDENTIFICAR PROBLEMAS REALES y SOLUCIONARLOS.\n\n"
     strategy_prompt += f"FECHA: {payload.date}\n"
-    
-    # Include viral angle context in strategy prompt
-    strategy_prompt += f"\n🎯 ÁNGULO VIRAL (GENERADO PREVIAMENTE):\n"
-    strategy_prompt += f"Tipo de gancho: {viral_angle.hook_type}\n"
-    strategy_prompt += f"Trigger psicológico: {viral_angle.primary_trigger}\n"
-    strategy_prompt += f"Frase de gancho: \"{viral_angle.hook_sentence}\"\n"
-    strategy_prompt += f"Concepto visual: {viral_angle.visual_concept}\n"
-    strategy_prompt += f"Gap de curiosidad: {viral_angle.curiosity_gap}\n\n"
-    strategy_prompt += f"⚠️ IMPORTANTE: El tema y contenido que generes DEBE alinearse con este ángulo viral.\n"
-    strategy_prompt += f"El hook_sentence debe ser incorporado o reflejado en el tema/título del post.\n"
-    strategy_prompt += f"El visual_concept debe guiar la generación del image_prompt.\n"
-    strategy_prompt += f"El curiosity_gap debe estar presente en el contenido para maximizar engagement.\n\n"
-    # Only include sales/phase context on Tuesday and Friday
-    if needs_sales_context and sales_context:
-        strategy_prompt += f"FASE AGRÍCOLA: {sales_context['phase']} ({sales_context['name']})\n"
-    
+
+    # Add recent post history for topic diversity
+    if history_section:
+        strategy_prompt += history_section
+
     # Only include Durango context for Thursday, Friday, Saturday
     if needs_durango_context:
         strategy_prompt += f"CONTEXTO REGIONAL DURANGO: {durango_context[:500]}...\n\n"
@@ -1308,19 +1142,6 @@ IMPORTANTE:
     strategy_prompt += "- Si el tema del día no encaja con problemas urgentes o fechas importantes, puedes adaptarlo\n"
     strategy_prompt += "- PERO: Siempre considera primero los tipos de post recomendados para el día\n\n"
     
-    # Only include urgency hints and important dates on Tuesday and Friday (when sales context is available)
-    if needs_sales_context:
-        # Add urgency hints from nearby dates (e.g., heladas coming soon)
-        if problems_data.get("urgency_hints"):
-            strategy_prompt += "⚠️ EVENTOS PRÓXIMOS (considera en tu análisis):\n"
-            for hint in problems_data["urgency_hints"]:
-                if hint.get("type") == "helada_risk":
-                    days = hint.get("days_until", 0)
-                    strategy_prompt += f"- {hint.get('name', 'Heladas')} en {days} días - considera problemas relacionados con protección contra frío\n"
-            strategy_prompt += "\n"
-        
-        if important_dates:
-            strategy_prompt += f"EFEMÉRIDES: {important_dates}.\n"
     strategy_prompt += f"PREFERENCIA USUARIO: {payload.category or 'Ninguna - Genera contenido educativo valioso sobre cualquier tema agrícola relevante'}.\n"
     strategy_prompt += "⚠️ IMPORTANTE: Si no hay preferencia de categoría, NO estás limitado a productos.\n"
     strategy_prompt += "Puedes generar contenido educativo sobre CUALQUIER tema agrícola valioso (técnicas, gestión, planificación, etc.).\n\n"
@@ -1380,11 +1201,6 @@ IMPORTANTE:
     strategy_prompt += "6. VENTANA DE TIEMPO CREA URGENCIA\n"
     strategy_prompt += "   - 'Enero-Febrero' es más urgente que 'durante el año'\n"
     strategy_prompt += "   - Si estamos en la ventana, el problema es INMEDIATO\n\n"
-    
-    # Add problems and solutions data for Tuesday/Thursday (BEFORE day-specific guidance)
-    problems_solutions_section = get_problems_solutions_for_prompt(weekday_theme['day_name'])
-    if problems_solutions_section:
-        strategy_prompt += problems_solutions_section
 
     # Add suggested topic if provided
     if payload.suggested_topic:
@@ -1405,9 +1221,9 @@ IMPORTANTE:
     if weekday_theme['day_name'] == 'Tuesday':
         strategy_prompt += "💸💸💸 MARTES - DÍA DE PROMOCIONES 💸💸💸\n"
         strategy_prompt += "Hoy es MARTES (💸 Promotion / Deals). Este día SIEMPRE requiere productos.\n\n"
-        strategy_prompt += "📋 USA LA LISTA DE PROBLEMAS Y SOLUCIONES ARRIBA:\n"
-        strategy_prompt += "- Elige UN problema de las 6 categorías (A-F) que NO hayas usado recientemente\n"
-        strategy_prompt += "- Identifica qué producto de esa categoría resuelve el problema\n"
+        strategy_prompt += "📋 ESTRATEGIA PARA MARTES:\n"
+        strategy_prompt += "- Identifica un problema agrícola relevante y concreto\n"
+        strategy_prompt += "- Varía los temas - explora diferentes categorías de productos (riego, fertilizantes, herramientas, mallasombra, protección, almacenamiento, sustratos, etc.)\n"
         strategy_prompt += "- Formula el tema como: 'Error → Daño concreto → Producto/Solución que ofrecemos'\n"
         strategy_prompt += "- Ejemplo: 'Riego desigual → Pierdes 30% de producción → Sistema riego por goteo con emisores uniformes'\n\n"
         strategy_prompt += "🚨 REGLA ABSOLUTA PARA MARTES - NO HAY EXCEPCIONES:\n"
@@ -1437,13 +1253,11 @@ IMPORTANTE:
     # Note: Sales context is only included on Tuesday and Friday
     # On other days, the LLM won't have seasonal/sales information to work with
     if is_friday:
-        # Friday - seasonal content is allowed and encouraged
         strategy_prompt += "📅 VIERNES - CONTENIDO ESTACIONAL:\n"
-        strategy_prompt += "Hoy es viernes (📅 Seasonal Focus). El contexto estacional arriba (FASE AGRÍCOLA, EFEMÉRIDES) está disponible para generar contenido estacional relacionado con la época del año.\n\n"
+        strategy_prompt += "Hoy es viernes (📅 Seasonal Focus). Usa la FECHA de arriba y tu conocimiento para generar contenido estacional relevante a la época.\n\n"
     elif is_tuesday:
-        # Tuesday - sales context available for product promotions
-        strategy_prompt += "💸 MARTES - CONTEXTO DE VENTAS DISPONIBLE:\n"
-        strategy_prompt += "Hoy es martes (💸 Promotion / Deals). El contexto de ventas arriba (FASE AGRÍCOLA, EFEMÉRIDES) está disponible para identificar productos relevantes para promocionar según la época del año.\n\n"
+        strategy_prompt += "💸 MARTES - PROMOCIONES:\n"
+        strategy_prompt += "Hoy es martes (💸 Promotion / Deals). Usa la FECHA de arriba y tu conocimiento para sugerir productos y promociones relevantes a la época.\n\n"
     
     # Add content tone guidance based on weekday
     strategy_prompt += "🎨 TONO DE CONTENIDO (CONTENT TONE):\n"
@@ -1542,18 +1356,6 @@ IMPORTANTE:
         strategy_prompt += "   - Usa tu conocimiento de agricultura en Durango (revisa el contexto regional arriba)\n"
     else:
         strategy_prompt += "   - Enfócate en problemas generales de agricultura que no requieren conocimiento regional específico\n"
-    # Only mention phase on Tuesday and Friday (when sales context is available)
-    if needs_sales_context and sales_context:
-        strategy_prompt += f"   - Considera la fase agrícola actual: {sales_context['phase']} ({sales_context['name']})\n"
-        if is_friday:
-            strategy_prompt += f"   - Considera el mes: {dt.month} y las condiciones estacionales típicas\n"
-            strategy_prompt += "   - Piensa en problemas REALES que los agricultores enfrentan HOY en esta época del año\n"
-        elif is_tuesday:
-            strategy_prompt += f"   - Considera el mes: {dt.month} y qué productos son relevantes para esta época\n"
-            strategy_prompt += "   - Piensa en productos que los agricultores necesitan HOY en esta época del año para promocionar\n"
-    else:
-        strategy_prompt += "   - Enfócate en problemas generales que ocurren durante todo el año (no dependientes de temporada)\n"
-        strategy_prompt += "   - Piensa en problemas técnicos, de gestión, o educativos que son relevantes siempre\n"
     strategy_prompt += "   - NO uses problemas genéricos - sé específico sobre síntomas, impactos y urgencia\n"
     if needs_sales_context:
         if is_friday:
@@ -1563,8 +1365,8 @@ IMPORTANTE:
             strategy_prompt += "   - Considera problemas que requieren productos para resolver (riego, fertilización, protección, herramientas, etc.)\n"
             strategy_prompt += "   - Enfócate en problemas donde puedas promocionar productos relevantes para esta época\n"
     else:
-        strategy_prompt += "   - Considera problemas de: riego, fertilización, control de plagas, planificación, costos, gestión, organización, etc. (problemas que ocurren todo el año)\n"
-        strategy_prompt += "   - NO menciones problemas estacionales o dependientes de época del año\n"
+        strategy_prompt += "   - Considera problemas relevantes según la época (usa la FECHA de arriba) o problemas que ocurren todo el año\n"
+        strategy_prompt += "   - Riego, fertilización, control de plagas, planificación, costos, gestión, etc.\n"
     if is_broad_topic_day:
         strategy_prompt += "2. Formula el tema como (A) 'Error → Daño concreto → Solución' O (B) un título corto descriptivo (ej: 'Fases lunares en la agricultura', 'Cómo funciona un biodigestor'). Si eliges (B), search_needed puede ser false.\n"
     else:
@@ -1578,8 +1380,9 @@ IMPORTANTE:
     if weekday_theme['day_name'] == 'Thursday':
         strategy_prompt += "🛠️🛠️🛠️ JUEVES - PROBLEMA Y SOLUCIÓN 🛠️🛠️🛠️\n"
         strategy_prompt += "Hoy es JUEVES (🛠️ Problem & Solution). Este día muestra cómo nuestros productos resuelven problemas reales.\n\n"
-        strategy_prompt += "📋 USA LA LISTA DE PROBLEMAS Y SOLUCIONES ARRIBA:\n"
-        strategy_prompt += "- Elige UN problema de las 6 categorías (A-F) que NO hayas usado recientemente\n"
+        strategy_prompt += "📋 ESTRATEGIA PARA JUEVES:\n"
+        strategy_prompt += "- Identifica un problema agrícola real y específico\n"
+        strategy_prompt += "- Varía los temas - explora diferentes áreas (riego, nutrición, protección, manejo de suelo, herramientas, post-cosecha, etc.)\n"
         strategy_prompt += "- Muestra cómo nuestro producto resuelve ese problema específico\n"
         strategy_prompt += "- Formula el tema como: 'Error → Daño concreto → Solución con nuestro producto'\n"
         strategy_prompt += "- Enfócate en el VALOR ENTREGADO (resultados medibles, beneficios concretos)\n"
@@ -1629,12 +1432,25 @@ IMPORTANTE:
         strategy_prompt += '  "preferred_category": "Categoría de producto OBLIGATORIA para martes (ej. riego, mallasombra, fertilizantes, herramientas, sustratos). DEBES seleccionar una categoría - NO puede estar vacío",\n'
         strategy_prompt += '  "search_needed": true (OBLIGATORIO para martes - SIEMPRE debe ser true, NUNCA false),\n'
         strategy_prompt += '  "search_keywords": "Términos de búsqueda OBLIGATORIOS para embeddings (ej. sistema riego, fertilizante, malla sombra, kit). DEBES proporcionar keywords - NO puede estar vacío"\n'
+    elif weekday_theme['day_name'] in ['Monday', 'Wednesday', 'Saturday', 'Sunday']:
+        strategy_prompt += '  "preferred_category": "" (DEJAR VACÍO - este día es educativo/informativo, NO promocional),\n'
+        strategy_prompt += '  "search_needed": false (OBLIGATORIO para días educativos - NO necesitas productos),\n'
+        strategy_prompt += '  "search_keywords": "" (DEJAR VACÍO - no hay búsqueda de productos en días educativos)\n'
     else:
+        # Thursday and Friday can optionally include products
         strategy_prompt += '  "preferred_category": "Categoría de producto preferida SOLO si el tema requiere un producto específico (ej. riego, mallasombra). Si el tema es educativo general sin producto, deja vacío",\n'
         strategy_prompt += '  "search_needed": true/false (true solo si necesitas buscar un producto para el tema, false si el contenido es educativo general sin producto),\n'
         strategy_prompt += '  "search_keywords": "términos de búsqueda para embeddings SOLO si search_needed=true (ej. arado, fertilizante inicio, protección heladas). Si no hay producto, deja vacío"\n'
     strategy_prompt += "}"
-    
+
+    # Log the full strategy prompt for debugging
+    social_logging.safe_log_info(
+        "[STEP 7] Strategy prompt (full text)",
+        user_id=user_id,
+        prompt_length=len(strategy_prompt),
+        full_prompt=strategy_prompt
+    )
+
     # Use new LLM module with strict JSON parsing and retry
     # This will raise HTTPException if topic validation fails
     strat_response = social_llm.call_strategy_llm(client, strategy_prompt)
@@ -1703,7 +1519,21 @@ IMPORTANTE:
                     user_id=user_id,
                     generated_keywords=search_keywords_override
                 )
-    
+
+    # Disable product selection for educational/motivational days (Monday, Wednesday, Saturday, Sunday)
+    # These days focus on pure education, tips, and information without product promotion
+    educational_days = ['Monday', 'Wednesday', 'Saturday', 'Sunday']
+    if weekday_theme['day_name'] in educational_days:
+        if search_needed:
+            social_logging.safe_log_info(
+                f"[STEP 10] Disabling product search for {weekday_theme['day_name']} (educational day)",
+                user_id=user_id,
+                original_search_needed=search_needed
+            )
+            search_needed = False
+            search_keywords_override = ""
+            preferred_category_override = ""
+
     strat_data = {
         "problem_identified": strat_response.problem_identified,
         "topic": strat_response.topic,
@@ -1712,21 +1542,14 @@ IMPORTANTE:
         "content_tone": content_tone,  # Always non-empty after fallback
         "preferred_category": preferred_category_override,
         "search_needed": search_needed,  # Forced to true on Tuesday
-        "search_keywords": search_keywords_override,
-        "viral_angle": {
-            "hook_type": viral_angle.hook_type,
-            "primary_trigger": viral_angle.primary_trigger,
-            "hook_sentence": viral_angle.hook_sentence,
-            "visual_concept": viral_angle.visual_concept,
-            "curiosity_gap": viral_angle.curiosity_gap
-        }
+        "search_keywords": search_keywords_override
     }
     
     # --- 3. PRODUCT SELECTION PHASE (using embeddings) ---
     social_logging.safe_log_info(
         "[STEP 11] Starting product selection",
         user_id=user_id,
-        search_needed=strat_data.get("search_needed", False),
+        search_needed=strat_data["search_needed"],
         weekday=weekday_theme['day_name']
     )
     selected_product_id = None
@@ -1799,28 +1622,9 @@ IMPORTANTE:
     # Get weekday theme for content generation (already computed earlier, but ensure we have it)
     if 'weekday_theme' not in locals():
         weekday_theme = get_weekday_theme(dt)
-    
-    # Include viral angle in content generation prompt
-    viral_angle_context = ""
-    if strat_data.get("viral_angle"):
-        va = strat_data["viral_angle"]
-        viral_angle_context = f"""
-🎯 ÁNGULO VIRAL (DEBE SER INCORPORADO):
-- Tipo de gancho: {va['hook_type']}
-- Trigger psicológico: {va['primary_trigger']}
-- Frase de gancho: "{va['hook_sentence']}"
-- Concepto visual: {va['visual_concept']}
-- Gap de curiosidad: {va['curiosity_gap']}
 
-⚠️ CRÍTICO: El caption DEBE incorporar o reflejar el hook_sentence.
-⚠️ CRÍTICO: El image_prompt DEBE alinearse con el visual_concept.
-⚠️ CRÍTICO: El contenido DEBE crear el curiosity_gap para maximizar engagement.
-
-"""
-    
     creation_prompt = (
         f"ACTÚA COMO: Social Media Manager especializado en contenido agrícola.\n\n"
-        f"{viral_angle_context}"
         f"📅 PLAN SEMANAL - DÍA ACTUAL: {weekday_theme['day_name']}\n"
         f"🎯 TEMA DEL DÍA: {weekday_theme['theme']}\n"
         f"📝 TIPO DE CONTENIDO: {weekday_theme['content_type']}\n\n"
@@ -1940,185 +1744,13 @@ IMPORTANTE:
         "6. REGLAS DE CONTENIDO (§8): Números con contexto; beneficios comparativos (vs qué); no exagerar specs; solución = contexto + producto; producto como componente central.\n"
         "7. Si el tema tiene 3-5 secciones claras (ej. los 5 mejores, 4 pasos, 3 tipos de ataque), genera carousel_slides con un slide por sección (título + 1-2 frases + idea visual). Slide final opcional: CTA o resumen.\n\n"
     )
-    
-    # Detect structure type based on topic (before building image prompt section)
-    topic_lower = strat_data.get('topic', '').lower()
-    post_type_lower = strat_data.get('post_type', '').lower()
-    
-    if "compar" in topic_lower or " vs " in topic_lower or "tradicional" in topic_lower:
-        structure_type = "COMPARATIVA"
-        structure_guide = """
-ESTRUCTURA: Comparativa lado a lado (Error → Daño concreto → Solución)
-- Panel izquierdo (40% espacio, fondo naranja/rojo): [MÉTODO TRADICIONAL/PROBLEMA]
-  * Título grande: "[MÉTODO TRADICIONAL]" (texto blanco, bold)
-  * Indicador numérico grande: "[X% pérdida/problema]" (número 120px, color rojo)
-  * 3-4 problemas específicos con porcentajes/datos
-  * Iconos de pérdida/riesgo (rojos)
-  * Flechas rojas hacia abajo
-- Panel derecho (40% espacio, fondo verde): [MÉTODO MEJORADO/SOLUCIÓN]
-  * Título grande: "[MÉTODO MEJORADO]" (texto blanco, bold)
-  * Indicador numérico grande: "[X% ahorro/beneficio]" (número 120px, color verde)
-  * 3-4 beneficios específicos con porcentajes/datos
-  * Iconos de beneficio/éxito (verdes)
-  * Flechas verdes hacia arriba
-- Sección inferior (20% espacio, fondo blanco): Tabla comparativa
-  * Columnas: Método | Consumo | Uniformidad | Costo | ROI
-  * Filas: Tradicional vs Tecnificado con datos específicos
-- Plantilla simple: un visual fuerte por lado + headline + 2 bullets por lado + footer.
-"""
-    elif "paso" in topic_lower or "cómo" in topic_lower or "instalación" in topic_lower or "tutorial" in post_type_lower:
-        structure_type = "TUTORIAL"
-        structure_guide = """
-ESTRUCTURA: Tutorial paso a paso
-- Título principal (20% altura, fondo verde/azul IMPAG): "[Nombre del Proceso]"
-- 4-6 pasos numerados (60% altura, cada paso en panel separado):
-  * Número grande (150px, color verde IMPAG): "1", "2", "3"...
-  * Título del paso (texto bold, 60px)
-  * Ilustración mostrando la acción
-  * Especificación técnica (medidas exactas)
-  * Indicador visual del resultado esperado
-- Sección de tips (20% altura, fondo azul claro con borde verde):
-  * Icono 💡 grande (40px)
-  * Texto: Consejos prácticos destacados
-"""
-    elif "sistema" in topic_lower or "instalación completa" in topic_lower or "diagrama" in topic_lower:
-        structure_type = "DIAGRAMA DE SISTEMA"
-        structure_guide = """
-ESTRUCTURA: Diagrama de sistema técnico
-- Vista superior (50% espacio): Sistema completo en paisaje agrícola Durango
-- Vista en corte (50% espacio): Sección técnica mostrando:
-  * Componentes subterráneos visibles
-  * Flujos con flechas de color (azul=agua, verde=nutrientes, naranja=energía)
-  * Dimensiones específicas etiquetadas (ej: "30-50 cm", "1-4 m")
-  * Materiales y conexiones visibles
-- Tabla de especificaciones (inferior): Materiales, dimensiones, capacidades
-"""
-    elif any(k in topic_lower for k in ("qué está atacando", "hongo", "virus", "plagas", "diagnóstico", "qué está atacando")):
-        structure_type = "QUICK_GUIDE_3"
-        structure_guide = """
-ESTRUCTURA: Guía rápida diagnóstica (3 paneles horizontales)
-- 3 paneles: uno por tipo de problema (ej. hongo, virus, plagas). Cada panel: subtítulo, ilustración pequeña, 1-2 bullets de síntomas + tip de manejo.
-- Plantilla simple: un visual por panel + headline + 2 bullets por panel + footer.
-"""
-    elif any(k in topic_lower for k in ("planifica", "pasos", "camino al éxito", "4 pasos")):
-        structure_type = "STEP_PATH_4"
-        structure_guide = """
-ESTRUCTURA: Proceso en 4 pasos (cuadrantes unidos por camino)
-- 4 cuadrantes conectados por una ruta; cada uno: número, título, texto corto, icono (ej. suelo, planta, calendario, pala).
-- Plantilla simple: número grande + título + 1-2 frases + icono por paso.
-"""
-    elif any(k in topic_lower for k in ("los 5", "5 mejores", "5 cultivos", "5 errores", "cinco ")):
-        structure_type = "LIST_CIRCULAR_5"
-        structure_guide = """
-ESTRUCTURA: Lista circular (5 ítems)
-- Título central; 5 ítems en círculo con borde/viña; cada ítem: nombre, tagline, 1-2 specs o tips.
-- Plantilla simple: un headline central + 5 bloques con título + 1-2 bullets.
-"""
-    elif any(k in topic_lower for k in ("plantas indicadoras", "tu suelo te habla", "indicador")):
-        structure_type = "INDICATOR_SECTIONS_3"
-        structure_guide = """
-ESTRUCTURA: Secciones por indicador (3 secciones)
-- 3 secciones: cada una = problema (ej. compactación) + 2 plantas indicadoras + solución corta.
-- Plantilla simple: un visual por sección + headline + 2 bullets por sección + footer.
-"""
-    elif any(k in topic_lower for k in ("fases lunares", "luna y agricultura", "luna")):
-        structure_type = "LUNAR_4_COLUMNS"
-        structure_guide = """
-ESTRUCTURA: 4 columnas lunares
-- 4 columnas: Luna nueva, Creciente, Llena, Menguante; cada una: icono luna, lista de actividades, ilustración pequeña.
-- Plantilla simple: 4 columnas con icono + lista + visual.
-"""
-    else:
-        structure_type = "MULTI-PANEL"
-        structure_guide = """
-ESTRUCTURA: Infografía educativa multi-panel
-- Panel 1 (25% altura): Título + Concepto principal (visual grande)
-- Panel 2 (20% altura): Problema/Necesidad (si aplica, fondo amarillo/naranja)
-- Panel 3 (20% altura): Solución/Método (fondo verde)
-- Panel 4 (20% altura): Especificaciones técnicas (tabla/lista con medidas específicas)
-- Panel 5 (15% altura): Tips/Beneficios destacados (caja azul con borde verde)
-"""
-    
-    # Continue building creation_prompt with structure detection
-    creation_prompt += (
-        "--- INSTRUCCIONES ESPECÍFICAS PARA image_prompt ---\n"
-        f"ESTRUCTURA DETECTADA: {structure_type}\n"
-        f"{structure_guide}\n\n"
-        "El campo 'image_prompt' DEBE ser un prompt detallado y técnico para generación de imágenes (estilo IMPAG).\n"
-        "Sigue este formato estructurado:\n\n"
-        
-        "⚠️⚠️⚠️ ADAPTACIÓN POR CANAL (CRÍTICO) ⚠️⚠️⚠️:\n"
-        "- Para wa-status, stories, tiktok, reels: La imagen DEBE ser AUTOEXPLICATIVA con TEXTO GRANDE Y VISIBLE.\n"
-        "  El usuario debe entender el mensaje SOLO viendo la imagen, sin leer el caption.\n"
-        "- Para fb-post, ig-post: La imagen puede ser más técnica/detallada, el caption puede complementar.\n\n"
-        
-        "FORMATO REQUERIDO (adaptar dimensiones al canal):\n"
-        "- wa-status/stories/tiktok/reels: Vertical 1080×1920 px\n"
-        "- fb-post/ig-post: Cuadrado 1080×1080 px\n"
-        "Estilo [flyer técnico/paisaje agrícola/catálogo técnico] IMPAG, con diseño limpio, moderno y profesional.\n"
-        "Mantén siempre la estética corporativa IMPAG: fondo agrícola difuminado, tonos blanco–gris, acentos verde–azul, sombras suaves, tipografías gruesas para títulos y delgadas para texto técnico.\n"
+
+    # Image prompt instructions (structure detection + weekday style + IMPAG branding, dimensions, JSON schema)
+    structure_type, structure_guide = social_image_prompt.detect_structure_type(
+        strat_data.get("topic", ""), strat_data.get("post_type", "")
     )
-    if (strat_data.get('post_type') or '').lower() in ('infografías', 'infografias'):
-        creation_prompt += (
-            "\nPara este tipo de post usa estilo: infografía educativa ilustrada, trazo amigable, colores tierra/verde/azul, no fotorealista. Iconos claros, viñetas y texto legible. Mantener logos IMPAG.\n"
-            "Para infografías: mensaje principal y 2-3 bullets por panel; especificaciones detalladas en caption si es necesario. Todo texto relevante (títulos, bullets) debe ser legible en móvil; preferir un headline y líneas cortas.\n\n"
-        )
-    creation_prompt += (
-        
-        "Instrucciones de diseño detalladas:\n"
-        "1. LOGOS (OBLIGATORIO - §7 IMPAG only):\n"
-        "   - Usar SOLO branding IMPAG. Logo oficial 'IMPAG Agricultura Inteligente' en esquina superior derecha, sin deformarlo.\n"
-        "   - No incluir otros nombres ni logos en la imagen (no Todo para el Campo ni otros). Contacto y URL pueden ser los mismos; la identidad visual en la imagen es solo IMPAG.\n\n"
-        
-        "2. ELEMENTO PRINCIPAL (CON PERSONAS CUANDO APLIQUE):\n"
-        "   - Si hay producto: Imagen realista del producto en alta resolución, fotorealista, iluminación de estudio suave o golden hour.\n"
-        "   - ⚠️ INCLUYE PERSONAS cuando sea apropiado:\n"
-        "     * Para productos agrícolas: Agricultor/productor mexicano usando el producto en campo, sosteniéndolo, o mostrándolo como recomendación.\n"
-        "     * Para productos ganaderos: Ganadero usando el producto, mostrándolo en uso real.\n"
-        "     * Para productos forestales: Ingeniero forestal o trabajador forestal usando el producto.\n"
-        "     * Para productos de riego/instalación: Ingeniero agrónomo o técnico instalando o mostrando el producto.\n"
-        "     * Las personas deben verse profesionales, auténticas, con ropa de trabajo agrícola/ganadero/forestal apropiada.\n"
-        "     * Las personas deben estar interactuando con el producto de forma natural (sosteniéndolo, instalándolo, usándolo).\n"
-        "   - Si es paisaje: Paisaje agrícola realista del norte de México (Durango), cultivos en hileras, iluminación natural suave.\n"
-        "   - Si es kit: Componentes completamente visibles, montados o desglosados en técnica 'knolling', cables ordenados.\n"
-        "   - Mantener proporción, ubicación, integración suave con fondo, estilo profesional tipo catálogo.\n"
-        "   ⚠️ PARA STORIES/STATUS/TIKTOK/REELS: Agrega TEXTO GRANDE Y VISIBLE en la imagen que comunique el mensaje principal.\n"
-        "   El texto debe ser legible desde lejos, con buen contraste, tamaño mínimo 60-80px.\n\n"
-        
-        "3. ESPECIFICACIONES TÉCNICAS (si aplica):\n"
-        "   - Bloque técnico con viñetas: 📏 Especificaciones Técnicas:\n"
-        "   - Lista de 4-6 datos técnicos relevantes del producto\n"
-        "   - Respetar viñetas, colores, alineación, tipografía, fondo del recuadro y sombra.\n\n"
-        
-        "4. PIE DEL FLYER (mantener estilo IMPAG):\n"
-        f"   - {CONTACT_INFO['web']}\n"
-        "   - Envíos a todo México\n"
-        f"   - WhatsApp: {CONTACT_INFO['whatsapp']}\n"
-        f"   - 📍 {CONTACT_INFO['location']}\n\n"
-        
-        "OUTPUT JSON:\n"
-        "- TODOS los strings JSON deben estar entre comillas dobles y CERRADOS correctamente\n"
-        "- Si un string contiene saltos de línea (\\n), escápalos como \\\\n\n"
-        "- Si un string contiene comillas, escápalas como \\\"\n"
-        "- NUNCA dejes strings sin cerrar - cada \" debe tener su \" de cierre\n"
-        "- El JSON debe ser válido y parseable\n"
-        "⚠️ REGLA CRÍTICA: 'image_prompt' es SIEMPRE OBLIGATORIO (nunca null). Si es carrusel, proporciona el prompt de la imagen de portada o primera slide.\n"
-        "suggested_hashtags: cuando sea útil, incluye 5-8 hashtags en español (ej. #Riego #Agricultura #Campo).\n\n"
-        "RESPONDE SOLO CON EL JSON (sin texto adicional):\n"
-        "{\n"
-        '  "selected_category": "...",\n'
-        '  "selected_product_id": "...",\n'
-        f'  "channel": "{strat_data.get("channel", "fb-post")}",\n'
-        f'  "topic": "{strat_data.get("topic")}",\n'
-        '  "caption": "... (RESPETA: wa-status/stories/tiktok/reels = MUY CORTO, fb-post = puede ser largo)",\n'
-        '  "image_prompt": "PROMPT DETALLADO OBLIGATORIO para generación de imagen (SIEMPRE requerido). Si es carrusel, usa el prompt de la imagen de portada o primera slide. Para stories/status debe ser autoexplicativa con texto grande visible. SIEMPRE incluye logos IMPAG y dimensiones correctas (1080×1920 para vertical, 1080×1080 para cuadrado).",\n'
-        '  "carousel_slides": ["Slide 1 CON TEXTO GRANDE...", "Slide 2 CON TEXTO...", ...] (SOLO si es carrusel: TikTok 2-3, FB/IG 2-10. Si es carrusel, image_prompt debe ser la portada o primera slide),\n'
-        '  "needs_music": true/false,\n'
-        '  "posting_time": "...",\n'
-        '  "notes": "...",\n'
-        '  "suggested_hashtags": ["#Riego", "#Agricultura", ...] (opcional: 5-8 hashtags en español)\n'
-        "}\n\n"
-        f"REGLAS FINALES: Producto ID {selected_product_id or 'ninguno'}. Incluye logos IMPAG, personas cuando aplique, sé específico sobre el producto y su uso."
+    creation_prompt += social_image_prompt.build_image_prompt_instructions(
+        strat_data, structure_type, structure_guide, CONTACT_INFO, selected_product_id, weekday_theme=weekday_theme
     )
 
     # Use new LLM module with strict JSON parsing and retry
@@ -2242,7 +1874,7 @@ ESTRUCTURA: Infografía educativa multi-panel
     # Build formatted_content for storage
     # Determine hookType: "seasonality" on Fridays, "general" otherwise
     hook_type = "seasonality" if is_friday else "general"
-    month_phase_actual = sales_context.get("phase", "general") if sales_context else "general"
+    month_phase_actual = "general"  # Season context skipped; LLM infers from date
     
     formatted_content = {
         "id": None,  # Will be set after save
@@ -2259,7 +1891,7 @@ ESTRUCTURA: Infografía educativa multi-panel
         "carouselSlides": data.get("carousel_slides"),
         "needsMusic": data.get("needs_music", False),
         "generatedContext": {
-            "monthPhase": month_phase_actual if needs_sales_context else "general",  # Only include phase on Tuesday and Friday
+            "monthPhase": month_phase_actual,
             "nearbyDates": [],
             "selectedCategories": [selected_category] if selected_category else []
         }
@@ -2364,7 +1996,7 @@ ESTRUCTURA: Infografía educativa multi-panel
         topic=canonical_topic,  # Canonical topic from strategy phase
         problem_identified=strat_data.get("problem_identified", ""),  # From strategy phase
         saved_post_id=saved_post_id,  # Return the saved post ID
-        viral_angle=strat_data.get("viral_angle"),  # Viral angle from pre-strategy phase
+        viral_angle=None,  # Viral angle removed - was causing topic repetition
         suggested_hashtags=data.get("suggested_hashtags")
     )
 
