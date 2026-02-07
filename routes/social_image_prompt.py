@@ -6,17 +6,28 @@ Builds structure detection and LLM instructions for image_prompt / carousel_slid
 from typing import Dict, Any, Optional, Tuple
 
 
-def detect_structure_type(topic: str, post_type: str) -> Tuple[str, str]:
+def detect_structure_type(topic: str, post_type: str, weekday: str = None) -> Tuple[str, str]:
     """
-    Detect infographic structure type from topic and post_type.
+    Detect infographic structure type from topic, post_type, and weekday.
     Returns (structure_type, structure_guide) for use in image prompt instructions.
+
+    Args:
+        topic: Topic string
+        post_type: Post type string
+        weekday: Day of week (e.g., "Monday", "Thursday") - used to avoid problem-solution framing on non-Thursday days
     """
     topic_lower = (topic or "").lower()
     post_type_lower = (post_type or "").lower()
 
+    # Only use problem-solution comparison structure on Thursday
+    # On other days, use educational/informative comparison structure instead
+    is_thursday = weekday == "Thursday" if weekday else False
+
     if "compar" in topic_lower or " vs " in topic_lower or "tradicional" in topic_lower:
-        structure_type = "COMPARATIVA_CURIOSITY"
-        structure_guide = """
+        if is_thursday:
+            # Thursday: Problem & Solution day - use problem-solution comparison
+            structure_type = "COMPARATIVA_CURIOSITY"
+            structure_guide = """
 ESTRUCTURA: Comparativa curiosa (Problema intrigante → Promesa visual)
 ⚠️ CRÍTICO PARA ALCANCE FB: NO CERRAR LA VENTA EN LA IMAGEN. Generar CURIOSIDAD.
 - Diseño suave dividido (50/50), NO usar rojo agresivo - usar tonos neutros/tierra con acentos sutiles
@@ -31,6 +42,24 @@ ESTRUCTURA: Comparativa curiosa (Problema intrigante → Promesa visual)
 - NO incluir tabla comparativa en la imagen - mover esos datos al caption
 - Objetivo: Imagen debe generar la pregunta "¿Cómo?" o "¿Cuánto?" - la respuesta está en el caption
 - Máximo 2 frases cortas por lado (10-15 palabras total por lado)
+"""
+        else:
+            # Other days: Use educational/informative comparison (not problem-solution)
+            structure_type = "COMPARATIVA_EDUCATIVA"
+            structure_guide = """
+ESTRUCTURA: Comparativa educativa (Opción A ↔ Opción B)
+- Diseño limpio dividido (50/50), usar tonos profesionales con acentos en verde/azul IMPAG
+- Panel izquierdo (50% espacio, fondo neutral claro): [OPCIÓN/MÉTODO A]
+  * Título descriptivo claro (ej. "Método Tradicional", "Sistema Manual")
+  * 2-3 características principales con iconos
+  * Enfoque neutral, informativo (NO negativo)
+- Panel derecho (50% espacio, fondo verde/azul suave): [OPCIÓN/MÉTODO B]
+  * Título descriptivo claro (ej. "Método Moderno", "Sistema Automatizado")
+  * 2-3 características principales con iconos
+  * Enfoque informativo, educativo
+- Objetivo: Educar sobre diferentes opciones o enfoques disponibles
+- Tono: Neutral, profesional, informativo (NO usar lenguaje de problema/solución)
+- Máximo 3-4 puntos por lado con iconos visuales
 """
     elif "paso" in topic_lower or "cómo" in topic_lower or "instalación" in topic_lower or "tutorial" in post_type_lower:
         structure_type = "TUTORIAL"

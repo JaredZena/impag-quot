@@ -1,0 +1,382 @@
+"""
+Topic Engine: Identifies agricultural problems and topics.
+
+This module handles STEP 1 of the multi-step pipeline:
+- Input: date, recent topics, weekday theme
+- Output: topic, problem, angle, urgency, audience
+- Prompt size: ~800 tokens (vs 7,925 in old system)
+"""
+from pydantic import BaseModel
+from typing import Optional
+import anthropic
+import json
+import re
+from social_config import DURANGO_SEASONALITY_CONTEXT
+
+
+class TopicStrategy(BaseModel):
+    """Output from Topic Engine."""
+    topic: str  # "Error → Daño concreto → Solución" or short title
+    problem_identified: str
+    angle: str  # "riego", "fertilización", "plagas", etc.
+    urgency_level: str  # "high", "medium", "low"
+    target_audience: str  # "plant", "animal", "forestry", "general"
+
+
+def generate_topic_strategy(
+    client: anthropic.Anthropic,
+    date_str: str,
+    weekday_theme: dict,
+    recent_topics: list,
+    seasonality_context: Optional[str] = None,  # Deprecated - kept for backward compatibility, not used
+    user_suggested_topic: Optional[str] = None,
+    is_second_post: bool = False
+) -> TopicStrategy:
+    """
+    Generate topic strategy using LLM.
+
+    Args:
+        client: Anthropic client
+        date_str: Date string (YYYY-MM-DD)
+        weekday_theme: Weekday theme dict from config
+        recent_topics: List of recent topic strings
+        seasonality_context: DEPRECATED - not used; detailed Durango context is embedded for Friday posts
+        user_suggested_topic: Optional user-suggested topic
+        is_second_post: Whether this is the second post (e.g., Monday's "La Vida en el Rancho")
+
+    Returns:
+        TopicStrategy object with topic, problem, angle, etc.
+    """
+    # Build compact prompt (~800 tokens)
+    prompt = f"""Identifica un problema agrícola real para productores comerciales.
+
+FECHA: {date_str}
+DÍA DE LA SEMANA: {weekday_theme['day_name']}
+TEMA DEL DÍA: {weekday_theme['theme']}
+
+"""
+
+    # Add recent topics for variety
+    if recent_topics:
+        prompt += "TEMAS RECIENTES (ÚLTIMOS 14 DÍAS) - ELIGE ALGO DIFERENTE:\n"
+        for topic in recent_topics[:10]:  # Max 10 recent
+            prompt += f"- {topic}\n"
+        prompt += """
+⚠️ CRÍTICO: Tu tema DEBE ser COMPLETAMENTE DIFERENTE a los temas recientes arriba.
+
+Ejemplos de cómo variar (SOLO EJEMPLOS - no te limites a estos):
+- Si hay varios sobre "cosecha", elige algo como "almacenamiento" o "comercialización" o "maquinaria"
+- Si hay varios sobre "suelo", elige algo como "tecnología" o "forestal" o "postcosecha"
+- Puedes elegir CUALQUIER tema agrícola relevante: producción, procesamiento, comercialización,
+  financiamiento, innovación, ganadería, forestal, tecnología, gestión, certificaciones,
+  maquinaria, construcciones, energía, etc.
+
+NO estás limitado a los ejemplos mencionados. Piensa en problemas reales que los productores
+enfrentan en CUALQUIER área de su operación.
+
+"""
+    else:
+        prompt += "No hay temas recientes - puedes elegir cualquier tema relevante.\n\n"
+
+    # Add detailed Durango seasonality context for FRIDAY posts only (Seasonal Focus theme)
+    day_name = weekday_theme['day_name']
+    if day_name == 'Friday':
+        prompt += f"""CONTEXTO ESTACIONAL DURANGO (CRÍTICO PARA VIERNES):
+
+{DURANGO_SEASONALITY_CONTEXT}
+
+⚠️ IMPORTANTE: Usa el contexto de Durango arriba para generar temas ESTACIONALES precisos.
+- Considera los ciclos agrícolas correctos por mes (temporal Mayo-Junio, NO Febrero)
+- Considera los cultivos principales: frijol (301,375 ha), maíz forrajero (2.3M t), alfalfa (2.5M t)
+- 79% rainfed/temporal - esto es CRÍTICO para entender el calendario agrícola real
+- Considera los problemas reales: 94.9% costos altos, 34% pérdida fertilidad suelo, financiamiento 8.5%
+- Productos IMPAG relevantes: mallasombra (39.7% agro protegida), invernaderos (36.4%), riego, antiheladas
+
+"""
+
+    # Add user-suggested topic if provided
+    if user_suggested_topic:
+        prompt += f"💡 TEMA SUGERIDO POR USUARIO: {user_suggested_topic}\n"
+        prompt += "Usa este tema como base, pero adáptalo al formato requerido.\n\n"
+
+    # Add task instructions - format varies by weekday
+    day_name = weekday_theme['day_name']
+
+    if day_name in ['Tuesday', 'Thursday']:
+        # Tuesday (Promotion) & Thursday (Problem & Solution) - use "Error → Daño → Solución" format
+        prompt += """TU TAREA:
+1. Identifica un problema agrícola REAL que productores enfrentan HOY
+2. Formula como: "Error → Daño concreto → Solución"
+   - ERROR: Acción incorrecta específica
+   - DAÑO: Consecuencia medible (números, %)
+   - SOLUCIÓN: Técnica específica y accionable
+
+⚠️ FORMATO CRÍTICO:
+- DEBES usar EXACTAMENTE este formato: "Error → Daño → Solución"
+- DEBES incluir los símbolos "→" para separar las tres partes
+- NO uses preguntas como "¿Sabías que...?" o "¿Te has preguntado...?"
+- NO uses títulos estilo clickbait
+
+Ejemplos CORRECTOS:
+- "Almacenar grano sin secar → Pierdes 20% por hongos → Secado a 14% humedad antes de almacenar"
+- "No calibrar sembradora → Desperdicias 30% de semilla → Calibración anual con prueba de campo"
+- "Vender sin contrato → Precios bajos 40% de temporada → Agricultura por contrato anticipado"
+
+RESPONDE SOLO CON JSON (sin markdown):
+{
+  "topic": "Error específico → Daño medible con % → Solución técnica concreta",
+  "problem_identified": "Descripción del problema real que enfrenta el productor",
+  "angle": "tema principal del contenido",
+  "urgency_level": "high|medium|low",
+  "target_audience": "plant|animal|forestry|general"
+}
+"""
+    else:
+        # Other days - use descriptive topic format appropriate to the day's theme
+        prompt += f"""TU TAREA:
+Genera un tema apropiado para {day_name} ({weekday_theme['theme']}).
+
+⚠️ FORMATO PARA {day_name.upper()}:
+"""
+
+        if day_name == 'Monday':
+            # Check if this is the second post for Monday ("La Vida en el Rancho")
+            if is_second_post and weekday_theme.get('theme') == '🌾 La Vida en el Rancho':
+                prompt += """- Este es un post de "La Vida en el Rancho" - literatura emocional rural
+- NO es motivacional tradicional, NO es humor, NO es liderazgo
+- Es poesía rural auténtica que conecta emocionalmente con la vida del rancho
+
+🎯 CUATRO PILARES EMOCIONALES (elige UNO como base):
+
+1️⃣ FE (Agricultura Espiritual)
+   - Conceptos: fe, confiar, esperanza, sin garantías, propósito
+   - La agricultura como acto de fe, no solo negocio
+   - Ejemplo: "La fe del campesino empieza antes de la lluvia"
+
+2️⃣ SACRIFICIO SIN RECONOCIMIENTO
+   - Conceptos: trabajar sin aplausos, aunque nadie lo vea, sin garantías
+   - La dignidad del trabajo invisible
+   - Ejemplo: "trabajo que nadie ve pero que sostiene todo"
+
+3️⃣ LEGADO GENERACIONAL
+   - Conceptos: padre, enseñanza, hijos, herencia, ejemplo
+   - Identidad familiar y continuidad
+   - Ejemplo: "Antes veía a mi papá llegar del campo..."
+
+4️⃣ MELANCOLÍA RURAL
+   - Conceptos: mesas vacías, silencio, hijos que se fueron, despedidas
+   - Dolor nostálgico mezclado con orgullo
+   - Ejemplo: "la mesa sigue ahí... pero sobran sillas"
+
+📝 ESTRUCTURA DE ESCRITURA (5 PASOS):
+1. Escena rural concreta (algo visual)
+2. Expande al significado emocional
+3. Eleva el sacrificio
+4. Universaliza ("solo quien vive del campo entiende")
+5. Cierre suave (nunca estridente)
+
+⚠️ FORMATO CRÍTICO:
+- Líneas CORTAS
+- Espacio para respirar
+- Casi poético
+- NO clickbait
+- NO venta
+- NO tecnología
+- Solo verdad humana rural
+
+✅ EJEMPLOS DE TEMAS CORRECTOS:
+- "Padres que enseñaron sin palabras" (Legado)
+- "La tristeza de ver el rancho vacío en fiestas" (Melancolía)
+- "Vender ganado no siempre es negocio, a veces es despedida" (Sacrificio + Melancolía)
+- "Sembrar hoy para que otros coman mañana" (Sacrificio + Legado)
+- "El campo es la primera línea de batalla" (Fe + Sacrificio)
+"""
+            else:
+                # Standard Monday motivational post
+                prompt += """- Usa un título inspirador o motivacional (NO usar "Error → Daño → Solución")
+- Enfoque: Motivación, inspiración, perspectiva positiva
+- Ejemplos CORRECTOS:
+  * "5 lecciones de productores exitosos que transformaron su operación"
+  * "Por qué la persistencia vale más que la perfección en agricultura"
+  * "Cómo convertir un mal año en aprendizaje valioso"
+"""
+        elif day_name == 'Wednesday':
+            prompt += """- Usa un título educativo claro (NO usar "Error → Daño → Solución")
+- Enfoque: Enseñanza, explicación, guía práctica
+- Ejemplos CORRECTOS:
+  * "Guía completa de fertilización nitrogenada por etapa fenológica"
+  * "Cómo interpretar un análisis de suelo sin ser agrónomo"
+  * "3 métodos de control biológico que realmente funcionan"
+"""
+        elif day_name == 'Friday':
+            prompt += """- Usa un título estacional/calendario (NO usar "Error → Daño → Solución")
+- Enfoque: Temporada actual, clima, fechas importantes
+- Ejemplos CORRECTOS:
+  * "Calendario de siembra para ciclo primavera-verano 2026"
+  * "Preparativos esenciales para temporada de heladas"
+  * "Qué plantar ahora para cosechar en 90 días"
+"""
+        elif day_name == 'Saturday':
+            prompt += """- Usa un título específico del sector (NO usar "Error → Daño → Solución")
+- Enfoque: Información relevante para el sector del día (forestry/plant/animal)
+- Ejemplos CORRECTOS:
+  * "Manejo de reforestación con especies nativas: supervivencia real"
+  * "Rotación de potreros: cálculo de carga animal óptima"
+  * "Variedades de maíz más resistentes a sequía en el Bajío"
+"""
+        elif day_name == 'Sunday':
+            prompt += """- Usa un título informativo sobre innovación/industria (NO usar "Error → Daño → Solución")
+- Enfoque: Novedades, tendencias, estadísticas, tecnología
+- Ejemplos CORRECTOS:
+  * "Drones agrícolas: cuándo sí valen la inversión en 2026"
+  * "Tendencias de mercado: qué cultivos están subiendo de precio"
+  * "Agricultura de precisión accesible para productores pequeños"
+"""
+
+        prompt += """
+Ejemplos INCORRECTOS para estos días:
+- "No usar fertilizante → Pierdes 40% de rendimiento → Programa de fertilización" ❌ (este es formato de Martes/Jueves)
+- "❄️ ¿Sabías que...? Te explico cómo" ❌ (clickbait)
+- "La importancia de..." ❌ (demasiado general)
+
+RESPONDE SOLO CON JSON (sin markdown):
+{
+  "topic": "Título descriptivo claro y específico apropiado para el tema del día",
+  "problem_identified": "Descripción del problema o contexto relevante",
+  "angle": "tema principal del contenido",
+  "urgency_level": "high|medium|low",
+  "target_audience": "plant|animal|forestry|general"
+}
+"""
+
+    # Log the prompt (for debugging)
+    try:
+        import social_logging
+        social_logging.safe_log_info(
+            "[TOPIC ENGINE] Prompt built",
+            prompt_length=len(prompt),
+            prompt_tokens_estimate=len(prompt) // 4,
+            full_prompt=prompt
+        )
+    except Exception:
+        pass  # Logging failure shouldn't break generation
+
+    # Call LLM
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1024,
+        temperature=1.0,  # Higher temperature for variety
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    # Parse JSON from response
+    content = response.content[0].text.strip()
+
+    # Log raw LLM response
+    try:
+        import social_logging
+        social_logging.safe_log_info(
+            "[TOPIC ENGINE] LLM response received",
+            response_length=len(content),
+            raw_response=content
+        )
+    except Exception:
+        pass
+
+    # Remove markdown code blocks if present
+    if content.startswith("```"):
+        # Extract content between ```json and ```
+        match = re.search(r'```(?:json)?\s*([\s\S]*?)```', content)
+        if match:
+            content = match.group(1).strip()
+        else:
+            # Fallback: remove all ```
+            content = content.replace("```json", "").replace("```", "").strip()
+
+    # Parse JSON
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError as e:
+        # Log the error and raise with context
+        raise ValueError(f"Failed to parse JSON from LLM response: {e}\nContent: {content}")
+
+    # Validate and create TopicStrategy
+    topic_strategy = TopicStrategy(**data)
+
+    # Validate topic format - only check "Error → Daño → Solución" format on Tuesday/Thursday
+    day_name = weekday_theme['day_name']
+
+    if day_name in ['Tuesday', 'Thursday']:
+        # Tuesday/Thursday should use "Error → Daño → Solución" format
+        if '→' not in topic_strategy.topic:
+            try:
+                import social_logging
+                social_logging.safe_log_warning(
+                    f"[TOPIC ENGINE] {day_name} topic missing '→' separators - should use 'Error → Daño → Solución' format",
+                    topic=topic_strategy.topic,
+                    day=day_name
+                )
+            except Exception:
+                pass
+        elif not validate_topic_format(topic_strategy.topic):
+            try:
+                import social_logging
+                social_logging.safe_log_warning(
+                    f"[TOPIC ENGINE] {day_name} topic format validation failed - expected 'Error → Daño → Solución'",
+                    topic=topic_strategy.topic,
+                    day=day_name
+                )
+            except Exception:
+                pass
+    else:
+        # Other days should NOT use "Error → Daño → Solución" format
+        if '→' in topic_strategy.topic and topic_strategy.topic.count('→') == 2:
+            try:
+                import social_logging
+                social_logging.safe_log_warning(
+                    f"[TOPIC ENGINE] {day_name} topic should NOT use 'Error → Daño → Solución' format - use descriptive title instead",
+                    topic=topic_strategy.topic,
+                    day=day_name
+                )
+            except Exception:
+                pass
+
+    # Log parsed result
+    try:
+        import social_logging
+        social_logging.safe_log_info(
+            "[TOPIC ENGINE] Topic generated successfully",
+            topic=topic_strategy.topic,
+            angle=topic_strategy.angle,
+            urgency=topic_strategy.urgency_level,
+            audience=topic_strategy.target_audience
+        )
+    except Exception:
+        pass
+
+    return topic_strategy
+
+
+def validate_topic_format(topic: str) -> bool:
+    """
+    Validate that topic follows required format.
+
+    Args:
+        topic: Topic string
+
+    Returns:
+        True if valid format, False otherwise
+    """
+    # Check for "→" separators (viral format)
+    if '→' in topic:
+        parts = topic.split('→')
+        if len(parts) == 3:
+            # Valid: "Error → Daño → Solución"
+            return all(part.strip() for part in parts)
+
+    # Also allow short descriptive titles (for educational days)
+    # If no "→", it should be a reasonable length title
+    if len(topic) >= 10 and len(topic) <= 150:
+        return True
+
+    return False

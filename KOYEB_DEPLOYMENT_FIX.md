@@ -66,3 +66,35 @@ All core functionality is preserved:
 - `main.py` ← **Added health endpoint**
 
 The deployment should now succeed on Koyeb! 🎉
+
+---
+
+## Why does Koyeb keep taking my app down?
+
+It’s usually **not** image size (you’re under 2GB). Two things are much more likely:
+
+### 1. **Scale-to-zero (Free tier)**
+
+On the **Free Instance**, Koyeb **stops your app after 1 hour with no traffic**. The next request triggers a cold start (slow, sometimes timeout). So the app isn’t “broken” — it’s sleeping.
+
+**What to do:**
+- **Accept it**: Use the app; it wakes on the first request (may take 30–60+ seconds).
+- **Keep it warm**: Use a cron (e.g. UptimeRobot, cron-job.org) to hit `/health` every 30–45 minutes so it never goes idle for 1 hour.
+- **Upgrade**: On a paid plan you can turn off scale-to-zero so the instance stays running.
+
+### 2. **Out-of-memory (OOM) on Free Instance**
+
+The **Free Instance has 512 MB RAM and 0.1 vCPU**. Your stack (FastAPI, gunicorn, SQLAlchemy, Anthropic, social routes, etc.) can exceed 512 MB at startup or under load. If the process is killed, the instance goes **Unhealthy** and Koyeb may restart or stop it.
+
+**What to do:**
+- **Upgrade instance**: On a paid plan, use at least **eco-small** (1 GB RAM) or **eco-micro** (512 MB but more predictable). In the Koyeb dashboard: Service → Settings → Instance type.
+- **Reduce startup memory**: RAG/Pinecone/llama-index are already lazy-loaded. You could lazy-load the social router so Anthropic isn’t imported until a social endpoint is hit (more involved).
+
+### Summary
+
+| Cause              | Symptom                         | Fix |
+|--------------------|----------------------------------|-----|
+| Scale-to-zero      | App “down” after ~1 h no traffic | Keep-alive pings to `/health` or paid plan |
+| OOM (512 MB)       | Crashes, unhealthy, restarts     | Paid plan + eco-small (1 GB) or larger     |
+
+**Recommendation:** If you need the app to stay up and respond quickly, use a **paid plan** and set the instance type to **eco-small** (1 GB RAM) and disable scale-to-zero. That’s the most reliable fix for “Koyeb keeps taking it down.”
