@@ -452,8 +452,9 @@ class SocialGenResponse(BaseModel):
     # Viral angle fields (from pre-strategy phase)
     viral_angle: Optional[Dict[str, str]] = None # Viral hook data: hook_type, primary_trigger, hook_sentence, visual_concept, curiosity_gap
     suggested_hashtags: Optional[List[str]] = None  # §5: 5-8 hashtags from content phase
-    # Multiple posts support (e.g., Monday generates 2 posts)
-    second_post: Optional['SocialGenResponse'] = None  # Optional second post (for days that generate multiple posts)
+    # Multiple posts support (e.g., Monday generates 2 posts, Saturday generates 3 posts)
+    second_post: Optional['SocialGenResponse'] = None  # Optional second post (for days that generate 2 posts like Monday)
+    additional_posts: Optional[List['SocialGenResponse']] = None  # Optional additional posts (for days that generate 3+ posts like Saturday)
 
 # Update forward references for Pydantic v2
 SocialGenResponse.model_rebuild()
@@ -1334,6 +1335,157 @@ def generate_with_new_pipeline(
         )
 
     # ========================================================================
+    # STEP 5.6: GENERATE MULTIPLE POSTS (FOR SATURDAY - 3 SECTOR POSTS)
+    # ========================================================================
+
+    additional_posts_responses = None
+    if weekday_theme.get('generate_multiple_posts') and weekday_theme.get('sector_posts'):
+        social_logging.safe_log_info(
+            "[NEW PIPELINE - STEP 5.6] Generating multiple sector posts for Saturday",
+            user_id=user_id,
+            num_sectors=len(weekday_theme['sector_posts'])
+        )
+
+        additional_posts_responses = []
+        sector_posts = weekday_theme['sector_posts']
+
+        for idx, sector_config in enumerate(sector_posts):
+            sector = sector_config.get('sector', f'sector_{idx}')
+            social_logging.safe_log_info(
+                f"[NEW PIPELINE - STEP 5.6] Generating post for sector: {sector}",
+                user_id=user_id,
+                sector=sector
+            )
+
+            # Generate topic for this sector
+            sector_topic_strategy = social_topic_engine.generate_topic_strategy(
+                client=client,
+                date_str=payload.date,
+                weekday_theme=sector_config,  # Use sector-specific config
+                recent_topics=recent_topics,
+                user_suggested_topic=None,  # No user suggestion for sector posts
+                is_second_post=True  # Flag to indicate this is a sector-specific post
+            )
+
+            social_logging.safe_log_info(
+                f"[NEW PIPELINE - STEP 5.6] {sector.capitalize()} topic generated",
+                topic=sector_topic_strategy.topic
+            )
+
+            # Generate strategy for sector post
+            sector_content_strategy = social_strategy_engine.generate_content_strategy(
+                client=client,
+                topic_strategy=sector_topic_strategy,
+                weekday_theme=sector_config,  # Use sector-specific config
+                recent_channels=recent_channels
+            )
+
+            social_logging.safe_log_info(
+                f"[NEW PIPELINE - STEP 5.6] {sector.capitalize()} strategy generated",
+                post_type=sector_content_strategy.post_type,
+                channel=sector_content_strategy.channel
+            )
+
+            # Sector posts don't need products (educational only)
+            sector_product_details = None
+            sector_selected_product_id = None
+            sector_selected_category = None
+
+            # Generate content for sector post
+            sector_content_data = social_content_engine.generate_content(
+                client=client,
+                topic_strategy=sector_topic_strategy,
+                content_strategy=sector_content_strategy,
+                weekday_theme=sector_config,
+                product_details=None
+            )
+
+            social_logging.safe_log_info(
+                f"[NEW PIPELINE - STEP 5.6] {sector.capitalize()} content generated",
+                has_caption=bool(sector_content_data.get("caption"))
+            )
+
+            # Save sector post to database
+            sector_formatted_content = {
+                "caption": sector_content_data.get("caption", ""),
+                "image_prompt": sector_content_data.get("image_prompt", ""),
+                "cta": sector_content_data.get("cta", ""),
+                "suggested_hashtags": sector_content_data.get("suggested_hashtags", []),
+                "posting_time": sector_content_data.get("posting_time"),
+                "notes": sector_content_data.get("notes", ""),
+                "channel": sector_content_data.get("channel"),
+                "needs_music": sector_content_data.get("needs_music", False),
+                "selected_category": sector_selected_category,
+                "pipeline_version": "multi_step_v1",
+                "is_sector_post": True,
+                "sector": sector,
+                "post_theme": sector_config.get('theme', f'{sector} post')
+            }
+
+            sector_normalized_topic = social_topic.normalize_topic(sector_topic_strategy.topic)
+            sector_topic_hash = social_topic.compute_topic_hash(sector_normalized_topic)
+
+            sector_db_post = SocialPost(
+                date_for=target_date,
+                caption=sector_content_data.get("caption", ""),
+                image_prompt=sector_content_data.get("image_prompt", ""),
+                topic=sector_normalized_topic,
+                topic_hash=sector_topic_hash,
+                problem_identified=sector_topic_strategy.problem_identified,
+                post_type=sector_content_strategy.post_type,
+                content_tone=sector_content_strategy.tone,
+                channel=sector_content_strategy.channel,
+                selected_product_id=None,
+                formatted_content=sector_formatted_content,
+                created_at=datetime.now()
+            )
+
+            db.add(sector_db_post)
+            db.commit()
+            db.refresh(sector_db_post)
+
+            sector_saved_post_id = sector_db_post.id
+            sector_formatted_content["id"] = str(sector_saved_post_id)
+            sector_db_post.formatted_content = sector_formatted_content
+            db.commit()
+
+            social_logging.safe_log_info(
+                f"[NEW PIPELINE - STEP 5.6] {sector.capitalize()} post saved successfully",
+                post_id=sector_saved_post_id,
+                user_id=user_id
+            )
+
+            # Build sector post response
+            sector_post_response = SocialGenResponse(
+                caption=sector_content_data.get("caption", ""),
+                image_prompt=sector_content_data.get("image_prompt", ""),
+                posting_time=sector_content_data.get("posting_time"),
+                notes=sector_content_data.get("notes", ""),
+                format=sector_content_data.get("format"),
+                cta=sector_content_data.get("cta", ""),
+                selected_product_id="",
+                selected_category="",
+                selected_product_details=None,
+                post_type=sector_content_strategy.post_type,
+                content_tone=sector_content_strategy.tone,
+                channel=sector_content_data.get("channel") or sector_content_strategy.channel,
+                carousel_slides=sector_content_data.get("carousel_slides"),
+                needs_music=sector_content_data.get("needs_music", False),
+                topic=sector_topic_strategy.topic,
+                problem_identified=sector_topic_strategy.problem_identified,
+                saved_post_id=sector_saved_post_id,
+                viral_angle=None,
+                suggested_hashtags=sector_content_data.get("suggested_hashtags", [])
+            )
+
+            additional_posts_responses.append(sector_post_response)
+
+        social_logging.safe_log_info(
+            f"[NEW PIPELINE - STEP 5.6] All {len(additional_posts_responses)} sector posts generated",
+            user_id=user_id
+        )
+
+    # ========================================================================
     # STEP 6: BUILD RESPONSE
     # ========================================================================
 
@@ -1359,7 +1511,8 @@ def generate_with_new_pipeline(
         saved_post_id=saved_post_id,
         viral_angle=None,  # Not used in new pipeline
         suggested_hashtags=content_data.get("suggested_hashtags", []),
-        second_post=second_post_response  # Include second post if generated
+        second_post=second_post_response,  # Include second post if generated (Monday)
+        additional_posts=additional_posts_responses  # Include additional posts if generated (Saturday)
     )
 
 

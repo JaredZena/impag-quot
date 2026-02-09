@@ -214,7 +214,7 @@ WEEKDAY_THEMES = {
     'Saturday': {
         'day_name': 'Saturday',
         'theme': '👩‍🌾 Producer Segment Focus',
-        'content_type': 'Rotate content for: forestry 🌲, plant 🌾, animal 🐄 producers',
+        'content_type': 'Generate content for ALL 3 sectors: forestry 🌲, plant 🌾, animal 🐄',
         'primary_tone': 'Educational',
         'alternative_tones': ['Technical', 'Practical', 'Humorous'],
         'recommended_post_types': [
@@ -226,7 +226,88 @@ WEEKDAY_THEMES = {
             'Recordatorio de servicio'
         ],
         'product_strategy': 'educational_only',  # No products
-        'sector_rotation': 'rotate'  # Will be determined by week number
+        'sector_rotation': None,  # No rotation - generate all 3 sectors
+        'generate_multiple_posts': True,  # Saturday generates 3 posts (one per sector)
+        'sector_posts': [
+            {
+                'day_name': 'Saturday',
+                'sector': 'forestry',
+                'theme': '🌲 Forestal - Bosques y Viveros',
+                'content_type': 'Sector-specific problems, solutions, and technical guidance for forestry producers',
+                'primary_tone': 'Technical',
+                'alternative_tones': ['Practical', 'Educational', 'Problem-Solving'],
+                'recommended_post_types': [
+                    'Pro Tip Forestal',
+                    'FAQ Forestry',
+                    'Tutorial forestal',
+                    'Problema y Solución Forestal'
+                ],
+                'product_strategy': 'educational_only',
+                'emotional_angle': 'Long-term vision and patience - forestry as generational investment',
+                'problem_focus': [
+                    'Fire prevention and management (Jan-Jun critical)',
+                    'Reforestation survival rates',
+                    'Nursery water management',
+                    'Pest control in pine/oak systems',
+                    'Low diversification and value-added products',
+                    'Seasonal supply disruption to sawmills'
+                ],
+                'technical_depth': 'High - include specific species (pine, oak), technical practices, and regional data',
+                'durango_context': 'Durango: 4.0M hectares forest use, ~4.17M m³ pine + 0.80M m³ oak annually, leader in sawmilling ($1,512M MX)'
+            },
+            {
+                'day_name': 'Saturday',
+                'sector': 'plant',
+                'theme': '🌾 Plantas y Cultivos - Agricultura Vegetal',
+                'content_type': 'Sector-specific problems, solutions, and technical guidance for crop producers',
+                'primary_tone': 'Practical',
+                'alternative_tones': ['Technical', 'Educational', 'Problem-Solving'],
+                'recommended_post_types': [
+                    'Pro Tip Agrícola',
+                    'FAQ Cultivos',
+                    'Tutorial cultivos',
+                    'Problema y Solución Agrícola'
+                ],
+                'product_strategy': 'educational_only',
+                'emotional_angle': 'Seasonal anxiety and timing precision - rainfed dependence as existential risk',
+                'problem_focus': [
+                    'Rainfed dependence (79% temporal) and drought risk',
+                    'Low bean yields despite large hectares',
+                    'Protected agriculture scale-up challenges',
+                    'Soil fertility loss (34% of producers)',
+                    'High input costs (94.9% dominant problem)',
+                    'Irrigation efficiency for forage crops'
+                ],
+                'technical_depth': 'High - include crop calendars, yield data, regional challenges (frijol 301k ha, maíz forrajero 2.3M t)',
+                'durango_context': 'Durango: 79% rainfed (746k ha), forage-dominant (91% tonnage), beans low yield, Primavera-Verano cycle critical'
+            },
+            {
+                'day_name': 'Saturday',
+                'sector': 'animal',
+                'theme': '🐄 Ganadería - Producción Animal',
+                'content_type': 'Sector-specific problems, solutions, and technical guidance for livestock/dairy producers',
+                'primary_tone': 'Practical',
+                'alternative_tones': ['Technical', 'Educational', 'Problem-Solving'],
+                'recommended_post_types': [
+                    'Pro Tip Ganadero',
+                    'FAQ Ganadería',
+                    'Tutorial ganadero',
+                    'Problema y Solución Ganadera'
+                ],
+                'product_strategy': 'educational_only',
+                'emotional_angle': 'Daily grind and economics - dairy/livestock as operating system, not just animals',
+                'problem_focus': [
+                    'Feed cost management (forage efficiency)',
+                    'Heat stress and summer dairy seasonality',
+                    'Water systems for livestock',
+                    'Dairy processing vertical integration opportunities',
+                    'Manure management and waste-to-value',
+                    'Animal health preventive care'
+                ],
+                'technical_depth': 'High - include herd economics, milk production data, feed ratios, Comarca Lagunera context',
+                'durango_context': 'Durango: 1.58M cattle, 5.6M liters milk/day, 3rd nationally (11.4%), Comarca Lagunera anchor, forage-livestock system'
+            }
+        ]
     },
     'Sunday': {
         'day_name': 'Sunday',

@@ -194,7 +194,178 @@ Hay ventas que dejan la mano vacía... y el corazón apretado."
 - Sin CTA comercial - el CTA es emocional ("solo quien vive del campo entiende")
 - Hashtags simples: #ElCampo #VidaRural #Rancho #Agricultura #Productor
 
-IMPORTANTE - REGLAS DE CAPTION:
+IMPORTANTE - REGLAS DE CAPTION:"""
+
+    # Check if this is a Saturday sector-specific post
+    elif weekday_theme and weekday_theme.get('sector'):
+        sector = weekday_theme.get('sector', 'general')
+        emotional_angle = weekday_theme.get('emotional_angle', '')
+        problem_focus = weekday_theme.get('problem_focus', [])
+        technical_depth = weekday_theme.get('technical_depth', '')
+        durango_context = weekday_theme.get('durango_context', '')
+
+        prompt += f"""TU TAREA - POST SECTOR-ESPECÍFICO DE {sector.upper()} ({content_strategy.tone}):
+Este es contenido TÉCNICO-PRÁCTICO para productores de {sector}.
+
+🎯 ÁNGULO EMOCIONAL: {emotional_angle}
+
+📊 CONTEXTO DURANGO - {sector.upper()}:
+{durango_context}
+
+🔧 PROBLEMAS PRIORITARIOS A ABORDAR:
+"""
+        for idx, problem in enumerate(problem_focus[:6], 1):
+            prompt += f"{idx}. {problem}\n"
+
+        prompt += f"""
+📝 PROFUNDIDAD TÉCNICA: {technical_depth}
+
+⚠️ FORMATO CRÍTICO PARA SÁBADO SECTOR-ESPECÍFICO:
+- Caption DEBE ser técnico pero ACCESIBLE
+- Incluye DATOS REGIONALES de Durango (usa el contexto arriba)
+- Enfoque práctico: qué hacer, cómo hacerlo, cuándo
+- Números concretos: hectáreas, volúmenes, porcentajes, costos
+- Considera estacionalidad si es relevante
+- NO vendas productos - esto es educativo
+
+"""
+
+        if sector == 'forestry':
+            prompt += """🌲 CONTENIDO FORESTAL - GUÍA ESPECÍFICA:
+- Habla de especies reales: pino, encino, especies nativas
+- Menciona prácticas específicas: reforestación, prevención incendios, manejo
+- Incluye temporadas: riesgo incendios (Ene-Jun, crítico Abr-Jun)
+- Aborda economía: aserrado, productos valor agregado
+- Tono: Largo plazo, paciencia, inversión generacional
+
+Estructura sugerida:
+1. PROBLEMA: [Identifica problema forestal específico]
+2. CONTEXTO DURANGO: [Usa datos regionales de arriba]
+3. SOLUCIÓN TÉCNICA: [Pasos prácticos y accionables]
+4. NÚMEROS REALES: [Datos de supervivencia, volúmenes, costos]
+5. CTA EDUCATIVO: "¿Tu vivero enfrenta este problema? Comparte tu experiencia"
+
+✅ Ejemplo de estructura:
+"🌲 Supervivencia en reforestación con pino nativo en Durango
+
+El problema: Tasas de supervivencia < 60% en reforestación.
+Durango produce ~4.17M m³ de pino anualmente, pero la regeneración no sigue el ritmo.
+
+Factores críticos de supervivencia:
+1. CALIDAD DE PLANTA: Altura mínima 25cm, raíz bien desarrollada
+2. ÉPOCA DE PLANTACIÓN: Antes de temporada de lluvias (Mayo-Junio)
+3. PREPARACIÓN DE SITIO: Limpieza de competencia, cepa 30x30x30 cm
+4. AGUA INICIAL: Riego en primeras 2 semanas crítico
+
+En viveros forestales de Durango, plantas con estas prácticas logran supervivencia >75% primer año.
+
+Temporada crítica: Abril-Junio (incendios), plantar antes o después.
+
+¿Qué técnicas te han funcionado mejor en reforestación? 💬
+
+#Forestal #Reforestación #Durango #Viveros #PinoNativo"
+
+"""
+        elif sector == 'plant':
+            prompt += """🌾 CONTENIDO AGRÍCOLA - GUÍA ESPECÍFICA:
+- Habla de cultivos reales de Durango: frijol, maíz forrajero, alfalfa
+- Menciona desafío temporal (79% rainfed) - esto es CRÍTICO
+- Incluye calendarios: ciclo Primavera-Verano, ventanas de siembra
+- Aborda economía: costos altos (94.9%), rendimientos, ROI
+- Tono: Ansiedad estacional, precisión de timing, dependencia climática
+
+Estructura sugerida:
+1. PROBLEMA: [Identifica problema agrícola específico]
+2. CONTEXTO DURANGO: [Usa datos regionales de arriba - 79% temporal]
+3. SOLUCIÓN TÉCNICA: [Pasos con calendario y timing preciso]
+4. NÚMEROS REALES: [Rendimientos, hectáreas, costos]
+5. CTA EDUCATIVO: "¿Cómo manejas este problema en tu parcela?"
+
+✅ Ejemplo de estructura:
+"🌾 Mejorar rendimiento en frijol temporal sin más hectáreas
+
+El problema: Durango tiene 301,375 ha de frijol pero rendimientos bajos.
+Con 79% de superficie temporal (dependiente de lluvia), cada gota cuenta.
+
+Estrategia para máximo rendimiento:
+
+1. SEMILLA CERTIFICADA: +20-30% rendimiento vs. semilla guardada
+   Costo: $800-1,200/ha vs pérdida de 200-300 kg/ha
+
+2. VENTANA DE SIEMBRA CRÍTICA:
+   - Temporal: inicio de lluvias regulares (típicamente finales de Junio)
+   - Límite: 25 de Julio (después, riesgo de heladas tempranas)
+
+3. DENSIDAD CORRECTA: 120,000-140,000 plantas/ha
+   - Muy denso: competencia por agua (fatal en temporal)
+   - Muy ralo: desperdicia potencial
+
+4. FERTILIZACIÓN MÍNIMA: 40-20-00 (N-P-K)
+   - 94.9% de productores reportan costos altos
+   - Fertilizar solo si análisis de suelo lo justifica
+
+Con estas prácticas, productores en temporal logran 1.2-1.5 t/ha vs 0.8 t/ha promedio.
+
+El temporal no cambia, pero tus prácticas sí. 💧
+
+#Frijol #AgriculturaTemporal #Durango #Rendimiento"
+
+"""
+        elif sector == 'animal':
+            prompt += """🐄 CONTENIDO GANADERO - GUÍA ESPECÍFICA:
+- Habla de realidad láctea/ganadera: hato, producción, forrajes
+- Menciona sistema integrado: forrajes (91% tonelaje) alimentan ganado
+- Incluye economía: costos de alimentación, conversión, leche
+- Aborda Comarca Lagunera (contexto regional crítico)
+- Tono: Operativo diario, economía de conversión, eficiencia
+
+Estructura sugerida:
+1. PROBLEMA: [Identifica problema ganadero específico]
+2. CONTEXTO DURANGO: [Usa datos regionales - 5.6M litros/día, Comarca Lagunera]
+3. SOLUCIÓN TÉCNICA: [Pasos con datos de conversión/eficiencia]
+4. NÚMEROS REALES: [Litros, conversión, costos, ROI]
+5. CTA EDUCATIVO: "¿Qué te funciona en tu operación?"
+
+✅ Ejemplo de estructura:
+"🐄 Optimización de forraje: conversión eficiente en producción láctea
+
+El problema: Forrajes son 91% del tonelaje agrícola en Durango.
+Con 5.6M litros/día de producción láctea, eficiencia de conversión = rentabilidad.
+
+Estrategia de alimentación eficiente:
+
+1. BALANCE MAÍZ FORRAJERO + ALFALFA:
+   - Maíz: energía (2.3M toneladas producidas en Durango)
+   - Alfalfa: proteína (2.5M toneladas, forraje premium)
+   - Proporción óptima: 60% maíz / 40% alfalfa (ajustar según análisis)
+
+2. CONVERSIÓN ESPERADA:
+   - Buena conversión: 1.3-1.5 kg materia seca → 1 litro leche
+   - Mala conversión: >1.8 kg materia seca → 1 litro leche
+   - Costo diferencial: $2-3/litro en forraje
+
+3. MANEJO ESTACIONAL (CRÍTICO):
+   - Verano: mayor producción láctea (estacionalidad nacional)
+   - Verano también: estrés térmico reduce consumo
+   - Solución: sombra, agua fresca, ajustar horarios alimentación
+
+4. COMARCA LAGUNERA CONTEXT:
+   - 21.7% producción nacional láctea
+   - Sistema integrado: forage → dairy → processing (Grupo Lala)
+
+Con conversión eficiente, operaciones lácteas mejoran margen $1.50-2.50/litro.
+
+En ganadería, los detalles operativos hacen la diferencia. 📊
+
+#Ganadería #Lechería #Forrajes #Durango #ComarcaLagunera"
+
+"""
+
+        prompt += """
+IMPORTANTE - REGLAS DE CAPTION SECTOR-ESPECÍFICO:"""
+
+    else:
+        prompt += """IMPORTANTE - REGLAS DE CAPTION:
 - Caption debe respetar el límite de caracteres del canal
 - Para canales visuales (wa-status, tiktok, reels, stories): caption CORTO, contenido en imagen
 - Para canales de texto (fb-post, ig-post): caption DEBE ser LARGO y SUSTANCIAL

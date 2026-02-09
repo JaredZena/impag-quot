@@ -217,7 +217,112 @@ Genera un tema apropiado para {day_name} ({weekday_theme['theme']}).
   * "Qué plantar ahora para cosechar en 90 días"
 """
         elif day_name == 'Saturday':
-            prompt += """- Usa un título específico del sector (NO usar "Error → Daño → Solución")
+            # Check if this is a sector-specific post (forestry, plant, or animal)
+            sector = weekday_theme.get('sector', 'general')
+
+            if sector == 'forestry':
+                prompt += """- Este es un post SECTOR-ESPECÍFICO para FORESTAL 🌲
+- NO usar "Error → Daño → Solución" - usa título técnico-práctico
+- Enfoque: Problemas reales que enfrentan productores forestales/viveros
+
+🌲 CONTEXTO DURANGO FORESTAL (USA ESTOS DATOS):
+- 4.0 millones de hectáreas con uso forestal (más que agrícola)
+- Producción: ~4.17M m³ pino + 0.80M m³ encino anualmente
+- Líder nacional en aserrado ($1,512M MX en producción bruta)
+- Riesgo de incendios: Jan-Jun (crítico Abr-Jun)
+- Bajo valor agregado (oportunidad en productos diversificados)
+
+🎯 PROBLEMAS FORESTALES PRIORITARIOS (elige UNO):
+1. Prevención y manejo de incendios forestales (temporada crítica)
+2. Tasas de supervivencia en reforestación con especies nativas
+3. Gestión de agua para viveros forestales
+4. Control de plagas en sistemas pino/encino
+5. Baja diversificación de productos (más allá de madera aserrada)
+6. Interrupción estacional de suministro a aserraderos
+
+✅ EJEMPLOS DE TEMAS CORRECTOS:
+- "Prevención de incendios forestales: checklist operativo abril-junio"
+- "Cómo mejorar supervivencia en reforestación con pino nativo"
+- "Sistemas de riego para viveros forestales en zonas semi-áridas"
+- "Control de descortezadores en pino: identificación temprana"
+- "Más allá del aserrado: productos forestales de valor agregado"
+
+⚠️ IMPORTANTE:
+- Usa datos técnicos reales (especies, volúmenes, temporadas)
+- Enfoque práctico y accionable para productores forestales
+- Considera estacionalidad (incendios, corte, transporte)
+"""
+            elif sector == 'plant':
+                prompt += """- Este es un post SECTOR-ESPECÍFICO para PLANTAS/CULTIVOS 🌾
+- NO usar "Error → Daño → Solución" - usa título técnico-práctico
+- Enfoque: Problemas reales que enfrentan agricultores de cultivos
+
+🌾 CONTEXTO DURANGO AGRÍCOLA (USA ESTOS DATOS):
+- 79% superficie temporal/rainfed (746k ha) - CRÍTICO
+- Cultivos principales: frijol (301k ha), maíz forrajero (2.3M t), alfalfa (2.5M t)
+- Frijol: grandes hectáreas pero rendimientos bajos (problema estructural)
+- Ciclo Primavera-Verano domina (depende de lluvia)
+- Agricultura protegida: 389 ha (mallasombra 39.7%, invernaderos 36.4%)
+- 94.9% productores reportan costos altos como problema #1
+
+🎯 PROBLEMAS AGRÍCOLAS PRIORITARIOS (elige UNO):
+1. Dependencia de temporal (79%) y riesgo de sequía
+2. Bajos rendimientos en frijol a pesar de área grande
+3. Escalamiento de agricultura protegida
+4. Pérdida de fertilidad del suelo (34% de productores)
+5. Costos altos de insumos (94.9% problema dominante)
+6. Eficiencia de riego para forrajes (maíz, alfalfa)
+
+✅ EJEMPLOS DE TEMAS CORRECTOS:
+- "Frijol temporal: cómo mejorar rendimiento sin más hectáreas"
+- "Mallasombra vs invernadero: ROI real en cultivos protegidos"
+- "Calendario preciso de siembra primavera-verano para Durango"
+- "Manejo de fertilidad en suelos temporaleros: prácticas de bajo costo"
+- "Riego eficiente en alfalfa: reducir evaporación y maximizar cortes"
+
+⚠️ IMPORTANTE:
+- Enfatiza dependencia temporal (79%) - esto define todo
+- Usa datos reales de cultivos regionales (frijol, maíz, alfalfa)
+- Considera ciclo Primavera-Verano (lluvia domina calendario)
+- Aborda costos altos - problema #1 reportado por productores
+"""
+            elif sector == 'animal':
+                prompt += """- Este es un post SECTOR-ESPECÍFICO para GANADERÍA/ANIMAL 🐄
+- NO usar "Error → Daño → Solución" - usa título técnico-práctico
+- Enfoque: Problemas reales que enfrentan ganaderos y productores lácteos
+
+🐄 CONTEXTO DURANGO GANADERO (USA ESTOS DATOS):
+- 1.58 millones de cabezas de ganado
+- Producción láctea: ~5.6M litros/día (2.0 mil millones litros/año)
+- 3er lugar nacional en leche (11.4% del total)
+- Comarca Lagunera: 21.7% de producción nacional láctea
+- Sistema forage-livestock: 91% tonelaje agrícola es forraje
+- Infraestructura: Grupo Lala oficinas corporativas en Gómez Palacio
+
+🎯 PROBLEMAS GANADEROS PRIORITARIOS (elige UNO):
+1. Gestión de costos de alimentación (eficiencia en forrajes)
+2. Estrés térmico y estacionalidad láctea (volumen en verano)
+3. Sistemas de agua para ganado (eficiencia y prevención de fugas)
+4. Oportunidades de integración vertical láctea
+5. Manejo de estiércol y valorización de residuos
+6. Salud animal preventiva y vacunación
+
+✅ EJEMPLOS DE TEMAS CORRECTOS:
+- "Optimización de forraje: maíz + alfalfa para máxima conversión láctea"
+- "Manejo de estrés térmico en verano: mantener producción láctea"
+- "Sistemas de agua para ganado: prevenir fugas y reducir costos"
+- "Oportunidades en lácteos: más allá de vender leche cruda"
+- "Biodigestores en ganadería: estiércol → energía y fertilizante"
+
+⚠️ IMPORTANTE:
+- Sistema forage-livestock es INTEGRADO (forrajes alimentan ganado)
+- Estacionalidad láctea: verano tiene más volumen
+- Comarca Lagunera es contexto regional crítico
+- Enfoque en economía operativa (costos, eficiencia, conversión)
+"""
+            else:
+                # Fallback for general Saturday (should not happen with new config)
+                prompt += """- Usa un título específico del sector (NO usar "Error → Daño → Solución")
 - Enfoque: Información relevante para el sector del día (forestry/plant/animal)
 - Ejemplos CORRECTOS:
   * "Manejo de reforestación con especies nativas: supervivencia real"
