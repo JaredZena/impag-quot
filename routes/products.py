@@ -96,7 +96,6 @@ class SupplierProductCreate(SupplierProductBase):
 class SupplierProductUpdate(BaseModel):
     # Supplier-specific fields
     supplier_id: Optional[int] = None
-    product_id: Optional[int] = None  # Keep for now (will be removed in Phase 2)
     supplier_sku: Optional[str] = None
     cost: Optional[float] = None
     default_margin: Optional[float] = None  # Margin percentage (e.g., 30.0 = 30%)
