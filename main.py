@@ -14,6 +14,7 @@ from routes.kits import router as kits_router
 from routes.balance import router as balance_router
 from routes.quotation_history import router as quotation_history_router
 from routes.social import router as social_router
+from routes.files import router as files_router
 from auth import verify_google_token
 
 # Lazy import for RAG system to ensure route registration even if import fails
@@ -52,6 +53,7 @@ app.include_router(kits_router)
 app.include_router(balance_router)
 app.include_router(quotation_history_router)
 app.include_router(social_router, prefix="/social", tags=["Social"])
+app.include_router(files_router)
 
 class Message(BaseModel):
     role: str  # 'user' or 'assistant'

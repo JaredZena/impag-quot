@@ -272,6 +272,29 @@ class SocialPost(Base):
     topic_hash = Column(String(64), nullable=False, index=True) # SHA256 hash of normalized topic (NOT NULL after migration) - used to detect same topic on same date
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+class FileMetadata(Base):
+    __tablename__ = "file_metadata"
+
+    id = Column(Integer, primary_key=True, index=True)
+    file_key = Column(String(500), nullable=False, unique=True)
+    original_filename = Column(String(500), nullable=False)
+    content_type = Column(String(100), nullable=False)
+    file_size_bytes = Column(Integer, nullable=False)
+
+    category = Column(String(50), nullable=False, default='general')
+    description = Column(Text, nullable=True)
+    tags = Column(String(500), nullable=True)
+
+    supplier_id = Column(Integer, ForeignKey("supplier.id", ondelete="SET NULL"), nullable=True)
+    quotation_id = Column(Integer, ForeignKey("quotation.id", ondelete="SET NULL"), nullable=True)
+    task_id = Column(Integer, nullable=True)  # FK constraint added at DB level (task table is in impag-tasks)
+
+    uploaded_by_email = Column(String(255), nullable=False)
+    uploaded_by_name = Column(String(200), nullable=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_updated = Column(DateTime(timezone=True), onupdate=func.now())
+
 # Parse the database URL to get the endpoint ID
 parsed_url = urlparse(database_url)
 endpoint_id = parsed_url.hostname.split('.')[0]  # Get the endpoint ID from the hostname
