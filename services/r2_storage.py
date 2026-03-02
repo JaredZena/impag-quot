@@ -3,11 +3,20 @@ from botocore.config import Config
 from config import r2_account_id, r2_access_key_id, r2_secret_access_key, r2_bucket_name
 
 VALID_CATEGORIES = {
-    'customer-quotation',
-    'supplier-quotation',
-    'nota-de-venta',
+    'cotizacion',
+    'nota',
+    'factura',
+    'comprobante-de-pago',
     'project-image',
-    'general',
+    'packaging-logistics',
+    'whatsapp-chat',
+    'ficha-tecnica',
+    'imagen-de-producto',
+    'infografia',
+    'article',
+    'control-de-ventas',
+    'catalogo',
+    'estado-de-cuenta',
 }
 
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB
@@ -50,6 +59,21 @@ def generate_presigned_download_url(file_key: str, expires_in: int = 900) -> str
     return client.generate_presigned_url(
         'get_object',
         Params={'Bucket': r2_bucket_name, 'Key': file_key},
+        ExpiresIn=expires_in,
+    )
+
+
+def generate_presigned_view_url(file_key: str, content_type: str, expires_in: int = 900) -> str:
+    """Generate a presigned URL for inline viewing (Content-Disposition: inline)."""
+    client = get_r2_client()
+    return client.generate_presigned_url(
+        'get_object',
+        Params={
+            'Bucket': r2_bucket_name,
+            'Key': file_key,
+            'ResponseContentDisposition': 'inline',
+            'ResponseContentType': content_type,
+        },
         ExpiresIn=expires_in,
     )
 

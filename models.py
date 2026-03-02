@@ -281,7 +281,9 @@ class FileMetadata(Base):
     content_type = Column(String(100), nullable=False)
     file_size_bytes = Column(Integer, nullable=False)
 
-    category = Column(String(50), nullable=False, default='general')
+    category = Column(String(50), nullable=False)
+    subtype = Column(String(50), nullable=True)
+    document_date = Column(Date, nullable=True)
     description = Column(Text, nullable=True)
     tags = Column(String(500), nullable=True)
 
@@ -294,6 +296,57 @@ class FileMetadata(Base):
     archived_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Document processing fields
+    processing_status = Column(String(20), default='pending')  # pending, processing, completed, failed, skipped
+    extracted_text = Column(Text, nullable=True)
+    chunk_count = Column(Integer, default=0)
+    processing_error = Column(Text, nullable=True)
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class DocumentChunk(Base):
+    __tablename__ = "document_chunk"
+
+    id = Column(Integer, primary_key=True, index=True)
+    file_id = Column(Integer, ForeignKey("file_metadata.id", ondelete="CASCADE"), nullable=False)
+    chunk_index = Column(Integer, nullable=False)
+    chunk_text = Column(Text, nullable=False)
+    pinecone_vector_id = Column(String(200), nullable=False, unique=True)
+    token_count = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class LogisticsMetadata(Base):
+    __tablename__ = "logistics_metadata"
+
+    id = Column(Integer, primary_key=True, index=True)
+    file_id = Column(Integer, ForeignKey("file_metadata.id", ondelete="CASCADE"), nullable=False)
+
+    product_name = Column(String(300), nullable=True)
+    quantity = Column(Integer, nullable=True)
+    package_size = Column(String(100), nullable=True)
+    package_type = Column(String(100), nullable=True)
+    weight_kg = Column(Numeric(10, 2), nullable=True)
+    dimensions = Column(String(100), nullable=True)
+
+    origin = Column(String(300), nullable=True)
+    destination = Column(String(300), nullable=True)
+    carrier = Column(String(200), nullable=True)
+    tracking_number = Column(String(200), nullable=True)
+    estimated_delivery = Column(Date, nullable=True)
+
+    cost = Column(Numeric(12, 2), nullable=True)
+    currency = Column(String(3), default='MXN')
+
+    supplier_product_id = Column(Integer, ForeignKey("supplier_product.id", ondelete="SET NULL"), nullable=True)
+    supplier_id = Column(Integer, ForeignKey("supplier.id", ondelete="SET NULL"), nullable=True)
+
+    extraction_confidence = Column(String(20), default='medium')
+    raw_extraction = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_updated = Column(DateTime(timezone=True), onupdate=func.now())
+
 
 # Parse the database URL to get the endpoint ID
 parsed_url = urlparse(database_url)

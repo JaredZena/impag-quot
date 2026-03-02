@@ -1,11 +1,14 @@
 from fastapi import HTTPException, Depends
-from fastapi.security import HTTPBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from google.oauth2 import id_token
 from google.auth.transport import requests
 import os
 
 # Your Google OAuth Client ID
 GOOGLE_CLIENT_ID = "223254458497-5tllach8urthlqtcau15sr35kaeicaqc.apps.googleusercontent.com"
+
+# Local dev mode: skip auth entirely when DISABLE_AUTH=true
+DISABLE_AUTH = os.getenv("DISABLE_AUTH", "").lower() == "true"
 
 # Allowed emails from environment variable (no fallback)
 def get_allowed_emails():
@@ -20,12 +23,26 @@ def get_allowed_emails():
 
 ALLOWED_EMAILS = get_allowed_emails()
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=not DISABLE_AUTH)
 
-def verify_google_token(token = Depends(security)):
+DEV_USER = {
+    "email": "dev@local.test",
+    "name": "Dev User",
+    "picture": None,
+    "user_id": "dev-local",
+}
+
+def verify_google_token(token: HTTPAuthorizationCredentials | None = Depends(security)):
     """
-    Verify Google OAuth token and check if user is authorized
+    Verify Google OAuth token and check if user is authorized.
+    When DISABLE_AUTH=true, skips all verification and returns a dev user.
     """
+    if DISABLE_AUTH:
+        return DEV_USER
+
+    if token is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     try:
         # Verify the token with Google's servers
         idinfo = id_token.verify_oauth2_token(
@@ -59,4 +76,4 @@ def verify_google_token(token = Depends(security)):
         raise HTTPException(status_code=401, detail="Invalid token")
     except Exception as e:
         # Other errors
-        raise HTTPException(status_code=401, detail="Token verification failed") 
+        raise HTTPException(status_code=401, detail="Token verification failed")
