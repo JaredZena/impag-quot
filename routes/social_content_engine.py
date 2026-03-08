@@ -19,7 +19,8 @@ def generate_content(
     topic_strategy,  # TopicStrategy from Topic Engine
     content_strategy,  # ContentStrategy from Strategy Engine
     product_details: Optional[Dict[str, Any]] = None,
-    weekday_theme: Optional[Dict[str, Any]] = None
+    weekday_theme: Optional[Dict[str, Any]] = None,
+    special_date: Optional[Dict[str, Any]] = None
 ) -> dict:
     """
     Generate content (caption, image_prompt) using LLM.
@@ -120,8 +121,60 @@ ESTRATEGIA:
     # Task instructions
     # Check if this is a "La Vida en el Rancho" post
     is_rancho_post = weekday_theme and weekday_theme.get('theme') == '🌾 La Vida en el Rancho'
+    is_social_celebration = special_date and special_date.get('special_date_type') == 'social'
 
-    if is_rancho_post:
+    if is_social_celebration:
+        special_date_name = special_date['special_date_name']
+        prompt += f"""TU TAREA - POST DE CELEBRACIÓN: {special_date_name.upper()}
+
+Genera una FELICITACIÓN CÁLIDA Y GENUINA. El copy debe sentirse como un mensaje humano de IMPAG, no un artículo.
+
+🎯 ESTRUCTURA DEL CAPTION (sigue este orden):
+1. RECONOCIMIENTO: 1-2 oraciones que celebren a las personas que protagonizan esta fecha, con mención a su rol en el campo
+2. PRESENCIA: Menciona dónde las ves en el trabajo diario (viveros, parcelas, invernaderos, ranchos, empresas agrícolas — elige los que apliquen)
+3. VOZ DE MARCA: "En IMPAG Agricultura Inteligente celebramos su trabajo, su liderazgo y su impacto en la agricultura."
+4. CIERRE EMOTIVO: Una frase poderosa de cierre antes del saludo
+5. SALUDO FINAL: Feliz {special_date_name}
+6. DATOS DE CONTACTO: Web, WhatsApp, Ubicación (ya los tienes arriba)
+7. HASHTAGS: 6-8 relevantes incluyendo #{special_date_name.replace(' ', '')} y #IMPAG
+
+⚠️ REGLAS CRÍTICAS:
+- NO inventes estadísticas ni porcentajes
+- NO menciones productos de IMPAG ni hagas ventas
+- Tono: cálido, orgulloso, cercano — como una empresa que conoce a su comunidad
+- Caption debe ser COMPLETO (no solo el tema): incluye párrafos, saludo y hashtags
+
+✅ EJEMPLO DE ESTRUCTURA (adáptalo, no lo copies):
+"Hoy reconocemos a las mujeres que todos los días trabajan la tierra, producen alimentos y sostienen comunidades rurales en todo México. Su conocimiento, disciplina y visión forman parte esencial del presente y del futuro del campo.
+
+En viveros, parcelas, invernaderos, ranchos y empresas agrícolas, las mujeres impulsan innovación, productividad y sostenibilidad.
+
+En IMPAG Agricultura Inteligente celebramos su trabajo, su liderazgo y su impacto en la agricultura.
+
+Porque detrás de muchos cultivos exitosos hay una mujer tomando decisiones, resolviendo problemas y haciendo que las cosas sucedan.
+
+🌱 Feliz {special_date_name}
+
+📍 Nuevo Ideal, Durango
+🌐 todoparaelcampo.com.mx
+📲 WhatsApp: 677-119-7737
+
+#DiaInternacionalDeLaMujer #MujeresEnElCampo #AgriculturaMexicana #IMPAG"
+
+RESPONDE SOLO CON JSON (sin markdown):
+{{
+  "caption": "caption completo de felicitación con párrafos, saludo, contacto y hashtags",
+  "image_prompt": "PROMPT DETALLADO siguiendo las instrucciones arriba (OBLIGATORIO - nunca null)",
+  "cta": "llamada a la acción celebratoria",
+  "suggested_hashtags": ["#{special_date_name.replace(' ', '')}", "#IMPAG", "#AgriculturaMexicana"],
+  "channel": "{content_strategy.channel}",
+  "needs_music": {str(channel_format.get('needs_music', False)).lower()},
+  "posting_time": "HH:MM (hora sugerida en formato 24h)",
+  "notes": "notas opcionales"
+}}
+"""
+
+    elif is_rancho_post:
         prompt += f"""TU TAREA - POST DE "LA VIDA EN EL RANCHO":
 Este es un post de literatura emocional rural, NO es contenido motivacional tradicional.
 

@@ -1147,7 +1147,8 @@ def generate_with_new_pipeline(
         topic_strategy=topic_strategy,
         content_strategy=content_strategy,
         product_details=product_details,
-        weekday_theme=weekday_theme
+        weekday_theme=weekday_theme,
+        special_date=special_date_info
     )
 
     social_logging.safe_log_info(
