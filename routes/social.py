@@ -644,6 +644,7 @@ def get_special_date_override(dt: datetime) -> Optional[Dict[str, Any]]:
     special_dates = {
         (1, 1): {'name': 'Año Nuevo', 'type': 'holiday'},
         (2, 5): {'name': 'Día de la Constitución', 'type': 'holiday'},
+        (3, 8): {'name': 'Día Internacional de la Mujer', 'type': 'social'},
         (3, 21): {'name': 'Natalicio de Benito Juárez', 'type': 'holiday'},
         (5, 10): {'name': 'Día de las Madres', 'type': 'social'},
         (5, 15): {'name': 'Día del Maestro', 'type': 'social'},
@@ -1012,6 +1013,15 @@ def generate_with_new_pipeline(
         theme=weekday_theme['theme']
     )
 
+    # Check for special date (efeméride) override
+    special_date_info = get_special_date_override(dt)
+    if special_date_info:
+        social_logging.safe_log_info(
+            "[NEW PIPELINE] Special date detected",
+            special_date=special_date_info.get('special_date_name'),
+            special_date_type=special_date_info.get('special_date_type')
+        )
+
     # ========================================================================
     # STEP 1: TOPIC ENGINE - Identify agricultural problems and topic
     # ========================================================================
@@ -1032,7 +1042,8 @@ def generate_with_new_pipeline(
         date_str=payload.date,
         weekday_theme=weekday_theme,
         recent_topics=recent_topics,
-        user_suggested_topic=payload.suggested_topic
+        user_suggested_topic=payload.suggested_topic,
+        special_date=special_date_info
     )
 
     social_logging.safe_log_info(

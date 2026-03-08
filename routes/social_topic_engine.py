@@ -30,7 +30,8 @@ def generate_topic_strategy(
     recent_topics: list,
     seasonality_context: Optional[str] = None,  # Deprecated - kept for backward compatibility, not used
     user_suggested_topic: Optional[str] = None,
-    is_second_post: bool = False
+    is_second_post: bool = False,
+    special_date: Optional[dict] = None
 ) -> TopicStrategy:
     """
     Generate topic strategy using LLM.
@@ -53,6 +54,15 @@ def generate_topic_strategy(
 FECHA: {date_str}
 DÍA DE LA SEMANA: {weekday_theme['day_name']}
 TEMA DEL DÍA: {weekday_theme['theme']}
+
+"""
+
+    # Inject special date context if present — this overrides normal topic selection
+    if special_date:
+        prompt += f"""⚠️ EFEMÉRIDE DEL DÍA: HOY ES {special_date['special_date_name'].upper()}
+El post de hoy DEBE estar relacionado con esta fecha especial.
+Conecta el tema con la agricultura, el campo y los productores de Durango.
+Tipo de fecha: {special_date['special_date_type']}
 
 """
 

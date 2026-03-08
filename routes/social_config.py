@@ -403,6 +403,7 @@ SPECIAL_DATES = {
     # Mexican National Holidays & Social Dates
     (1, 1): {'name': 'Año Nuevo', 'type': 'holiday'},
     (2, 5): {'name': 'Día de la Constitución', 'type': 'holiday'},
+    (3, 8): {'name': 'Día Internacional de la Mujer', 'type': 'social'},
     (3, 21): {'name': 'Natalicio de Benito Juárez', 'type': 'holiday'},
     (5, 10): {'name': 'Día de las Madres', 'type': 'social'},
     (5, 15): {'name': 'Día del Maestro', 'type': 'social'},
