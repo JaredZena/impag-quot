@@ -59,10 +59,30 @@ TEMA DEL DÍA: {weekday_theme['theme']}
 
     # Inject special date context if present — this overrides normal topic selection
     if special_date:
-        prompt += f"""⚠️ EFEMÉRIDE DEL DÍA: HOY ES {special_date['special_date_name'].upper()}
+        special_date_type = special_date.get('special_date_type', 'social')
+        special_date_name = special_date['special_date_name']
+
+        if special_date_type == 'social':
+            prompt += f"""⚠️ EFEMÉRIDE DEL DÍA: HOY ES {special_date_name.upper()}
+El post de hoy DEBE ser una FELICITACIÓN CÁLIDA y EMOTIVA por esta fecha.
+- Tono: celebratorio, emotivo, humano — NO promocional, NO de ventas, NO de ingresos
+- Felicita a las mujeres/personas involucradas de manera genuina
+- Puedes hacer una referencia sutil al campo o los productores, pero el foco es la celebración
+- NO uses ángulos de "cómo triplicaron sus ingresos" o "estrategias de negocio"
+- El post debe sentirse como una tarjeta de felicitación con identidad IMPAG
+
+"""
+        elif special_date_type == 'holiday':
+            prompt += f"""⚠️ EFEMÉRIDE DEL DÍA: HOY ES {special_date_name.upper()}
+El post de hoy DEBE conmemorar esta fecha cívica/nacional.
+- Tono: respetuoso, orgulloso, patriótico — con conexión al campo y la agricultura mexicana
+- No es un post promocional, es de reconocimiento y celebración
+
+"""
+        else:  # agricultural
+            prompt += f"""⚠️ EFEMÉRIDE DEL DÍA: HOY ES {special_date_name.upper()}
 El post de hoy DEBE estar relacionado con esta fecha especial.
 Conecta el tema con la agricultura, el campo y los productores de Durango.
-Tipo de fecha: {special_date['special_date_type']}
 
 """
 
