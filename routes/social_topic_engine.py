@@ -23,6 +23,58 @@ class TopicStrategy(BaseModel):
     target_audience: str  # "plant", "animal", "forestry", "general"
 
 
+def _call_topic_llm(client: anthropic.Anthropic, prompt: str) -> 'TopicStrategy':
+    """Call LLM with a prompt and parse the TopicStrategy JSON response."""
+    try:
+        import social_logging
+        social_logging.safe_log_info("[TOPIC ENGINE] Prompt built", prompt_length=len(prompt), full_prompt=prompt)
+    except Exception:
+        pass
+
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=512,
+        temperature=0.7,
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    content = response.content[0].text.strip()
+
+    try:
+        import social_logging
+        social_logging.safe_log_info("[TOPIC ENGINE] LLM response received", raw_response=content)
+    except Exception:
+        pass
+
+    if content.startswith("```"):
+        match = re.search(r'```(?:json)?\s*([\s\S]*?)```', content)
+        if match:
+            content = match.group(1).strip()
+        else:
+            content = content.replace("```json", "").replace("```", "").strip()
+
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Failed to parse JSON from LLM response: {e}\nContent: {content}")
+
+    topic_strategy = TopicStrategy(**data)
+
+    try:
+        import social_logging
+        social_logging.safe_log_info(
+            "[TOPIC ENGINE] Topic generated successfully",
+            topic=topic_strategy.topic,
+            angle=topic_strategy.angle,
+            urgency=topic_strategy.urgency_level,
+            audience=topic_strategy.target_audience
+        )
+    except Exception:
+        pass
+
+    return topic_strategy
+
+
 def generate_topic_strategy(
     client: anthropic.Anthropic,
     date_str: str,
@@ -48,7 +100,37 @@ def generate_topic_strategy(
     Returns:
         TopicStrategy object with topic, problem, angle, etc.
     """
-    # Build compact prompt (~800 tokens)
+    # For social-type special dates, use a completely different prompt —
+    # the normal "identify an agricultural problem" task is irrelevant here.
+    if special_date and special_date.get('special_date_type') == 'social':
+        special_date_name = special_date['special_date_name']
+        prompt = f"""Genera el tema para un post de FELICITACIÓN por {special_date_name}.
+
+FECHA: {date_str}
+MARCA: IMPAG Agricultura Inteligente (insumos agrícolas, Durango, México)
+
+INSTRUCCIONES:
+- El post es una FELICITACIÓN SINCERA y EMOTIVA, como una tarjeta de celebración
+- Tono: cálido, humano, cercano — celebra a las personas que protagonizan esta fecha
+- Puedes hacer una referencia breve y natural al campo o a los productores, pero NO es obligatorio
+- NO inventes estadísticas, científicos, ni datos específicos
+- NO hagas un post de ventas, ingresos, estrategias de negocio ni biotecnología
+- NO menciones productos de IMPAG
+- El topic debe ser una frase de felicitación simple y genuina
+
+RESPONDE SOLO CON JSON (sin markdown):
+{{
+  "topic": "Frase de felicitación cálida y genuina por {special_date_name}",
+  "problem_identified": "Celebración de {special_date_name}",
+  "angle": "celebración",
+  "urgency_level": "high",
+  "target_audience": "general"
+}}
+"""
+        # Skip all the rest of the prompt-building logic
+        return _call_topic_llm(client, prompt)
+
+    # Build compact prompt (~800 tokens) for normal (non-social-date) days
     prompt = f"""Identifica un problema agrícola real para productores comerciales.
 
 FECHA: {date_str}
@@ -57,22 +139,12 @@ TEMA DEL DÍA: {weekday_theme['theme']}
 
 """
 
-    # Inject special date context if present — this overrides normal topic selection
+    # Inject special date context for holiday/agricultural dates
     if special_date:
-        special_date_type = special_date.get('special_date_type', 'social')
+        special_date_type = special_date.get('special_date_type', 'agricultural')
         special_date_name = special_date['special_date_name']
 
-        if special_date_type == 'social':
-            prompt += f"""⚠️ EFEMÉRIDE DEL DÍA: HOY ES {special_date_name.upper()}
-El post de hoy DEBE ser una FELICITACIÓN CÁLIDA y EMOTIVA por esta fecha.
-- Tono: celebratorio, emotivo, humano — NO promocional, NO de ventas, NO de ingresos
-- Felicita a las mujeres/personas involucradas de manera genuina
-- Puedes hacer una referencia sutil al campo o los productores, pero el foco es la celebración
-- NO uses ángulos de "cómo triplicaron sus ingresos" o "estrategias de negocio"
-- El post debe sentirse como una tarjeta de felicitación con identidad IMPAG
-
-"""
-        elif special_date_type == 'holiday':
+        if special_date_type == 'holiday':
             prompt += f"""⚠️ EFEMÉRIDE DEL DÍA: HOY ES {special_date_name.upper()}
 El post de hoy DEBE conmemorar esta fecha cívica/nacional.
 - Tono: respetuoso, orgulloso, patriótico — con conexión al campo y la agricultura mexicana
@@ -384,59 +456,7 @@ RESPONDE SOLO CON JSON (sin markdown):
 }
 """
 
-    # Log the prompt (for debugging)
-    try:
-        import social_logging
-        social_logging.safe_log_info(
-            "[TOPIC ENGINE] Prompt built",
-            prompt_length=len(prompt),
-            prompt_tokens_estimate=len(prompt) // 4,
-            full_prompt=prompt
-        )
-    except Exception:
-        pass  # Logging failure shouldn't break generation
-
-    # Call LLM
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1024,
-        temperature=1.0,  # Higher temperature for variety
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    # Parse JSON from response
-    content = response.content[0].text.strip()
-
-    # Log raw LLM response
-    try:
-        import social_logging
-        social_logging.safe_log_info(
-            "[TOPIC ENGINE] LLM response received",
-            response_length=len(content),
-            raw_response=content
-        )
-    except Exception:
-        pass
-
-    # Remove markdown code blocks if present
-    if content.startswith("```"):
-        # Extract content between ```json and ```
-        match = re.search(r'```(?:json)?\s*([\s\S]*?)```', content)
-        if match:
-            content = match.group(1).strip()
-        else:
-            # Fallback: remove all ```
-            content = content.replace("```json", "").replace("```", "").strip()
-
-    # Parse JSON
-    try:
-        data = json.loads(content)
-    except json.JSONDecodeError as e:
-        # Log the error and raise with context
-        raise ValueError(f"Failed to parse JSON from LLM response: {e}\nContent: {content}")
-
-    # Validate and create TopicStrategy
-    topic_strategy = TopicStrategy(**data)
+    topic_strategy = _call_topic_llm(client, prompt)
 
     # Validate topic format - only check "Error → Daño → Solución" format on Tuesday/Thursday
     day_name = weekday_theme['day_name']
@@ -475,19 +495,6 @@ RESPONDE SOLO CON JSON (sin markdown):
                 )
             except Exception:
                 pass
-
-    # Log parsed result
-    try:
-        import social_logging
-        social_logging.safe_log_info(
-            "[TOPIC ENGINE] Topic generated successfully",
-            topic=topic_strategy.topic,
-            angle=topic_strategy.angle,
-            urgency=topic_strategy.urgency_level,
-            audience=topic_strategy.target_audience
-        )
-    except Exception:
-        pass
 
     return topic_strategy
 
