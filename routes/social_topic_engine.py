@@ -196,37 +196,64 @@ enfrentan en CUALQUIER área de su operación.
 
 """
 
-    # Add user-suggested topic if provided
-    if user_suggested_topic:
-        prompt += f"💡 TEMA SUGERIDO POR USUARIO: {user_suggested_topic}\n"
-        prompt += "Usa este tema como base, pero adáptalo al formato requerido.\n\n"
-
     # Add task instructions - format varies by weekday
     day_name = weekday_theme['day_name']
 
     if day_name in ['Tuesday', 'Thursday']:
         # Tuesday (Promotion) & Thursday (Problem & Solution) - use "Error → Daño → Solución" format
-        prompt += """TU TAREA:
-1. Identifica un problema agrícola REAL que productores enfrentan HOY
-2. Formula como: "Error → Daño concreto → Solución"
-   - ERROR: Acción incorrecta específica
-   - DAÑO: Consecuencia medible (números, %)
+        if user_suggested_topic:
+            prompt += f"""🔴 TEMA OBLIGATORIO DEL USUARIO: "{user_suggested_topic}"
+El post DEBE ser sobre este tema. NO lo ignores ni lo reemplaces.
+
+TU TAREA:
+Formula el tema del usuario en el formato "Error → Consecuencia → Solución":
+   - ERROR: La acción incorrecta relacionada con "{user_suggested_topic}"
+   - CONSECUENCIA: Daño concreto y descriptivo — NO inventes porcentajes ni cifras
    - SOLUCIÓN: Técnica específica y accionable
 
 ⚠️ FORMATO CRÍTICO:
-- DEBES usar EXACTAMENTE este formato: "Error → Daño → Solución"
+- DEBES usar EXACTAMENTE este formato: "Error → Consecuencia → Solución"
+- DEBES incluir los símbolos "→" para separar las tres partes
+- El tema DEBE estar relacionado con: "{user_suggested_topic}"
+- NO uses preguntas como "¿Sabías que...?" o "¿Te has preguntado...?"
+- NO inventes porcentajes ("30%", "hasta 40%") — describe el daño sin cifras fabricadas
+
+Ejemplos CORRECTOS:
+- "Almacenar grano sin secar → Hongos arruinan lotes completos en clima húmedo → Secar a 14% de humedad antes de almacenar"
+- "No calibrar la aspersora → Aplicación desigual desperdicia producto y deja zonas sin proteger → Calibrar antes de cada ciclo de aplicación"
+
+RESPONDE SOLO CON JSON (sin markdown):
+{{
+  "topic": "Error específico → Consecuencia concreta y descriptiva → Solución técnica accionable (sobre {user_suggested_topic})",
+  "problem_identified": "Descripción del problema real relacionado con {user_suggested_topic}",
+  "angle": "tema principal del contenido",
+  "urgency_level": "high|medium|low",
+  "target_audience": "plant|animal|forestry|general"
+}}
+"""
+        else:
+            prompt += """TU TAREA:
+1. Identifica un problema agrícola REAL que productores enfrentan HOY
+2. Formula como: "Error → Consecuencia → Solución"
+   - ERROR: Acción incorrecta específica
+   - CONSECUENCIA: Daño concreto y descriptivo — NO inventes porcentajes ni cifras
+   - SOLUCIÓN: Técnica específica y accionable
+
+⚠️ FORMATO CRÍTICO:
+- DEBES usar EXACTAMENTE este formato: "Error → Consecuencia → Solución"
 - DEBES incluir los símbolos "→" para separar las tres partes
 - NO uses preguntas como "¿Sabías que...?" o "¿Te has preguntado...?"
 - NO uses títulos estilo clickbait
+- NO inventes porcentajes ("30%", "hasta 40%") — describe el daño sin cifras fabricadas
 
 Ejemplos CORRECTOS:
-- "Almacenar grano sin secar → Pierdes 20% por hongos → Secado a 14% humedad antes de almacenar"
-- "No calibrar sembradora → Desperdicias 30% de semilla → Calibración anual con prueba de campo"
-- "Vender sin contrato → Precios bajos 40% de temporada → Agricultura por contrato anticipado"
+- "Almacenar grano sin secar → Hongos arruinan lotes completos en clima húmedo → Secar a 14% de humedad antes de almacenar"
+- "No calibrar la aspersora → Aplicación desigual deja zonas sin proteger y desperdicia producto → Calibrar antes de cada ciclo"
+- "Vender en temporada alta sin contrato previo → Precio spot es el más bajo del año → Contratar comprador antes de sembrar"
 
 RESPONDE SOLO CON JSON (sin markdown):
 {
-  "topic": "Error específico → Daño medible con % → Solución técnica concreta",
+  "topic": "Error específico → Consecuencia concreta y descriptiva → Solución técnica accionable",
   "problem_identified": "Descripción del problema real que enfrenta el productor",
   "angle": "tema principal del contenido",
   "urgency_level": "high|medium|low",
@@ -235,6 +262,11 @@ RESPONDE SOLO CON JSON (sin markdown):
 """
     else:
         # Other days - use descriptive topic format appropriate to the day's theme
+        if user_suggested_topic:
+            prompt += f"""🔴 TEMA OBLIGATORIO DEL USUARIO: "{user_suggested_topic}"
+El post DEBE ser sobre este tema. NO lo ignores ni lo reemplaces con otro.
+
+"""
         prompt += f"""TU TAREA:
 Genera un tema apropiado para {day_name} ({weekday_theme['theme']}).
 

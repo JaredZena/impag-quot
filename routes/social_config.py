@@ -388,11 +388,12 @@ POST_TYPES_DESCRIPTIONS = {
 # ===================================================================
 
 CONTENT_RULES = [
-    "Números concretos con contexto: 'hasta $X dependiendo de...', 'pérdidas que pueden llegar a X% en condiciones típicas'",
-    "Beneficios comparativos, no absolutos: 'ahorro vs riego por surco', 'mejor distribución que con X'",
-    "No exagerar especificaciones del producto; usar lenguaje preciso",
-    "Solución = contexto + producto, no solo producto (práctica correcta + producto)",
-    "Producto como componente central de la solución, no único héroe"
+    "NUNCA inventes porcentajes, cifras o estadísticas que no estén en el contexto proporcionado. Si no tienes el dato real, describe el efecto de forma cualitativa: 'puede dañar la cosecha', 'reduce el rendimiento', 'genera pérdidas evitables'.",
+    "Usa SOLO los datos numéricos del contexto entregado (estadísticas de Durango, datos de productos). No agregues números propios como si fueran hechos establecidos.",
+    "Beneficios comparativos sin inventar cifras: 'consume menos agua que riego por surco', 'distribución más uniforme que con aspersor tradicional'.",
+    "No exagerar especificaciones del producto; usar lenguaje preciso.",
+    "Solución = contexto + producto, no solo producto (práctica correcta + producto).",
+    "Producto como componente central de la solución, no único héroe."
 ]
 
 # ===================================================================

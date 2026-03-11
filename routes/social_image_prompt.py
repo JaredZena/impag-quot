@@ -76,7 +76,7 @@ ESTRUCTURA: Tutorial paso a paso
   * Icono 💡 grande (40px)
   * Texto: Consejos prácticos destacados
 """
-    elif "sistema" in topic_lower or "instalación completa" in topic_lower or "diagrama" in topic_lower:
+    elif any(k in topic_lower for k in ("sistema", "instalación completa", "diagrama", "bomba solar", "pozo", "sistema de riego", "sistema solar", "instalación de riego")):
         structure_type = "DIAGRAMA DE SISTEMA"
         structure_guide = """
 ESTRUCTURA: Diagrama de sistema técnico
@@ -226,6 +226,151 @@ def get_weekday_image_style_guidance(weekday_theme: Dict[str, Any]) -> str:
     )
 
 
+def get_visual_style_for_post(post_type: str, structure_type: str, weekday: str = None) -> str:
+    """
+    Return the visual rendering style directive for the main element of the image.
+    Maps post_type + structure_type to a concrete visual style (3D render, photo, illustration, etc.)
+    instead of always defaulting to 'person holding product'.
+    """
+    pt = (post_type or "").lower()
+    st = (structure_type or "").lower()
+
+    # ── 3D TECHNICAL RENDER ──────────────────────────────────────────────────
+    # For educational, installation, how-to, system diagram posts.
+    # Shows the technology/system itself — no person needed.
+    if st in ("tutorial", "diagrama de sistema") or pt in ("tutorial", "checklist"):
+        return (
+            "🎨 ESTILO VISUAL: RENDER 3D TÉCNICO\n"
+            "- Genera una ilustración 3D técnica de alta calidad (estilo render arquitectónico/industrial moderno).\n"
+            "- Vista isométrica o en perspectiva que muestra el sistema, proceso o instalación completa.\n"
+            "- Componentes claramente visibles y etiquetados con líneas de llamada (callouts).\n"
+            "- Fondo: gradiente azul-gris muy claro o blanco roto; iluminación de estudio, sombras suaves.\n"
+            "- Materiales realistas: metal, plástico, tuberías, cables representados con texturas precisas.\n"
+            "- SIN personas — el protagonista es el sistema técnico.\n"
+            "- Colores de acento IMPAG (verde #2E7D32, azul #1565C0) para resaltar componentes clave.\n"
+            "- Si es proceso de instalación: mostrar las etapas en vista de corte o explosionada (exploded view).\n"
+            "- Ejemplo de prompt: 'Isometric 3D technical render of a solar-powered water pump system, '
+              'exploded view showing solar panel, pump, pipes and drip irrigation network, '
+              'clean labels, soft studio lighting, white background, IMPAG green accents'\n"
+        )
+
+    # ── 3D / ILLUSTRATED INFOGRAPHIC ────────────────────────────────────────
+    if pt in ("infografías", "infografias", "infographic") or st in ("quick_guide_3", "step_path_4", "list_circular_5", "indicator_sections_3", "lunar_4_columns"):
+        return (
+            "🎨 ESTILO VISUAL: ILUSTRACIÓN TÉCNICA / INFOGRAFÍA 3D\n"
+            "- Estilo ilustración editorial moderna con elementos 3D ligeros (no flat design, no fotorealista).\n"
+            "- Iconografía detallada: plantas, herramientas, maquinaria agrícola representados como ilustraciones limpias.\n"
+            "- Paleta: tonos tierra (ocre, verde olivo, marrón cálido) con acentos IMPAG verde-azul.\n"
+            "- Composición modular y organizada — cada sección tiene su ícono o ilustración representativa.\n"
+            "- SIN personas — los elementos visuales son íconos e ilustraciones del tema.\n"
+            "- Tipografía bold para títulos, regular para subtexto; mucho espacio blanco entre secciones.\n"
+        )
+
+    # ── SPLIT PANEL / CURIOSITY (Thursday problem-solution) ─────────────────
+    if st in ("comparativa_curiosity",):
+        return (
+            "🎨 ESTILO VISUAL: SPLIT PANEL CURIOSITY (visual intrigante)\n"
+            "- Dos paneles lado a lado (50/50), tonos neutros beige/gris claro vs verde suave.\n"
+            "- Panel izquierdo: fotografía o ilustración que muestra la situación problemática de forma visual, "
+              "SIN texto explicativo largo — solo una imagen evocadora y 1 frase corta.\n"
+            "- Panel derecho: fotografía o ilustración que insinúa la solución sin revelarla completamente.\n"
+            "- Las imágenes pueden ser fotorrealistas (campo real, planta real, maquinaria real).\n"
+            "- Si hay personas: solo una, en plano medio o detalle de manos/herramienta — NO retrato frontal.\n"
+            "- Objetivo visual: generar la pregunta '¿Qué está pasando aquí?' — NO cerrar la historia.\n"
+        )
+
+    # ── EDUCATIONAL COMPARISON (other days, not Thursday) ───────────────────
+    if st in ("comparativa_educativa",):
+        return (
+            "🎨 ESTILO VISUAL: COMPARATIVA ILUSTRADA\n"
+            "- Diseño en dos columnas con ilustraciones o íconos 3D ligeros para cada opción.\n"
+            "- Estilo limpio y profesional, paleta IMPAG verde-azul sobre fondo blanco o gris muy claro.\n"
+            "- Cada columna tiene su ilustración representativa (NO foto de persona) + título + 2-3 bullets cortos.\n"
+            "- SIN personas — usar íconos, plantas, equipos representados como ilustraciones.\n"
+        )
+
+    # ── DATA VISUALIZATION (ROI, Sunday innovation/stats) ────────────────────
+    if pt in ("roi",) or weekday == "Sunday":
+        return (
+            "🎨 ESTILO VISUAL: VISUALIZACIÓN DE DATOS / REPORT\n"
+            "- Diseño tipo dashboard o reporte ejecutivo limpio.\n"
+            "- Número o estadística clave: tipografía muy grande (display), color IMPAG verde o azul.\n"
+            "- Gráfica simple (barra, pastel, línea) si hay datos comparativos — estilo flat design moderno.\n"
+            "- Íconos de tendencia, innovación o crecimiento como elementos de apoyo.\n"
+            "- Fondo blanco o gris muy claro; sin fotografías de personas ni paisajes.\n"
+            "- Badges mínimos ('Nuevo', 'Tendencia 2026') si aplica.\n"
+        )
+
+    # ── MOTIVATIONAL / LIFESTYLE (Monday, La Vida en el Rancho) ─────────────
+    if weekday == "Monday":
+        return (
+            "🎨 ESTILO VISUAL: FOTOGRAFÍA CINEMATOGRÁFICA / PAISAJE EMOCIONAL\n"
+            "- Fotografía fotorrealista de paisaje agrícola del norte de México (Durango), "
+              "toma amplia o aérea (drone shot), golden hour o amanecer.\n"
+            "- Si hay persona: silueta de productor en el campo al contraluz, "
+              "plano general — NO retrato frontal mirando a cámara.\n"
+            "- Ambiente: emocional, poético, auténtico. Cielo dramático, hileras de cultivo o ganado en pastizal.\n"
+            "- Colores: tonos cálidos (dorado, naranja suave, verde natural), sin filtros artificiales.\n"
+            "- Texto mínimo o ninguno — la imagen habla sola.\n"
+        )
+
+    # ── SEASONAL / CALENDAR (Friday) ────────────────────────────────────────
+    if weekday == "Friday":
+        return (
+            "🎨 ESTILO VISUAL: ILUSTRACIÓN ESTACIONAL / CALENDARIO\n"
+            "- Composición que evoca la temporada: lluvia, heladas, cosecha, siembra — según el tema.\n"
+            "- Elementos visuales: íconos de clima (☁️❄️🌧️☀️), calendario agrícola, cultivos en etapa relevante.\n"
+            "- Estilo ilustración editorial moderna — no fotorrealista, pero detallada y cálida.\n"
+            "- Paleta adaptada a la época: verdes frescos para siembra, dorados para cosecha, azules para heladas.\n"
+            "- SIN personas — los protagonistas son los elementos naturales y las plantas/cultivos.\n"
+        )
+
+    # ── PROMOTIONAL WITH PRODUCT + PERSON (Tuesday/promo/kit/new-arrivals) ──
+    if pt in ("promo", "kit", "new-arrivals", "new_arrivals") or weekday == "Tuesday":
+        return (
+            "🎨 ESTILO VISUAL: FOTOGRAFÍA DE PRODUCTO EN CONTEXTO REAL\n"
+            "- Fotografía fotorrealista del producto EN USO REAL en campo, rancho o vivero.\n"
+            "- Contexto auténtico: ambiente natural de Durango, NOT fondo blanco tipo catálogo.\n"
+            "- Persona SOLO si añade autenticidad: técnico o productor usando/instalando el producto "
+              "en plano medio — NO retrato frontal mirando a cámara con producto en mano.\n"
+            "- Iluminación natural preferida (golden hour). Colores reales, sin saturación artificial.\n"
+            "- Para kits en FB/IG: composición en contexto de uso; para Stories/Status: knolling limpio está OK.\n"
+        )
+
+    # ── BEFORE/AFTER ────────────────────────────────────────────────────────
+    if pt in ("before-after", "before_after"):
+        return (
+            "🎨 ESTILO VISUAL: ANTES / DESPUÉS (fotografía o render comparativo)\n"
+            "- Dos imágenes lado a lado o arriba/abajo mostrando el estado antes y el estado después.\n"
+            "- Puede ser fotografía real o render 3D según el tema (campo antes/después de riego, suelo seco/húmedo, etc.).\n"
+            "- Etiquetas simples 'ANTES' / 'DESPUÉS' con tipografía bold; colores neutros para ANTES, verde IMPAG para DESPUÉS.\n"
+            "- SIN personas — protagoniza el resultado visible en el cultivo, suelo o instalación.\n"
+        )
+
+    # ── IMPORTANT DATE / CELEBRATION ────────────────────────────────────────
+    if pt in ("important-date", "important_date"):
+        return (
+            "🎨 ESTILO VISUAL: DISEÑO EDITORIAL DE CELEBRACIÓN\n"
+            "- Composición festiva pero elegante, tipografía expresiva como elemento principal.\n"
+            "- Elementos visuales: flores, campos, símbolos culturales mexicanos según la fecha.\n"
+            "- Paleta cálida y celebratoria; puede incluir ilustraciones de personas en estilo editorial "
+              "(no fotorrealista) si la fecha lo amerita.\n"
+            "- NO usar diseño tipo póster escolar ni imágenes de banco de fotos genéricas.\n"
+        )
+
+    # ── DEFAULT: SECTOR-SPECIFIC TECHNICAL PHOTO ────────────────────────────
+    return (
+        "🎨 ESTILO VISUAL: FOTOGRAFÍA TÉCNICA AGRÍCOLA AUTÉNTICA\n"
+        "- Fotografía fotorrealista del cultivo, sistema, maquinaria o situación descrita en el tema.\n"
+        "- Contexto real de campo en el norte de México (Durango): parcelas, invernaderos, ranchos.\n"
+        "- Persona SOLO si es imprescindible para mostrar escala o uso — plano medio o detalle, "
+          "NO retrato frontal mirando a cámara sosteniendo algo.\n"
+        "- Priorizar el ELEMENTO TÉCNICO o NATURAL como protagonista: la planta enferma, "
+          "el sistema de riego, el suelo, la maquinaria, el cultivo.\n"
+        "- Iluminación natural. Sin personas decorativas ni modelos de stock.\n"
+    )
+
+
 def build_image_prompt_instructions(
     strat_data: Dict[str, Any],
     structure_type: str,
@@ -240,6 +385,8 @@ def build_image_prompt_instructions(
     """
     channel = strat_data.get("channel", "fb-post")
     topic = strat_data.get("topic", "")
+    post_type = (strat_data.get("post_type") or "").lower()
+    weekday = weekday_theme.get("day_name") if weekday_theme else None
 
     out = (
         "--- INSTRUCCIONES ESPECÍFICAS PARA image_prompt ---\n"
@@ -281,21 +428,11 @@ def build_image_prompt_instructions(
         "FORMATO REQUERIDO (adaptar dimensiones al canal):\n"
         "- wa-status/stories/tiktok/reels: Vertical 1080×1920 px\n"
         "- fb-post/ig-post: Cuadrado 1080×1080 px\n"
-        "Estilo [flyer técnico/paisaje agrícola/catálogo técnico] IMPAG, con diseño limpio, moderno y profesional.\n"
-        "Mantén siempre la estética corporativa IMPAG: fondo agrícola difuminado, tonos blanco–gris, acentos verde–azul, sombras suaves, tipografías gruesas para títulos y delgadas para texto técnico.\n"
+        "Estilo IMPAG: diseño limpio, moderno y profesional. Acentos verde–azul IMPAG, tipografías gruesas para títulos.\n"
     )
 
-    post_type = (strat_data.get("post_type") or "").lower()
-    if post_type in ("infografías", "infografias"):
-        out += (
-            "\n⚠️ Para este tipo de post usa estilo: infografía educativa ilustrada, trazo amigable, colores tierra/verde/azul, no fotorealista.\n"
-            "IMPORTANTE para alcance orgánico FB:\n"
-            "- REDUCIR texto en la infografía: máximo 1 headline + 2-3 bullets CORTOS (5-8 palabras por bullet)\n"
-            "- Especificaciones técnicas detalladas, porcentajes múltiples, tablas → van en CAPTION\n"
-            "- La infografía debe intrigar y comunicar el concepto principal, NO ser un documento completo\n"
-            "- Evitar listados densos de 5-6+ bullets - mantener visual limpio y respirado\n"
-            "- Si hay mucha info, considerar carrusel donde cada slide es simple (1 concepto + visual)\n\n"
-        )
+    # ── Inject post-type-aware visual style (replaces generic 'person holding product') ──
+    out += "\n" + get_visual_style_for_post(post_type, structure_type, weekday) + "\n"
 
     web = contact_info.get("web", "")
     whatsapp = contact_info.get("whatsapp", "")
@@ -305,28 +442,18 @@ def build_image_prompt_instructions(
         "Instrucciones de diseño detalladas:\n"
         "1. LOGOS (OBLIGATORIO - §7 IMPAG only):\n"
         "   - Usar SOLO branding IMPAG. Logo oficial 'IMPAG Agricultura Inteligente' en esquina superior derecha, sin deformarlo.\n"
-        "   - No incluir otros nombres ni logos en la imagen (no Todo para el Campo ni otros). Contacto y URL pueden ser los mismos; la identidad visual en la imagen es solo IMPAG.\n\n"
-        "2. ELEMENTO PRINCIPAL (CON PERSONAS CUANDO APLIQUE):\n"
-        "   - Si hay producto: Imagen realista del producto EN USO REAL, fotorealista, iluminación natural (golden hour preferida)\n"
-        "   - ⚠️ PRIORIZA CONTEXTO AUTÉNTICO sobre estudio: producto en campo, ambiente real, NO fondo blanco tipo catálogo\n"
-        "   - ⚠️ INCLUYE PERSONAS cuando sea apropiado:\n"
-        "     * Para productos agrícolas: Agricultor/productor mexicano usando el producto en campo, sosteniéndolo, o mostrándolo como recomendación.\n"
-        "     * Para productos ganaderos: Ganadero usando el producto, mostrándolo en uso real.\n"
-        "     * Para productos forestales: Ingeniero forestal o trabajador forestal usando el producto.\n"
-        "     * Para productos de riego/instalación: Ingeniero agrónomo o técnico instalando o mostrando el producto.\n"
-        "     * Las personas deben verse profesionales, auténticas, con ropa de trabajo agrícola/ganadero/forestal apropiada.\n"
-        "     * Las personas deben estar interactuando con el producto de forma natural (sosteniéndolo, instalándolo, usándolo).\n"
-        "   - Si es paisaje: Paisaje agrícola realista del norte de México (Durango), cultivos en hileras, iluminación natural suave.\n"
-        "   - Si es kit para FB/IG: Mostrar en contexto de uso, NO técnica 'knolling'. Para Stories/Status el knolling está OK.\n"
+        "   - No incluir otros nombres ni logos en la imagen.\n\n"
+        "2. ELEMENTO PRINCIPAL:\n"
+        "   - Seguir EXACTAMENTE el estilo visual indicado arriba (🎨 ESTILO VISUAL).\n"
+        "   - El estilo visual define si usar render 3D, fotografía, ilustración, etc. según el tipo de post.\n"
+        "   - NO ignorar el estilo visual para poner una foto genérica de 'persona sosteniendo producto'.\n"
         "   ⚠️ PARA STORIES/STATUS/TIKTOK/REELS: Agrega TEXTO GRANDE Y VISIBLE en la imagen que comunique el mensaje principal.\n"
         "   El texto debe ser legible desde lejos, con buen contraste, tamaño mínimo 60-80px.\n"
-        "   ⚠️ PARA FB-POST/IG-POST: REDUCIR TEXTO. Máximo 1-2 frases cortas (10-20 palabras total). Generar curiosidad, no explicarlo todo.\n\n"
+        "   ⚠️ PARA FB-POST/IG-POST: REDUCIR TEXTO. Máximo 1-2 frases cortas (10-20 palabras total). Generar curiosidad.\n\n"
         "3. ESPECIFICACIONES TÉCNICAS:\n"
-        "   ⚠️ NUEVA REGLA ALCANCE FB/IG:\n"
-        "   - Para FB-POST/IG-POST: NO incluir bloque de especificaciones técnicas en la imagen\n"
-        "   - Specs técnicas detalladas (listas de 4-6 bullets, medidas, capacidades) → van en el CAPTION\n"
-        "   - Si es absolutamente necesario destacar 1 spec clave, usar máximo 1 línea corta integrada al diseño\n"
-        "   - Para STORIES/STATUS/TIKTOK/REELS: Puede incluir 2-3 specs clave con viñetas (formato vertical lo permite)\n\n"
+        "   - Para FB-POST/IG-POST: NO incluir bloque de especificaciones técnicas en la imagen.\n"
+        "   - Specs técnicas detalladas → van en el CAPTION\n"
+        "   - Para STORIES/STATUS/TIKTOK/REELS: Puede incluir 2-3 specs clave con viñetas.\n\n"
         "4. PIE DEL FLYER (mantener estilo IMPAG):\n"
         f"   - {web}\n"
         "   - Envíos a todo México\n"
@@ -347,14 +474,14 @@ def build_image_prompt_instructions(
         f'  "channel": "{channel}",\n'
         f'  "topic": "{topic}",\n'
         '  "caption": "... (RESPETA: wa-status/stories/tiktok/reels = MUY CORTO, fb-post = puede ser largo)",\n'
-        '  "image_prompt": "PROMPT DETALLADO OBLIGATORIO para generación de imagen (SIEMPRE requerido). Si es carrusel, usa el prompt de la imagen de portada o primera slide. Para stories/status debe ser autoexplicativa con texto grande visible. SIEMPRE incluye logos IMPAG y dimensiones correctas (1080×1920 para vertical, 1080×1080 para cuadrado).",\n'
+        '  "image_prompt": "PROMPT DETALLADO OBLIGATORIO para generación de imagen (SIEMPRE requerido). Debe describir el estilo visual indicado (3D render / fotografía / ilustración / etc.) según el tipo de post. Si es carrusel, usa el prompt de la imagen de portada o primera slide. SIEMPRE incluye logos IMPAG y dimensiones correctas (1080×1920 para vertical, 1080×1080 para cuadrado).",\n'
         '  "carousel_slides": ["Slide 1 CON TEXTO GRANDE...", "Slide 2 CON TEXTO...", ...] (SOLO si es carrusel: TikTok 2-3, FB/IG 2-10. Si es carrusel, image_prompt debe ser la portada o primera slide),\n'
         '  "needs_music": true/false,\n'
         '  "posting_time": "...",\n'
         '  "notes": "...",\n'
         '  "suggested_hashtags": ["#Riego", "#Agricultura", ...] (opcional: 5-8 hashtags en español)\n'
         "}\n\n"
-        f"REGLAS FINALES: Producto ID {selected_product_id or 'ninguno'}. Incluye logos IMPAG, personas cuando aplique, sé específico sobre el producto y su uso."
+        f"REGLAS FINALES: Producto ID {selected_product_id or 'ninguno'}. Incluye logos IMPAG. Sigue el estilo visual (🎨) indicado — NO sustituir por foto genérica de persona con producto."
     )
 
     return out

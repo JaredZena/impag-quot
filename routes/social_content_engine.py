@@ -275,9 +275,9 @@ Este es contenido TÉCNICO-PRÁCTICO para productores de {sector}.
 
 ⚠️ FORMATO CRÍTICO PARA SÁBADO SECTOR-ESPECÍFICO:
 - Caption DEBE ser técnico pero ACCESIBLE
-- Incluye DATOS REGIONALES de Durango (usa el contexto arriba)
+- Incluye DATOS REGIONALES de Durango del contexto proporcionado arriba (hectáreas, volúmenes, estadísticas reales)
 - Enfoque práctico: qué hacer, cómo hacerlo, cuándo
-- Números concretos: hectáreas, volúmenes, porcentajes, costos
+- NUNCA inventes porcentajes ni cifras que no estén en el contexto — si no tienes el número real, descríbelo cualitativamente
 - Considera estacionalidad si es relevante
 - NO vendas productos - esto es educativo
 
@@ -295,24 +295,22 @@ Estructura sugerida:
 1. PROBLEMA: [Identifica problema forestal específico]
 2. CONTEXTO DURANGO: [Usa datos regionales de arriba]
 3. SOLUCIÓN TÉCNICA: [Pasos prácticos y accionables]
-4. NÚMEROS REALES: [Datos de supervivencia, volúmenes, costos]
+4. DATOS CONTEXTUALES: [Solo datos que aparecen en el contexto de Durango arriba — no inventes cifras]
 5. CTA EDUCATIVO: "¿Tu vivero enfrenta este problema? Comparte tu experiencia"
 
 ✅ Ejemplo de estructura:
-"🌲 Supervivencia en reforestación con pino nativo en Durango
+"🌲 Reforestación con pino nativo en Durango: los factores que más afectan la supervivencia
 
-El problema: Tasas de supervivencia < 60% en reforestación.
-Durango produce ~4.17M m³ de pino anualmente, pero la regeneración no sigue el ritmo.
+Durango produce ~4.17M m³ de pino anualmente y lidera la producción forestal nacional.
+Pero la regeneración natural no sigue el ritmo de la extracción — la reforestación bien ejecutada es clave.
 
-Factores críticos de supervivencia:
-1. CALIDAD DE PLANTA: Altura mínima 25cm, raíz bien desarrollada
-2. ÉPOCA DE PLANTACIÓN: Antes de temporada de lluvias (Mayo-Junio)
-3. PREPARACIÓN DE SITIO: Limpieza de competencia, cepa 30x30x30 cm
-4. AGUA INICIAL: Riego en primeras 2 semanas crítico
+Factores críticos que determinan si la planta vive o muere:
+1. CALIDAD DE PLANTA: Altura mínima de 25 cm, raíz bien desarrollada y sin deformaciones
+2. ÉPOCA DE PLANTACIÓN: Plantar antes del inicio de lluvias (Mayo-Junio) para aprovechar la humedad
+3. PREPARACIÓN DE SITIO: Limpieza de competencia, cepa de 30×30×30 cm mínimo
+4. AGUA INICIAL: Las primeras dos semanas son críticas — sin humedad en ese periodo, la planta no prende
 
-En viveros forestales de Durango, plantas con estas prácticas logran supervivencia >75% primer año.
-
-Temporada crítica: Abril-Junio (incendios), plantar antes o después.
+Temporada de alto riesgo: Abril-Junio (incendios forestales) — plantar antes o esperar después.
 
 ¿Qué técnicas te han funcionado mejor en reforestación? 💬
 
@@ -331,7 +329,7 @@ Estructura sugerida:
 1. PROBLEMA: [Identifica problema agrícola específico]
 2. CONTEXTO DURANGO: [Usa datos regionales de arriba - 79% temporal]
 3. SOLUCIÓN TÉCNICA: [Pasos con calendario y timing preciso]
-4. NÚMEROS REALES: [Rendimientos, hectáreas, costos]
+4. DATOS CONTEXTUALES: [Solo datos del contexto de Durango arriba — no inventes cifras ni rendimientos]
 5. CTA EDUCATIVO: "¿Cómo manejas este problema en tu parcela?"
 
 ✅ Ejemplo de estructura:
@@ -342,24 +340,22 @@ Con 79% de superficie temporal (dependiente de lluvia), cada gota cuenta.
 
 Estrategia para máximo rendimiento:
 
-1. SEMILLA CERTIFICADA: +20-30% rendimiento vs. semilla guardada
-   Costo: $800-1,200/ha vs pérdida de 200-300 kg/ha
+1. SEMILLA CERTIFICADA: Mejor germinación y uniformidad que semilla guardada de ciclos anteriores
 
 2. VENTANA DE SIEMBRA CRÍTICA:
    - Temporal: inicio de lluvias regulares (típicamente finales de Junio)
    - Límite: 25 de Julio (después, riesgo de heladas tempranas)
 
-3. DENSIDAD CORRECTA: 120,000-140,000 plantas/ha
-   - Muy denso: competencia por agua (fatal en temporal)
-   - Muy ralo: desperdicia potencial
+3. DENSIDAD ADECUADA AL TEMPORAL:
+   - Muy denso: plantas compiten por agua — fatal en año seco
+   - Muy ralo: no aprovechas el potencial de la parcela
+   - Consulta a tu técnico según variedad y ciclo esperado
 
-4. FERTILIZACIÓN MÍNIMA: 40-20-00 (N-P-K)
-   - 94.9% de productores reportan costos altos
-   - Fertilizar solo si análisis de suelo lo justifica
+4. FERTILIZACIÓN BASADA EN ANÁLISIS DE SUELO:
+   - 94.9% de productores reportan costos altos como problema #1
+   - Fertilizar sin análisis = gastar sin saber qué falta
 
-Con estas prácticas, productores en temporal logran 1.2-1.5 t/ha vs 0.8 t/ha promedio.
-
-El temporal no cambia, pero tus prácticas sí. 💧
+El temporal no cambia, pero tus decisiones de manejo sí. 💧
 
 #Frijol #AgriculturaTemporal #Durango #Rendimiento"
 
@@ -376,37 +372,34 @@ Estructura sugerida:
 1. PROBLEMA: [Identifica problema ganadero específico]
 2. CONTEXTO DURANGO: [Usa datos regionales - 5.6M litros/día, Comarca Lagunera]
 3. SOLUCIÓN TÉCNICA: [Pasos con datos de conversión/eficiencia]
-4. NÚMEROS REALES: [Litros, conversión, costos, ROI]
+4. DATOS CONTEXTUALES: [Solo datos del contexto de Durango arriba — no inventes cifras de conversión ni costos]
 5. CTA EDUCATIVO: "¿Qué te funciona en tu operación?"
 
 ✅ Ejemplo de estructura:
-"🐄 Optimización de forraje: conversión eficiente en producción láctea
+"🐄 Eficiencia de forraje: la variable que más impacta tu costo por litro
 
-El problema: Forrajes son 91% del tonelaje agrícola en Durango.
-Con 5.6M litros/día de producción láctea, eficiencia de conversión = rentabilidad.
+El problema: Los forrajes representan 91% del tonelaje agrícola en Durango.
+Con 5.6M litros/día de producción láctea en la región, la eficiencia de conversión define la rentabilidad.
 
-Estrategia de alimentación eficiente:
+Claves de una ración eficiente:
 
-1. BALANCE MAÍZ FORRAJERO + ALFALFA:
-   - Maíz: energía (2.3M toneladas producidas en Durango)
-   - Alfalfa: proteína (2.5M toneladas, forraje premium)
-   - Proporción óptima: 60% maíz / 40% alfalfa (ajustar según análisis)
+1. BALANCE MAÍZ + ALFALFA:
+   - Maíz forrajero: fuente de energía (Durango produce 2.3M toneladas al año)
+   - Alfalfa: fuente de proteína (2.5M toneladas, forraje premium regional)
+   - Proporción ideal: depende del análisis de tu hato — consulta a tu nutriólogo
 
-2. CONVERSIÓN ESPERADA:
-   - Buena conversión: 1.3-1.5 kg materia seca → 1 litro leche
-   - Mala conversión: >1.8 kg materia seca → 1 litro leche
-   - Costo diferencial: $2-3/litro en forraje
+2. SEÑALES DE MALA CONVERSIÓN:
+   - Animal consume pero no produce al nivel esperado
+   - Heces con fibra visible sin digerir
+   - Pérdida de condición corporal en alta producción
 
-3. MANEJO ESTACIONAL (CRÍTICO):
-   - Verano: mayor producción láctea (estacionalidad nacional)
-   - Verano también: estrés térmico reduce consumo
-   - Solución: sombra, agua fresca, ajustar horarios alimentación
+3. MANEJO DE ESTRÉS TÉRMICO (VERANO):
+   - Calor reduce consumo voluntario de alimento
+   - Estrategia: sombra, agua fresca ad libitum, ajustar horarios de alimentación
 
-4. COMARCA LAGUNERA CONTEXT:
-   - 21.7% producción nacional láctea
-   - Sistema integrado: forage → dairy → processing (Grupo Lala)
-
-Con conversión eficiente, operaciones lácteas mejoran margen $1.50-2.50/litro.
+4. COMARCA LAGUNERA — CONTEXTO REGIONAL:
+   - 21.7% de la producción láctea nacional
+   - Sistema integrado forraje → lechería → procesamiento (Grupo Lala)
 
 En ganadería, los detalles operativos hacen la diferencia. 📊
 
@@ -432,19 +425,23 @@ IMPORTANTE - REGLAS DE CAPTION SECTOR-ESPECÍFICO:"""
 - Incluye 5-8 hashtags relevantes en suggested_hashtags
 
 EJEMPLOS DE CAPTION (para fb-post/ig-post):
-❌ INCORRECTO: "❄️ ¿Sabías que sin cadena de frío pierdes hasta 30% del valor de tus cultivos? Te explico cómo"
-✅ CORRECTO: "❄️ La cadena de frío es crítica en postcosecha - sin ella, pierdes hasta 30% del valor de tus cultivos.
+❌ INCORRECTO: "¿Sabías que sin cadena de frío pierdes hasta 30% del valor de tus cultivos? Te explico cómo"
+  (Problema: es un teaser sin información, y el porcentaje "30%" es inventado)
 
-Aquí está el proceso completo:
+✅ CORRECTO: "❄️ La cadena de frío en postcosecha es uno de los puntos más críticos — y más descuidados — en la comercialización agrícola.
 
-1. COSECHA (0-2h): Mantén producto a sombra inmediatamente
-2. PRE-ENFRIAMIENTO (2-4h): Baja temperatura a 2-4°C lo más rápido posible
-3. ALMACENAMIENTO: Cámara fría constante, sin romper la cadena
-4. TRANSPORTE: Vehículo refrigerado certificado
+Sin control de temperatura, el deterioro se acelera desde el momento de la cosecha. El producto llega al mercado en peores condiciones, baja el precio de venta y aumentan los rechazos.
 
-Cada hora sin refrigeración acelera deterioro y reduce precio de venta. Invertir en cadena de frío se paga solo en 2-3 cosechas.
+El proceso correcto:
+1. COSECHA (0-2h): Saca el producto del sol inmediatamente, lleva a zona sombreada
+2. PRE-ENFRIAMIENTO (2-4h): Baja la temperatura del producto lo antes posible
+3. ALMACENAMIENTO: Cámara fría constante — nunca interrumpas la cadena
+4. TRANSPORTE: Vehículo refrigerado hasta el punto de entrega
 
-📞 ¿Necesitas asesoría en refrigeración postcosecha? Contáctanos al 677-119-7737"
+Cada hora de retraso en el enfriamiento acorta la vida útil del producto y reduce tu margen de venta.
+
+📞 ¿Dudas sobre manejo postcosecha? Escríbenos al 677-119-7737"
+  (Correcto: explica el proceso completo, sin porcentajes inventados)
 
 RESPONDE SOLO CON JSON (sin markdown):
 {{
