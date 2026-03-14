@@ -249,9 +249,9 @@ def get_visual_style_for_post(post_type: str, structure_type: str, weekday: str 
             "- SIN personas — el protagonista es el sistema técnico.\n"
             "- Colores de acento IMPAG (verde #2E7D32, azul #1565C0) para resaltar componentes clave.\n"
             "- Si es proceso de instalación: mostrar las etapas en vista de corte o explosionada (exploded view).\n"
-            "- Ejemplo de prompt: 'Isometric 3D technical render of a solar-powered water pump system, '
-              'exploded view showing solar panel, pump, pipes and drip irrigation network, '
-              'clean labels, soft studio lighting, white background, IMPAG green accents'\n"
+            "- Ejemplo de prompt: 'Isometric 3D technical render of a solar-powered water pump system, "
+            "exploded view showing solar panel, pump, pipes and drip irrigation network, "
+            "clean labels, soft studio lighting, white background, IMPAG green accents'\n"
         )
 
     # ── 3D / ILLUSTRATED INFOGRAPHIC ────────────────────────────────────────
