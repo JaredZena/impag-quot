@@ -23,7 +23,12 @@ class TopicStrategy(BaseModel):
     target_audience: str  # "plant", "animal", "forestry", "general"
 
 
-def _call_topic_llm(client: anthropic.Anthropic, prompt: str) -> 'TopicStrategy':
+def _call_topic_llm_low_temp(client: anthropic.Anthropic, prompt: str) -> 'TopicStrategy':
+    """Same as _call_topic_llm but with lower temperature for correction retries."""
+    return _call_topic_llm(client, prompt, temperature=0.2)
+
+
+def _call_topic_llm(client: anthropic.Anthropic, prompt: str, temperature: float = 0.7) -> 'TopicStrategy':
     """Call LLM with a prompt and parse the TopicStrategy JSON response."""
     try:
         import social_logging
@@ -34,7 +39,7 @@ def _call_topic_llm(client: anthropic.Anthropic, prompt: str) -> 'TopicStrategy'
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=512,
-        temperature=0.7,
+        temperature=temperature,
         messages=[{"role": "user", "content": prompt}]
     )
 
@@ -575,35 +580,61 @@ RESPONDE SOLO CON JSON (sin markdown):
             except Exception:
                 pass
 
+            # Clean the bad topic before sending — strip newlines, phone numbers, excess whitespace
+            import re as _re
+            bad_topic_clean = _re.sub(r'\n+', ' ', topic_strategy.topic)           # collapse newlines
+            bad_topic_clean = _re.sub(r'\d{3}[-.\s]?\d{3}[-.\s]?\d{4}', '', bad_topic_clean)  # strip phone numbers
+            bad_topic_clean = _re.sub(r'#\w+', '', bad_topic_clean)               # strip hashtags
+            bad_topic_clean = bad_topic_clean.strip()[:200]                        # truncate
+
             tuesday_note = (
                 "\n- La SOLUCIÓN debe ser un producto físico vendible (equipo, insumo, herramienta)."
                 "\n- NO uses capacitaciones, certificaciones ni protocolos de gestión como solución."
                 if day_name == 'Tuesday' else ""
             )
 
-            correction_prompt = f"""El siguiente tema NO está en el formato correcto:
-"{topic_strategy.topic}"
+            correction_prompt = f"""El siguiente tema NO está en el formato correcto para un post de {day_name}:
+"{bad_topic_clean}"
 
-DEBES reformularlo como: "Error específico → Consecuencia concreta → Solución accionable"
-- Cada parte separada por " → " (con espacios)
-- ERROR: la práctica incorrecta
-- CONSECUENCIA: el daño real (sin inventar porcentajes)
+DEBES reformularlo EXACTAMENTE como: "Error → Consecuencia → Solución"
+Reglas estrictas:
+- Usa " → " (flecha con espacios) para separar las 3 partes
+- ERROR: la práctica incorrecta del productor (acción concreta)
+- CONSECUENCIA: el daño real que ocurre (sin inventar porcentajes)
 - SOLUCIÓN: la técnica o producto que lo resuelve{tuesday_note}
 
-Ejemplos correctos:
-- "No calibrar la aspersora → Aplicación desigual deja zonas sin proteger → Aspersor calibrado con boquilla regulable"
+Ejemplos del formato CORRECTO:
+- "No calibrar la aspersora → Dosis desigual deja zonas sin proteger → Aspersor con boquilla regulable calibrada"
 - "No documentar trazabilidad → Cargamentos rechazados en frontera → Sistema de registro desde siembra hasta empaque"
+- "Transportar fruta sin protección → Golpes y manchas bajan precio de venta → Caja plástica ventilada con acolchado interno"
 
 RESPONDE SOLO CON JSON (sin markdown):
 {{
-  "topic": "Error → Consecuencia → Solución (reformulado correctamente)",
-  "problem_identified": "{topic_strategy.problem_identified}",
-  "angle": "{topic_strategy.angle}",
-  "urgency_level": "{topic_strategy.urgency_level}",
-  "target_audience": "{topic_strategy.target_audience}"
+  "topic": "Error concreto → Consecuencia real → Solución accionable",
+  "problem_identified": "descripción del problema en una oración",
+  "angle": "producto o práctica principal que resuelve el problema",
+  "urgency_level": "high",
+  "target_audience": "general"
 }}"""
 
-            topic_strategy = _call_topic_llm(client, correction_prompt)
+            corrected = _call_topic_llm_low_temp(client, correction_prompt)
+
+            # If retry also failed, build a minimal valid topic from what we know
+            if '→' not in corrected.topic:
+                try:
+                    import social_logging
+                    social_logging.safe_log_warning(
+                        f"[TOPIC ENGINE] {day_name} correction retry also failed — using fallback construction",
+                        corrected_topic=corrected.topic
+                    )
+                except Exception:
+                    pass
+                # Construct a minimal valid topic from problem_identified and angle
+                problem = (corrected.problem_identified or topic_strategy.problem_identified or "práctica incorrecta").split('.')[0][:60]
+                angle = (corrected.angle or topic_strategy.angle or "solución técnica")[:60]
+                corrected.topic = f"{problem} → daño en cultivo o producto → {angle}"
+
+            topic_strategy = corrected
 
             try:
                 import social_logging

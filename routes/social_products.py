@@ -5,7 +5,7 @@ Handles semantic search, product filtering, and selection logic.
 
 from typing import List, Dict, Any, Set, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, and_
 from models import SupplierProduct, ProductCategory
 from collections import Counter
 import logging
@@ -25,7 +25,9 @@ def fetch_db_products(db: Session, limit: int = 10) -> List[Dict[str, Any]]:
         .join(ProductCategory, SupplierProduct.category_id == ProductCategory.id)
         .filter(
             SupplierProduct.is_active == True,
-            SupplierProduct.archived_at == None
+            SupplierProduct.archived_at == None,
+            SupplierProduct.name != None,
+            SupplierProduct.name != ''
         )
         .order_by(func.random())  # PostgreSQL random() for true randomness
         .limit(limit)
@@ -286,16 +288,18 @@ def select_product_for_post(
             .filter(
                 SupplierProduct.is_active == True,
                 SupplierProduct.archived_at == None,
-                SupplierProduct.embedding != None
+                SupplierProduct.embedding != None,
+                SupplierProduct.name != None,
+                SupplierProduct.name != ''
             )
         )
-        
+
         # Filter by preferred category if specified
         if preferred_category:
             product_query = product_query.filter(
                 ProductCategory.name.ilike(f"%{preferred_category}%")
             )
-        
+
         # Get top products by vector similarity
         candidate_products = (
             product_query.order_by(
