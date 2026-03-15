@@ -1125,10 +1125,72 @@ def generate_with_new_pipeline(
                 category=selected_category
             )
         else:
-            social_logging.safe_log_info(
-                "[NEW PIPELINE - STEP 3] No product found, continuing without product",
-                user_id=user_id
-            )
+            is_tuesday = weekday_theme.get('day_name') == 'Tuesday'
+
+            if is_tuesday:
+                # Tuesday requires a product — attempt progressively broader fallback searches
+                TUESDAY_FALLBACK_CATEGORIES = [
+                    "riego", "fertilizantes", "aspersoras", "agroquimicos",
+                    "mallasombra", "herramientas", "sustratos"
+                ]
+                social_logging.safe_log_info(
+                    "[NEW PIPELINE - STEP 3] Tuesday: no product found with original query, trying fallback categories",
+                    original_query=search_query,
+                    user_id=user_id
+                )
+
+                for fallback_cat in TUESDAY_FALLBACK_CATEGORIES:
+                    selected_product_id, selected_category, product_details_dict = social_products.select_product_for_post(
+                        db=db,
+                        search_query=fallback_cat,
+                        preferred_category=fallback_cat
+                    )
+                    if selected_product_id and product_details_dict:
+                        product_details = {
+                            'name': product_details_dict.get('name', ''),
+                            'category': product_details_dict.get('category', ''),
+                            'features': product_details_dict.get('features', [])[:3]
+                        }
+                        social_logging.safe_log_info(
+                            "[NEW PIPELINE - STEP 3] Tuesday: fallback product found",
+                            fallback_category=fallback_cat,
+                            product_id=selected_product_id,
+                            product_name=product_details['name']
+                        )
+                        break
+
+                # Last resort: any random active product from the catalog
+                if not product_details:
+                    social_logging.safe_log_info(
+                        "[NEW PIPELINE - STEP 3] Tuesday: trying random product as last resort",
+                        user_id=user_id
+                    )
+                    random_products = social_products.fetch_db_products(db, limit=1)
+                    if random_products:
+                        p = random_products[0]
+                        selected_product_id = p.get('id')
+                        selected_category = p.get('category', '')
+                        product_details = {
+                            'name': p.get('name', ''),
+                            'category': p.get('category', ''),
+                            'features': []
+                        }
+                        social_logging.safe_log_info(
+                            "[NEW PIPELINE - STEP 3] Tuesday: random product selected",
+                            product_id=selected_product_id,
+                            product_name=product_details['name']
+                        )
+
+                if not product_details:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="No se encontró ningún producto en el catálogo para el post de martes. Verifica que hay productos activos en la base de datos."
+                    )
+            else:
+                social_logging.safe_log_info(
+                    "[NEW PIPELINE - STEP 3] No product found, continuing without product",
+                    user_id=user_id
+                )
     else:
         social_logging.safe_log_info(
             "[NEW PIPELINE - STEP 3] Product selection skipped (not needed)",

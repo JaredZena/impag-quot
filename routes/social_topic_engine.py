@@ -199,8 +199,74 @@ enfrentan en CUALQUIER área de su operación.
     # Add task instructions - format varies by weekday
     day_name = weekday_theme['day_name']
 
-    if day_name in ['Tuesday', 'Thursday']:
-        # Tuesday (Promotion) & Thursday (Problem & Solution) - use "Error → Daño → Solución" format
+    if day_name == 'Tuesday':
+        # Tuesday = Promotion day — topic must connect to a physical product IMPAG can sell
+        if user_suggested_topic:
+            prompt += f"""🔴 TEMA OBLIGATORIO DEL USUARIO: "{user_suggested_topic}"
+El post DEBE ser sobre este tema. NO lo ignores ni lo reemplaces.
+
+TU TAREA:
+Formula el tema del usuario en el formato "Error → Consecuencia → Solución con producto":
+   - ERROR: La práctica incorrecta relacionada con "{user_suggested_topic}"
+   - CONSECUENCIA: Daño concreto y descriptivo — NO inventes porcentajes ni cifras
+   - SOLUCIÓN: Técnica específica que involucre un insumo o equipo físico (producto vendible)
+
+⚠️ MARTES = DÍA PROMOCIONAL — REGLAS CRÍTICAS:
+- La SOLUCIÓN debe involucrar un producto físico que IMPAG puede vender:
+  equipos de aspersión, sistemas de riego, fertilizantes, sustratos, mallasombra,
+  herramientas, plaguicidas, semillas, materiales de invernadero, bombas, etc.
+- NO uses como solución: capacitaciones, certificaciones, talleres, asesorías, protocolos de gestión
+- El tema debe poder conectarse a un producto del catálogo IMPAG
+- DEBES usar EXACTAMENTE este formato: "Error → Consecuencia → Solución"
+- NO inventes porcentajes ni cifras fabricadas
+
+Ejemplos CORRECTOS para martes:
+- "No calibrar la aspersora → Dosis desigual deja zonas sin proteger y desperdicia producto → Aspersor de mochila calibrado con boquilla regulable"
+- "Regar sin control de caudal → Suelo compactado y raíces asfixiadas en temporal → Sistema de riego por goteo con regulador de presión"
+- "Usar mallasombra inadecuada → Quema de plántulas y pérdida de stand → Mallasombra 35% calibrada para Durango"
+
+RESPONDE SOLO CON JSON (sin markdown):
+{{
+  "topic": "Error específico → Consecuencia concreta → Solución con producto físico (sobre {user_suggested_topic})",
+  "problem_identified": "Descripción del problema real relacionado con {user_suggested_topic}",
+  "angle": "producto o insumo físico que resuelve el problema",
+  "urgency_level": "high|medium|low",
+  "target_audience": "plant|animal|forestry|general"
+}}
+"""
+        else:
+            prompt += """TU TAREA:
+1. Identifica un problema agrícola REAL que productores enfrentan y que se resuelve con un producto físico
+2. Formula como: "Error → Consecuencia → Solución con producto"
+   - ERROR: Práctica incorrecta específica
+   - CONSECUENCIA: Daño concreto y descriptivo — NO inventes porcentajes ni cifras
+   - SOLUCIÓN: Técnica que involucre un insumo o equipo físico que IMPAG puede vender
+
+⚠️ MARTES = DÍA PROMOCIONAL — REGLAS CRÍTICAS:
+- La SOLUCIÓN debe ser un producto físico vendible: equipos de aspersión, sistemas de riego,
+  fertilizantes, sustratos, mallasombra, herramientas, plaguicidas, semillas, bombas, etc.
+- NO uses como solución: capacitaciones, certificaciones, talleres, asesorías, protocolos de gestión
+- El tema DEBE poder conectarse a algo del catálogo IMPAG
+- NO inventes porcentajes ni cifras fabricadas
+
+Ejemplos CORRECTOS para martes:
+- "No calibrar la aspersora → Dosis desigual deja zonas sin proteger y desperdicia producto → Aspersor con boquilla regulable y calibración correcta"
+- "Regar sin control de caudal → Suelo compactado y raíces asfixiadas → Sistema de riego por goteo con regulador de presión"
+- "Usar mallasombra inadecuada → Quema de plántulas y pérdida de stand en invernadero → Mallasombra 35% para clima semi-árido"
+- "Fertilizar sin análisis de suelo → Exceso de sales daña raíces → Kit de análisis de suelo + fertilizante balanceado"
+- "Almacenar agroquímicos sin equipo de protección → Intoxicación del trabajador y multas sanitarias → Traje de protección y kit de aspersión segura"
+
+RESPONDE SOLO CON JSON (sin markdown):
+{
+  "topic": "Error específico → Consecuencia concreta y descriptiva → Solución con producto físico",
+  "problem_identified": "Descripción del problema real que enfrenta el productor",
+  "angle": "producto o insumo físico que resuelve el problema",
+  "urgency_level": "high|medium|low",
+  "target_audience": "plant|animal|forestry|general"
+}
+"""
+    elif day_name == 'Thursday':
+        # Thursday = Problem & Solution — educational, no product constraint
         if user_suggested_topic:
             prompt += f"""🔴 TEMA OBLIGATORIO DEL USUARIO: "{user_suggested_topic}"
 El post DEBE ser sobre este tema. NO lo ignores ni lo reemplaces.
