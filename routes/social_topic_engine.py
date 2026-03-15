@@ -560,24 +560,56 @@ RESPONDE SOLO CON JSON (sin markdown):
     day_name = weekday_theme['day_name']
 
     if day_name in ['Tuesday', 'Thursday']:
-        # Tuesday/Thursday should use "Error → Daño → Solución" format
-        if '→' not in topic_strategy.topic:
+        # Tuesday/Thursday must use "Error → Daño → Solución" format.
+        # If the LLM returned a plain headline, retry once with a strict correction prompt.
+        needs_retry = ('→' not in topic_strategy.topic) or (not validate_topic_format(topic_strategy.topic))
+
+        if needs_retry:
             try:
                 import social_logging
                 social_logging.safe_log_warning(
-                    f"[TOPIC ENGINE] {day_name} topic missing '→' separators - should use 'Error → Daño → Solución' format",
-                    topic=topic_strategy.topic,
+                    f"[TOPIC ENGINE] {day_name} topic missing '→' format — retrying with correction prompt",
+                    bad_topic=topic_strategy.topic,
                     day=day_name
                 )
             except Exception:
                 pass
-        elif not validate_topic_format(topic_strategy.topic):
+
+            tuesday_note = (
+                "\n- La SOLUCIÓN debe ser un producto físico vendible (equipo, insumo, herramienta)."
+                "\n- NO uses capacitaciones, certificaciones ni protocolos de gestión como solución."
+                if day_name == 'Tuesday' else ""
+            )
+
+            correction_prompt = f"""El siguiente tema NO está en el formato correcto:
+"{topic_strategy.topic}"
+
+DEBES reformularlo como: "Error específico → Consecuencia concreta → Solución accionable"
+- Cada parte separada por " → " (con espacios)
+- ERROR: la práctica incorrecta
+- CONSECUENCIA: el daño real (sin inventar porcentajes)
+- SOLUCIÓN: la técnica o producto que lo resuelve{tuesday_note}
+
+Ejemplos correctos:
+- "No calibrar la aspersora → Aplicación desigual deja zonas sin proteger → Aspersor calibrado con boquilla regulable"
+- "No documentar trazabilidad → Cargamentos rechazados en frontera → Sistema de registro desde siembra hasta empaque"
+
+RESPONDE SOLO CON JSON (sin markdown):
+{{
+  "topic": "Error → Consecuencia → Solución (reformulado correctamente)",
+  "problem_identified": "{topic_strategy.problem_identified}",
+  "angle": "{topic_strategy.angle}",
+  "urgency_level": "{topic_strategy.urgency_level}",
+  "target_audience": "{topic_strategy.target_audience}"
+}}"""
+
+            topic_strategy = _call_topic_llm(client, correction_prompt)
+
             try:
                 import social_logging
-                social_logging.safe_log_warning(
-                    f"[TOPIC ENGINE] {day_name} topic format validation failed - expected 'Error → Daño → Solución'",
-                    topic=topic_strategy.topic,
-                    day=day_name
+                social_logging.safe_log_info(
+                    f"[TOPIC ENGINE] {day_name} topic corrected",
+                    corrected_topic=topic_strategy.topic
                 )
             except Exception:
                 pass
