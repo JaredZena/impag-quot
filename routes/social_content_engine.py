@@ -1,10 +1,11 @@
 """
-Content Engine: Generates caption and image_prompt.
+Content Engine: Generates caption and image_prompt in two sequential LLM calls.
 
-This module handles STEP 4 of the multi-step pipeline:
-- Input: topic, strategy, product (if selected), channel format
-- Output: caption, image_prompt, cta, hashtags
-- Prompt size: ~1,500 tokens (vs ~20k in old system)
+Step 4a: Caption generation — focused on message, tone, and channel format.
+Step 4b: Image prompt generation — reads the final caption to ensure visual alignment.
+
+Separating these two calls means the image always reflects the actual angle
+the caption took, not just the raw topic keywords.
 """
 from typing import Optional, Dict, Any
 import anthropic
@@ -14,38 +15,19 @@ from social_config import CHANNEL_FORMATS, CONTENT_RULES, CONTACT_INFO
 import social_image_prompt
 
 
-def generate_content(
-    client: anthropic.Anthropic,
-    topic_strategy,  # TopicStrategy from Topic Engine
-    content_strategy,  # ContentStrategy from Strategy Engine
+# ── STEP 4a: CAPTION ─────────────────────────────────────────────────────────
+
+def _build_caption_prompt(
+    topic_strategy,
+    content_strategy,
     product_details: Optional[Dict[str, Any]] = None,
     weekday_theme: Optional[Dict[str, Any]] = None,
-    special_date: Optional[Dict[str, Any]] = None
-) -> dict:
-    """
-    Generate content (caption, image_prompt) using LLM.
+    special_date: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Build the caption-only prompt."""
+    channel_format = CHANNEL_FORMATS.get(content_strategy.channel, {})
 
-    Args:
-        client: Anthropic client
-        topic_strategy: TopicStrategy from Topic Engine
-        content_strategy: ContentStrategy from Strategy Engine
-        product_details: Optional product details dict
-        weekday_theme: Optional weekday theme dict
-
-    Returns:
-        Dict with caption, image_prompt, cta, suggested_hashtags
-    """
-    # Detect structure type for image generation
-    # Pass weekday to ensure Thursday uses problem-solution, other days use educational framing
-    weekday = weekday_theme.get('day_name') if weekday_theme else None
-    structure_type, structure_guide = social_image_prompt.detect_structure_type(
-        topic=topic_strategy.topic,
-        post_type=content_strategy.post_type,
-        weekday=weekday
-    )
-
-    # Build compact prompt (~1,500 tokens)
-    prompt = f"""Genera contenido para este post.
+    prompt = f"""Genera el caption para este post.
 
 TEMA: {topic_strategy.topic}
 PROBLEMA: {topic_strategy.problem_identified}
@@ -57,20 +39,16 @@ ESTRATEGIA:
 
 """
 
-    # Add product info (brief, if selected)
     if product_details:
         prompt += f"""PRODUCTO SELECCIONADO:
 - Nombre: {product_details.get('name', 'N/A')}
 - Categoría: {product_details.get('category', 'N/A')}
 """
-        # Add 2-3 key features if available
         features = product_details.get('features', [])
         if features and isinstance(features, list):
             prompt += f"- Características: {', '.join(str(f) for f in features[:3])}\n"
         prompt += "\n"
 
-    # Add format constraints (from config)
-    channel_format = CHANNEL_FORMATS.get(content_strategy.channel, {})
     prompt += f"""FORMATO PARA {content_strategy.channel}:
 - Aspecto: {channel_format.get('aspect_ratio', 'N/A')}
 - Caption máx: {channel_format.get('caption_max_chars', 'N/A')} caracteres
@@ -85,13 +63,11 @@ ESTRATEGIA:
 
     prompt += "\n"
 
-    # Add content rules (§8, brief)
     prompt += "REGLAS DE CONTENIDO (§8):\n"
     for i, rule in enumerate(CONTENT_RULES, 1):
         prompt += f"{i}. {rule}\n"
     prompt += "\n"
 
-    # Add contact info for CTA
     prompt += f"""CONTACTO (para CTA):
 - Web: {CONTACT_INFO['web']}
 - WhatsApp: {CONTACT_INFO['whatsapp']}
@@ -99,27 +75,20 @@ ESTRATEGIA:
 
 """
 
-    # Build detailed image prompt instructions using social_image_prompt module
-    strat_data = {
-        "channel": content_strategy.channel,
-        "topic": topic_strategy.topic,
-        "post_type": content_strategy.post_type
-    }
-
-    image_instructions = social_image_prompt.build_image_prompt_instructions(
-        strat_data=strat_data,
-        structure_type=structure_type,
-        structure_guide=structure_guide,
-        contact_info=CONTACT_INFO,
-        selected_product_id=product_details.get('name') if product_details else None,
-        weekday_theme=weekday_theme
+    # Shared caption-only JSON schema (no image_prompt here)
+    caption_json = (
+        "RESPONDE SOLO CON JSON (sin markdown):\n"
+        "{\n"
+        '  "caption": "texto del caption completo adaptado al canal",\n'
+        '  "cta": "llamada a la acción",\n'
+        '  "suggested_hashtags": ["#hashtag1", "#hashtag2"],\n'
+        f'  "channel": "{content_strategy.channel}",\n'
+        f'  "needs_music": {str(channel_format.get("needs_music", False)).lower()},\n'
+        '  "posting_time": "HH:MM",\n'
+        '  "notes": "notas opcionales"\n'
+        "}\n"
     )
 
-    # Append image prompt instructions to the prompt
-    prompt += image_instructions + "\n\n"
-
-    # Task instructions
-    # Check if this is a "La Vida en el Rancho" post
     is_rancho_post = weekday_theme and weekday_theme.get('theme') == '🌾 La Vida en el Rancho'
     is_social_celebration = special_date and special_date.get('special_date_type') == 'social'
 
@@ -161,18 +130,7 @@ Porque detrás de muchos cultivos exitosos hay una mujer tomando decisiones, res
 
 #DiaInternacionalDeLaMujer #MujeresEnElCampo #AgriculturaMexicana #IMPAG"
 
-RESPONDE SOLO CON JSON (sin markdown):
-{{
-  "caption": "caption completo de felicitación con párrafos, saludo, contacto y hashtags",
-  "image_prompt": "PROMPT DETALLADO siguiendo las instrucciones arriba (OBLIGATORIO - nunca null)",
-  "cta": "llamada a la acción celebratoria",
-  "suggested_hashtags": ["#{special_date_name.replace(' ', '')}", "#IMPAG", "#AgriculturaMexicana"],
-  "channel": "{content_strategy.channel}",
-  "needs_music": {str(channel_format.get('needs_music', False)).lower()},
-  "posting_time": "HH:MM (hora sugerida en formato 24h)",
-  "notes": "notas opcionales"
-}}
-"""
+{caption_json}"""
 
     elif is_rancho_post:
         prompt += f"""TU TAREA - POST DE "LA VIDA EN EL RANCHO":
@@ -243,13 +201,12 @@ Hay ventas que dejan la mano vacía... y el corazón apretado."
 
 ✅ LO QUE SÍ DEBES HACER:
 - Caption LARGO (400-800 palabras) - Facebook premia dwell time
-- Imagen simple: foto auténtica del rancho (manos trabajando, campo al amanecer, herramientas viejas)
 - Sin CTA comercial - el CTA es emocional ("solo quien vive del campo entiende")
 - Hashtags simples: #ElCampo #VidaRural #Rancho #Agricultura #Productor
 
-IMPORTANTE - REGLAS DE CAPTION:"""
+IMPORTANTE - REGLAS DE CAPTION:
+{caption_json}"""
 
-    # Check if this is a Saturday sector-specific post
     elif weekday_theme and weekday_theme.get('sector'):
         sector = weekday_theme.get('sector', 'general')
         emotional_angle = weekday_theme.get('emotional_angle', '')
@@ -407,11 +364,12 @@ En ganadería, los detalles operativos hacen la diferencia. 📊
 
 """
 
-        prompt += """
-IMPORTANTE - REGLAS DE CAPTION SECTOR-ESPECÍFICO:"""
+        prompt += f"""
+IMPORTANTE - REGLAS DE CAPTION SECTOR-ESPECÍFICO:
+{caption_json}"""
 
     else:
-        prompt += """IMPORTANTE - REGLAS DE CAPTION:
+        prompt += f"""IMPORTANTE - REGLAS DE CAPTION:
 - Caption debe respetar el límite de caracteres del canal
 - Para canales visuales (wa-status, tiktok, reels, stories): caption CORTO, contenido en imagen
 - Para canales de texto (fb-post, ig-post): caption DEBE ser LARGO y SUSTANCIAL
@@ -420,9 +378,6 @@ IMPORTANTE - REGLAS DE CAPTION SECTOR-ESPECÍFICO:"""
   * Incluye datos, pasos, o información educativa real
   * El caption debe entregar VALOR por sí solo, no solo prometer información
   * Estructura sugerida para fb-post/ig-post: Hook → Explicación → Pasos/Tips → CTA
-- image_prompt debe seguir TODAS las instrucciones detalladas arriba (logos IMPAG, dimensiones, estructura, estilo)
-- Para TikTok: CARRUSEL DE 2-3 IMÁGENES (NO video) - genera carousel_slides con prompts individuales
-- Incluye 5-8 hashtags relevantes en suggested_hashtags
 
 EJEMPLOS DE CAPTION (para fb-post/ig-post):
 ❌ INCORRECTO: "¿Sabías que sin cadena de frío pierdes hasta 30% del valor de tus cultivos? Te explico cómo"
@@ -443,55 +398,54 @@ Cada hora de retraso en el enfriamiento acorta la vida útil del producto y redu
 📞 ¿Dudas sobre manejo postcosecha? Escríbenos al 677-119-7737"
   (Correcto: explica el proceso completo, sin porcentajes inventados)
 
-RESPONDE SOLO CON JSON (sin markdown):
-{{
-  "caption": "texto del caption adaptado al canal - LARGO y EDUCATIVO para fb-post/ig-post",
-  "image_prompt": "PROMPT DETALLADO siguiendo las instrucciones arriba (OBLIGATORIO - nunca null)",
-  "carousel_slides": ["Slide 1 prompt...", "Slide 2 prompt...", "Slide 3 prompt..."] (SOLO para TikTok carrusel),
-  "cta": "llamada a la acción clara",
-  "suggested_hashtags": ["#agricultura", "#riego", "..."],
-  "channel": "{content_strategy.channel}",
-  "needs_music": {str(channel_format.get('needs_music', False)).lower()},
-  "posting_time": "HH:MM (hora sugerida en formato 24h)",
-  "notes": "notas opcionales"
-}}
-"""
+{caption_json}"""
 
-    # Log the prompt (for debugging)
+    return prompt
+
+
+def _generate_caption(
+    client: anthropic.Anthropic,
+    topic_strategy,
+    content_strategy,
+    product_details: Optional[Dict[str, Any]] = None,
+    weekday_theme: Optional[Dict[str, Any]] = None,
+    special_date: Optional[Dict[str, Any]] = None,
+) -> dict:
+    """Step 4a: Generate caption only."""
+    prompt = _build_caption_prompt(
+        topic_strategy, content_strategy, product_details, weekday_theme, special_date
+    )
+
     try:
         import social_logging
         social_logging.safe_log_info(
-            "[CONTENT ENGINE] Prompt built",
+            "[CONTENT ENGINE] Caption prompt built",
             prompt_length=len(prompt),
             prompt_tokens_estimate=len(prompt) // 4,
             full_prompt=prompt
         )
     except Exception:
-        pass  # Logging failure shouldn't break generation
+        pass
 
-    # Call LLM (increased max_tokens for detailed image prompts)
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
-        max_tokens=3072,
+        max_tokens=2048,
         temperature=0.8,
         messages=[{"role": "user", "content": prompt}]
     )
 
-    # Parse JSON from response
     content = response.content[0].text.strip()
 
-    # Log raw LLM response
     try:
         import social_logging
         social_logging.safe_log_info(
-            "[CONTENT ENGINE] LLM response received",
+            "[CONTENT ENGINE] Caption LLM response received",
             response_length=len(content),
-            raw_response=content[:500] + "..." if len(content) > 500 else content  # Truncate long responses
+            raw_response=content[:500] + "..." if len(content) > 500 else content
         )
     except Exception:
         pass
 
-    # Remove markdown code blocks if present
     if content.startswith("```"):
         match = re.search(r'```(?:json)?\s*([\s\S]*?)```', content)
         if match:
@@ -499,30 +453,184 @@ RESPONDE SOLO CON JSON (sin markdown):
         else:
             content = content.replace("```json", "").replace("```", "").strip()
 
-    # Parse JSON
     try:
         data = json.loads(content)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse JSON from LLM response: {e}\nContent: {content}")
+        raise ValueError(f"Failed to parse caption JSON: {e}\nContent: {content}")
 
-    # Validate required fields
     if not data.get('caption'):
         raise ValueError("Missing required field: caption")
-    if not data.get('image_prompt'):
-        raise ValueError("Missing required field: image_prompt")
 
-    # Log parsed result
+    return data
+
+
+# ── STEP 4b: IMAGE PROMPT ────────────────────────────────────────────────────
+
+def _generate_image_prompt(
+    client: anthropic.Anthropic,
+    caption: str,
+    topic_strategy,
+    content_strategy,
+    product_details: Optional[Dict[str, Any]] = None,
+    weekday_theme: Optional[Dict[str, Any]] = None,
+) -> dict:
+    """
+    Step 4b: Generate image_prompt using the actual caption as the primary reference.
+
+    Structure detection runs against caption text (not just the raw topic),
+    so the visual layout matches what the caption actually says.
+    """
+    weekday = weekday_theme.get('day_name') if weekday_theme else None
+
+    # Use caption content to improve structure detection accuracy
+    combined_text = f"{topic_strategy.topic} {caption[:300]}"
+    structure_type, structure_guide = social_image_prompt.detect_structure_type(
+        topic=combined_text,
+        post_type=content_strategy.post_type,
+        weekday=weekday
+    )
+
+    strat_data = {
+        "channel": content_strategy.channel,
+        "topic": topic_strategy.topic,
+        "post_type": content_strategy.post_type
+    }
+
+    image_instructions = social_image_prompt.build_image_prompt_instructions(
+        strat_data=strat_data,
+        structure_type=structure_type,
+        structure_guide=structure_guide,
+        contact_info=CONTACT_INFO,
+        selected_product_id=product_details.get('name') if product_details else None,
+        weekday_theme=weekday_theme
+    )
+
+    is_carousel_channel = content_strategy.channel in ("tiktok", "fb-post", "ig-post")
+    carousel_note = (
+        '  "carousel_slides": ["Slide 1 prompt...", "Slide 2 prompt..."]'
+        if is_carousel_channel
+        else '  "carousel_slides": null'
+    )
+
+    prompt = f"""Genera el image_prompt para este post de redes sociales.
+
+CAPTION FINAL (ya generado — úsalo como referencia principal para la imagen):
+---
+{caption}
+---
+
+TEMA: {topic_strategy.topic}
+TIPO DE POST: {content_strategy.post_type}
+CANAL: {content_strategy.channel}
+
+{image_instructions}
+
+TAREA ESPECÍFICA:
+Genera un image_prompt que represente visualmente el contenido REAL del caption anterior.
+- Refleja el ángulo exacto que tomó el caption, no solo el tema general
+- Si el caption explica un proceso paso a paso → la imagen muestra ese proceso
+- Si el caption hace una comparación → la imagen refleja esa comparación
+- Si el caption cuenta una historia emocional → la imagen transmite esa emoción
+- Sigue el estilo visual (🎨) indicado en las instrucciones de arriba
+
+RESPONDE SOLO CON JSON (sin markdown):
+{{
+  "image_prompt": "PROMPT DETALLADO OBLIGATORIO — describe estilo visual, composición, elementos, colores, dimensiones, branding IMPAG",
+{carousel_note}
+}}
+"""
+
     try:
         import social_logging
         social_logging.safe_log_info(
-            "[CONTENT ENGINE] Content generated successfully",
-            caption_length=len(data.get('caption', '')),
-            has_image_prompt=bool(data.get('image_prompt')),
-            has_cta=bool(data.get('cta')),
-            hashtag_count=len(data.get('suggested_hashtags', [])),
-            channel=data.get('channel')
+            "[CONTENT ENGINE] Image prompt generation started",
+            structure_type=structure_type,
+            caption_length=len(caption)
+        )
+    except Exception:
+        pass
+
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1024,
+        temperature=0.7,
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    content = response.content[0].text.strip()
+
+    if content.startswith("```"):
+        match = re.search(r'```(?:json)?\s*([\s\S]*?)```', content)
+        if match:
+            content = match.group(1).strip()
+        else:
+            content = content.replace("```json", "").replace("```", "").strip()
+
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Failed to parse image_prompt JSON: {e}\nContent: {content}")
+
+    if not data.get('image_prompt'):
+        raise ValueError("Missing required field: image_prompt")
+
+    try:
+        import social_logging
+        social_logging.safe_log_info(
+            "[CONTENT ENGINE] Image prompt generated",
+            has_carousel=bool(data.get('carousel_slides')),
+            image_prompt_length=len(data.get('image_prompt', ''))
         )
     except Exception:
         pass
 
     return data
+
+
+# ── PUBLIC API ────────────────────────────────────────────────────────────────
+
+def generate_content(
+    client: anthropic.Anthropic,
+    topic_strategy,
+    content_strategy,
+    product_details: Optional[Dict[str, Any]] = None,
+    weekday_theme: Optional[Dict[str, Any]] = None,
+    special_date: Optional[Dict[str, Any]] = None
+) -> dict:
+    """
+    Generate caption + image_prompt using two sequential LLM calls.
+
+    Step 4a generates the caption, step 4b reads that caption to produce
+    an image_prompt that reflects what the caption actually says.
+    """
+    # Step 4a: caption
+    caption_data = _generate_caption(
+        client, topic_strategy, content_strategy, product_details, weekday_theme, special_date
+    )
+
+    # Step 4b: image_prompt informed by the actual caption
+    image_data = _generate_image_prompt(
+        client,
+        caption=caption_data['caption'],
+        topic_strategy=topic_strategy,
+        content_strategy=content_strategy,
+        product_details=product_details,
+        weekday_theme=weekday_theme,
+    )
+
+    result = {**caption_data, **image_data}
+
+    try:
+        import social_logging
+        social_logging.safe_log_info(
+            "[CONTENT ENGINE] Content generated successfully",
+            caption_length=len(result.get('caption', '')),
+            has_image_prompt=bool(result.get('image_prompt')),
+            has_carousel=bool(result.get('carousel_slides')),
+            hashtag_count=len(result.get('suggested_hashtags', [])),
+            channel=result.get('channel')
+        )
+    except Exception:
+        pass
+
+    return result
