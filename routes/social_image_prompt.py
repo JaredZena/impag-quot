@@ -206,10 +206,13 @@ def get_weekday_image_style_guidance(weekday_theme: Dict[str, Any]) -> str:
         ),
         "Sunday": (
             "📊 DOMINGO - ESTILO INNOVACIÓN / REPORTES:\n"
-            "- Imagen debe verse actual e informativa: datos, estadísticas, novedad de industria o trivia.\n"
-            "- Estilo: gráficas simples, números destacados, íconos de tendencia o innovación; puede ser más \"report\" o \"noticia\".\n"
-            "- Colores: mantener IMPAG; puede usar bloques de datos o badges (\"Nuevo\", \"Tendencia\") con moderación.\n"
-            "- Si es trivia: pregunta o dato como centro visual; si es estadística, número grande + contexto breve.\n"
+            "- Imagen debe verse actual e informativa: instalación real, dato clave, novedad de industria o trivia.\n"
+            "- ⚠️ BASE SIEMPRE en fotografía fotorrealista de instalación real (invernadero, sistema de riego, "
+            "parcela tecnificada). NO renders 3D futuristas, NO luces LED neón, NO ciencia ficción.\n"
+            "- Si hay estadística o dato: overlay limpio con número grande sobre la fotografía real — "
+            "no en fondo blanco vacío.\n"
+            "- Colores: mantener IMPAG natural; badges ('Nuevo', 'Tendencia 2026') solo si añaden contexto, máximo 1.\n"
+            "- Si es trivia: pregunta o dato como centro visual sobre foto real agrícola difuminada.\n"
         ),
     }
 
@@ -290,7 +293,7 @@ def get_visual_style_for_post(post_type: str, structure_type: str, weekday: str 
         )
 
     # ── DATA VISUALIZATION (ROI, Sunday innovation/stats) ────────────────────
-    if pt in ("roi",) or weekday == "Sunday":
+    if pt in ("roi",):
         return (
             "🎨 ESTILO VISUAL: VISUALIZACIÓN DE DATOS / REPORT\n"
             "- Diseño tipo dashboard o reporte ejecutivo limpio.\n"
@@ -299,6 +302,24 @@ def get_visual_style_for_post(post_type: str, structure_type: str, weekday: str 
             "- Íconos de tendencia, innovación o crecimiento como elementos de apoyo.\n"
             "- Fondo blanco o gris muy claro; sin fotografías de personas ni paisajes.\n"
             "- Badges mínimos ('Nuevo', 'Tendencia 2026') si aplica.\n"
+        )
+
+    if weekday == "Sunday":
+        return (
+            "🎨 ESTILO VISUAL: FOTOGRAFÍA REAL DE INNOVACIÓN AGRÍCOLA\n"
+            "- ⚠️ CRÍTICO: Fotografía fotorrealista de una instalación REAL — invernadero, sistema hidropónico, "
+            "parcela tecnificada, rancho ganadero moderno — según el tema del post.\n"
+            "- NO renders 3D futuristas. NO ciencia ficción. NO luces LED de colores (morado, azul neón). "
+            "NO estética de videojuego ni laboratorio sci-fi.\n"
+            "- La instalación debe verse como algo que EXISTE en México hoy, no en el futuro.\n"
+            "- Luz natural preferida: sol de mediodía o golden hour entrando por el techo del invernadero.\n"
+            "- Si el tema incluye datos o estadísticas: overlay limpio con 1 número grande + contexto breve "
+            "sobre la fotografía real (no en fondo blanco vacío).\n"
+            "- Gráficas simples (barra, línea) solo si son imprescindibles — siempre sobre foto real difuminada, "
+            "NO en fondo blanco.\n"
+            "- Badges ('Tendencia 2026', 'Nuevo') solo si añaden contexto; máximo 1.\n"
+            "- Ejemplos de referencias: hileras de torres hidropónicas en invernadero con luz natural, "
+            "sistema de riego por goteo en parcela de Durango, invernadero de hortalizas con plantas reales y verdes.\n"
         )
 
     # ── MOTIVATIONAL / LIFESTYLE (Monday, La Vida en el Rancho) ─────────────
