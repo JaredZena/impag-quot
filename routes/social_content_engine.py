@@ -505,11 +505,49 @@ def _generate_image_prompt(
         weekday_theme=weekday_theme
     )
 
-    is_carousel_channel = content_strategy.channel in ("tiktok", "fb-post", "ig-post")
-    carousel_note = (
-        '  "carousel_slides": ["Slide 1 prompt...", "Slide 2 prompt..."]'
-        if is_carousel_channel
-        else '  "carousel_slides": null'
+    channel = content_strategy.channel
+    is_tiktok = channel == "tiktok"
+    is_carousel_channel = channel in ("tiktok", "fb-post", "ig-post")
+
+    # Build carousel-specific override for TikTok
+    if is_tiktok:
+        carousel_override = """
+⚠️⚠️⚠️ CANAL TIKTOK — CARRUSEL OBLIGATORIO ⚠️⚠️⚠️
+Este post es un CARRUSEL de 2-3 imágenes individuales. NO generes una sola imagen multi-panel.
+
+REGLAS ABSOLUTAS:
+- Cada slide es una imagen COMPLETA e INDEPENDIENTE (no un panel dentro de otra imagen)
+- Cada slide: vertical 1080×1920px, texto grande y legible (mín 60px), un solo concepto
+- image_prompt = portada (Slide 1), carousel_slides = array con TODOS los slides (incluyendo la portada como primer elemento)
+- 2 slides si el tema es simple, 3 slides si el tema tiene más pasos
+
+ESTRUCTURA OBLIGATORIA para un tema de 3 consejos:
+  Slide 1 (portada): Pregunta o gancho + elemento visual fuerte — hace que el usuario quiera deslizar
+  Slide 2: Consejo 1 + ilustración — explica el primer punto
+  Slide 3: Consejo 2-3 + CTA de contacto IMPAG
+
+EJEMPLO de output correcto para "Riego eficiente":
+{
+  "image_prompt": "Slide 1/3 — PORTADA TikTok: Bold question '¿Estás tirando agua al regar?' Large white text on deep green IMPAG background, water drop icon, field background blurred. Vertical 1080x1920px. Logo IMPAG top right.",
+  "carousel_slides": [
+    "Slide 1/3 — PORTADA: '¿Estás tirando agua al regar?' Bold white text on IMPAG green, water drop icon, blurred field background. Vertical 1080x1920px. Logo IMPAG top right.",
+    "Slide 2/3 — CONSEJO 1: 'Riega en la madrugada, no al mediodía'. Split showing wilted plant (noon sun) vs healthy plant (dawn irrigation). Large number '1' IMPAG green. Vertical 1080x1920px.",
+    "Slide 3/3 — CONSEJO 2 + CTA: 'Sensor de humedad = no más suposiciones'. Close-up soil sensor in field. '¿Dudas? Escríbenos 677-119-7737'. Vertical 1080x1920px. Footer IMPAG."
+  ]
+}
+
+⚠️ NUNCA pongas "4 paneles" o "multi-panel" en un solo image_prompt para TikTok.
+   Cada punto = su propio slide independiente.
+"""
+    else:
+        carousel_override = ""
+
+    carousel_json = (
+        '  "carousel_slides": ["Slide 1 prompt completo...", "Slide 2 prompt completo...", "Slide 3 prompt completo (opcional)"]'
+        if is_tiktok
+        else ('  "carousel_slides": ["Slide 1...", "Slide 2...", "...hasta 10 slides"]'
+              if is_carousel_channel
+              else '  "carousel_slides": null')
     )
 
     prompt = f"""Genera el image_prompt para este post de redes sociales.
@@ -521,8 +559,8 @@ CAPTION FINAL (ya generado — úsalo como referencia principal para la imagen):
 
 TEMA: {topic_strategy.topic}
 TIPO DE POST: {content_strategy.post_type}
-CANAL: {content_strategy.channel}
-
+CANAL: {channel}
+{carousel_override}
 {image_instructions}
 
 TAREA ESPECÍFICA:
@@ -536,7 +574,7 @@ Genera un image_prompt que represente visualmente el contenido REAL del caption 
 RESPONDE SOLO CON JSON (sin markdown):
 {{
   "image_prompt": "PROMPT DETALLADO OBLIGATORIO — describe estilo visual, composición, elementos, colores, dimensiones, branding IMPAG",
-{carousel_note}
+{carousel_json}
 }}
 """
 
