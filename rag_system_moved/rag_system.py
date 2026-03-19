@@ -40,15 +40,15 @@ def get_products_from_db(fallback_margin=30.0, include_internal_details=False):
                     float(sp.shipping_stage4_cost or 0)
                 )
 
-                # Use product's default_margin, or fallback if not set
-                margin_percentage = float(sp.default_margin) if sp.default_margin else fallback_margin
-                
+                # Use product's default_margin (decimal: 0.25 = 25%), or fallback if not set
+                margin_decimal = float(sp.default_margin) if sp.default_margin else (fallback_margin / 100)
+                margin_percentage = margin_decimal * 100
+
                 # Calculate Basis: Cost + Shipping
                 cost_basis = float(sp.cost) + shipping_total
 
-                # Calculate: cost_basis * (1 + margin/100)
-                margin_multiplier = 1 + (margin_percentage / 100)
-                final_price = cost_basis * margin_multiplier
+                # Standardized formula: price = cost / (1 - margin)
+                final_price = cost_basis / (1 - margin_decimal) if margin_decimal < 1 else cost_basis
                 
                 price_str = f"${final_price:,.2f} MXN"
                 
@@ -135,8 +135,8 @@ def get_relevant_products(query_embedding, limit=30, include_internal_details=Fa
                 # Calculate Basis: Cost + Shipping
                 cost_basis = float(sp.cost) + shipping_total
 
-                # Calculate: cost_basis * (1 + margin_decimal)
-                final_price = cost_basis * (1 + margin_decimal)
+                # Standardized formula: price = cost / (1 - margin)
+                final_price = cost_basis / (1 - margin_decimal) if margin_decimal < 1 else cost_basis
                 
                 price_str = f"${final_price:,.2f} MXN"
                 

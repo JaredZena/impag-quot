@@ -20,6 +20,9 @@ from routes.tasks_mgmt import router as tasks_mgmt_router
 from routes.task_categories import router as task_categories_router
 from routes.task_comments import router as task_comments_router
 from routes.task_users import router as task_users_router
+from routes.quotes import router as quotes_router
+from routes.notifications import router as notifications_router
+from routes.public_quotes import router as public_quotes_router
 from auth import verify_google_token
 
 # Lazy import for RAG system to ensure route registration even if import fails
@@ -34,7 +37,15 @@ def get_rag_query_function():
             detail=f"RAG system not available: {str(e)}. Please check that all dependencies are installed."
         )
 
+from fastapi.staticfiles import StaticFiles
+import os
+
 app = FastAPI()
+
+# Serve static files for public quote pages
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,7 +53,9 @@ app.add_middleware(
         "https://impag-admin-app.vercel.app",  # Production domain Product Manager
         "https://impag-quot-web.vercel.app",  # Production domain Cotizador
         "http://localhost:5173",              # Local development
-        "http://localhost:3000"               # Alternative local port
+        "http://localhost:3000",              # Alternative local port
+        "https://todoparaelcampo.com.mx",    # New storefront
+        "https://www.todoparaelcampo.com.mx" # www variant
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
@@ -64,6 +77,9 @@ app.include_router(tasks_mgmt_router)
 app.include_router(task_categories_router)
 app.include_router(task_comments_router)
 app.include_router(task_users_router)
+app.include_router(quotes_router)
+app.include_router(notifications_router)
+app.include_router(public_quotes_router)
 
 class Message(BaseModel):
     role: str  # 'user' or 'assistant'

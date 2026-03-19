@@ -97,13 +97,12 @@ class SupplierProduct(Base):
     package_size = Column(Integer, nullable=True)
     iva = Column(Boolean, default=True, nullable=True)
     specifications = Column(JSON, nullable=True)
-    default_margin = Column(Numeric(5, 4), nullable=True)
     # Note: No calculated_price columns - we'll calculate dynamically
-    
+
     # ===== Supplier-specific columns (existing) =====
     supplier_sku = Column(String(100), nullable=True)
     cost = Column(Numeric(10, 2), nullable=True)
-    default_margin = Column(Numeric(5, 2), nullable=True)  # Margin percentage (e.g., 30.00 = 30%)
+    default_margin = Column(Numeric(5, 4), nullable=True)  # Margin as decimal (0.25 = 25%). Formula: price = cost / (1 - margin)
     currency = Column(String(3), default='MXN', nullable=False)  # Currency of cost and shipping costs (MXN or USD)
     stock = Column(Integer, default=0)
     lead_time_days = Column(Integer, nullable=True)
@@ -439,6 +438,106 @@ def get_next_task_number(db):
     while n in used:
         n += 1
     return n
+
+
+# ==================== Quote Commerce Models ====================
+
+class Quote(Base):
+    __tablename__ = "quote"
+
+    id = Column(Integer, primary_key=True, index=True)
+    quote_number = Column(String(20), unique=True, nullable=False)  # Format: TEC-2026-0001
+
+    # Status: draft, sent, viewed, accepted, rejected, expired
+    status = Column(String(20), nullable=False, default="draft")
+
+    # Customer info
+    customer_name = Column(String(200), nullable=False)
+    customer_phone = Column(String(30), nullable=False)
+    customer_email = Column(String(255), nullable=True)
+    customer_location = Column(String(300), nullable=True)
+
+    # Quote content
+    notes = Column(Text, nullable=True)
+    validity_days = Column(Integer, nullable=False, default=15)
+    subtotal = Column(Numeric(12, 2), nullable=False, default=0)
+    iva_amount = Column(Numeric(12, 2), nullable=False, default=0)
+    total = Column(Numeric(12, 2), nullable=False, default=0)
+
+    # Lifecycle timestamps
+    sent_at = Column(DateTime(timezone=True), nullable=True)
+    viewed_at = Column(DateTime(timezone=True), nullable=True)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    expired_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Ownership
+    created_by = Column(String(255), nullable=False)  # engineer email
+    assigned_to = Column(String(255), nullable=True)   # engineer email
+
+    # Public access
+    access_token = Column(String(36), unique=True, nullable=True)  # UUID v4, generated on send
+
+    # Future-proofing (Phase 3 payment)
+    payment_status = Column(String(20), nullable=True)
+    payment_method = Column(String(50), nullable=True)
+    payment_reference = Column(String(255), nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    items = relationship("QuoteItem", back_populates="quote", cascade="all, delete-orphan", order_by="QuoteItem.sort_order")
+
+
+class QuoteItem(Base):
+    __tablename__ = "quote_item"
+
+    id = Column(Integer, primary_key=True, index=True)
+    quote_id = Column(Integer, ForeignKey("quote.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(Integer, ForeignKey("product.id"), nullable=True)  # null for freeform items
+    supplier_product_id = Column(Integer, ForeignKey("supplier_product.id"), nullable=True)
+
+    description = Column(String(500), nullable=False)  # product name or freeform description
+    sku = Column(String(100), nullable=True)
+    quantity = Column(Numeric(10, 2), nullable=False)
+    unit = Column(String(50), nullable=True)
+    unit_price = Column(Numeric(12, 2), nullable=False)
+    iva_applicable = Column(Boolean, default=True)
+    discount_percent = Column(Numeric(5, 2), nullable=True)  # Future: line-item discount
+    discount_amount = Column(Numeric(12, 2), nullable=True)  # Future: line-item discount
+    notes = Column(Text, nullable=True)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    # Relationships
+    quote = relationship("Quote", back_populates="items")
+
+
+class Notification(Base):
+    __tablename__ = "notification"
+
+    id = Column(Integer, primary_key=True, index=True)
+    recipient_email = Column(String(255), nullable=False, index=True)  # engineer email
+    quote_id = Column(Integer, ForeignKey("quote.id", ondelete="CASCADE"), nullable=False)
+    event_type = Column(String(30), nullable=False)  # quote_viewed, quote_accepted
+    message = Column(Text, nullable=False)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+def get_next_quote_number(db):
+    """Generate the next quote number in format TEC-{YEAR}-{XXXX}."""
+    import datetime
+    year = datetime.datetime.now().year
+    prefix = f"TEC-{year}-"
+    last = db.query(Quote).filter(
+        Quote.quote_number.like(f"{prefix}%")
+    ).order_by(Quote.quote_number.desc()).first()
+    if last:
+        last_num = int(last.quote_number.split("-")[-1])
+        return f"{prefix}{last_num + 1:04d}"
+    return f"{prefix}0001"
 
 
 # Parse the database URL to get the endpoint ID

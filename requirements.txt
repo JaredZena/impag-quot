@@ -39,3 +39,8 @@ pgvector==0.2.0
 
 # Cloud Storage (Cloudflare R2)
 boto3>=1.28.0
+
+# Quote Commerce
+jinja2>=3.1.0
+aiofiles>=23.0.0
+resend>=0.7.0
