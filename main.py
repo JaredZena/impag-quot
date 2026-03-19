@@ -204,17 +204,26 @@ async def delete_conversation(conversation_id: int, db: Session = Depends(get_db
 async def query(request: QueryRequest, db: Session = Depends(get_db)):
     # Lazy import to ensure route is always registered
     query_rag_system_with_history = get_rag_query_function()
-    
+
     # Convert Pydantic models to dicts for RAG system
     chat_history = [{"role": msg.role, "content": msg.content} for msg in (request.messages or [])]
-    
+
     # Get response from RAG system with conversation context
-    response = query_rag_system_with_history(
-        query=request.query,
-        chat_history=chat_history,
-        customer_name=request.customer_name,
-        customer_location=request.customer_location
-    )
+    try:
+        response = query_rag_system_with_history(
+            query=request.query,
+            chat_history=chat_history,
+            customer_name=request.customer_name,
+            customer_location=request.customer_location
+        )
+    except Exception as e:
+        error_str = str(e)
+        if "credit balance is too low" in error_str or "billing" in error_str.lower():
+            raise HTTPException(
+                status_code=402,
+                detail="ANTHROPIC_CREDITS_EXHAUSTED: Los créditos de la API de Claude se agotaron. Recarga en https://console.anthropic.com/settings/billing"
+            )
+        raise HTTPException(status_code=500, detail=f"Error generando cotización: {error_str[:300]}")
     
     # Save query and response to database
     db_query = Query(
