@@ -241,22 +241,113 @@ def analyze_request_and_calculate(query, context):
     return response.text
 
 
+def _search_all_namespaces(query_embedding, customer_name=None, top_k=7):
+    """
+    Search across all relevant Pinecone namespaces for quotation context.
+    Returns structured context from: historical quotations, WhatsApp conversations,
+    past quotation documents, facturas, and catalogs.
+    """
+    from services.pinecone_service import search_vectors
+
+    # Namespaces to search, ordered by relevance for quotation generation
+    namespaces = [
+        '',                    # Original historical quotations (legacy)
+        'cotizaciones',        # Quotation PDFs/DOCX from WhatsApp
+        'whatsapp-chats',      # WhatsApp conversation context (pricing discussions, customer interactions)
+        'catalogos',           # Product catalogs
+        'facturas',            # Invoices (real pricing data)
+        'notas',               # Sales notes
+    ]
+
+    results = search_vectors(
+        query_embedding=query_embedding,
+        namespaces=namespaces,
+        top_k=top_k * 2,  # Get more results, we'll filter and organize
+    )
+
+    # Organize by source type for the prompt
+    historical_context = []
+    whatsapp_context = []
+    document_context = []
+
+    for r in results:
+        text = r.get("metadata", {}).get("text", "")
+        ns = r.get("namespace", "")
+        score = r.get("score", 0)
+        filename = r.get("metadata", {}).get("original_filename", "")
+
+        if not text:
+            continue
+
+        # If customer name is provided, boost results that mention them
+        entry = {"text": text, "score": score, "source": ns, "filename": filename}
+
+        if ns == "whatsapp-chats":
+            whatsapp_context.append(entry)
+        elif ns in ("", "general", "supplier-quotations", "customer-quotations"):
+            historical_context.append(entry)
+        else:
+            document_context.append(entry)
+
+    # If customer name provided, search WhatsApp specifically for their conversations
+    if customer_name:
+        customer_query = f"conversación con {customer_name}"
+        from rag_system_moved.embeddings import generate_embeddings as gen_emb
+        customer_embedding = gen_emb([customer_query])[0]
+        customer_results = search_vectors(
+            query_embedding=customer_embedding,
+            namespaces=["whatsapp-chats"],
+            top_k=5,
+        )
+        for r in customer_results:
+            text = r.get("metadata", {}).get("text", "")
+            if text and customer_name.lower() in text.lower():
+                whatsapp_context.insert(0, {
+                    "text": text, "score": r.get("score", 0),
+                    "source": "whatsapp-chats", "filename": "",
+                })
+
+    # Build structured context string
+    context_parts = []
+
+    if historical_context:
+        lines = [e["text"] for e in historical_context[:top_k]]
+        context_parts.append("**Cotizaciones históricas:**\n" + "\n---\n".join(lines))
+
+    if whatsapp_context:
+        lines = [e["text"] for e in whatsapp_context[:5]]
+        context_parts.append("**Conversaciones WhatsApp relevantes:**\n" + "\n---\n".join(lines))
+
+    if document_context:
+        lines = []
+        for e in document_context[:5]:
+            src = e.get("filename", e["source"])
+            lines.append(f"[{src}] {e['text']}")
+        context_parts.append("**Documentos relacionados (facturas, catálogos, notas):**\n" + "\n---\n".join(lines))
+
+    combined = "\n\n".join(context_parts)
+
+    print(f"🔹 Context sources: {len(historical_context)} historical, {len(whatsapp_context)} whatsapp, {len(document_context)} documents")
+
+    return combined
+
+
 def query_rag_system_with_history(query, chat_history=None, customer_name=None, customer_location=None):
     """Generate a response using database product search, historical context, and conversation history."""
     print(f'🔹 Query Received: {query}')
-    
+
     if chat_history is None:
         chat_history = []
-    
+
     # Generate query embedding for Pinecone context search
     query_embedding = generate_embeddings([query])[0]
 
-    # Fetch relevant text context from Pinecone (historical quotations and catalog data)
-    results = index.query(vector=query_embedding, top_k=7, include_metadata=True)
-    context = " ".join([match["metadata"]["text"] for match in results["matches"]])
+    # Search across ALL namespaces: historical quotations, WhatsApp conversations,
+    # quotation documents, facturas, catalogs
+    context = _search_all_namespaces(query_embedding, customer_name=customer_name)
 
     # PHASE 1: Analyze and Calculate
-    # We use the Pinecone context to help with the math/logic AND to extract dynamic notes
+    # We use the full context (including WhatsApp + documents) for math/logic AND dynamic notes
     calculation_report = analyze_request_and_calculate(query, context)
     print(f"🔹 Calculation & Analysis Report:\n{calculation_report}")
 
@@ -353,9 +444,13 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
       f"- Por favor usa **doble salto de línea** entre cada sección principal.\n"
       f"- Usa un único # para el título principal y limita su longitud a no más de 5 palabras.\n"
 
-      f"📌 **Importante:**\n"
-      f"- No asumas que un producto no existe solo porque no está en el catálogo actual. Verifica en cotizaciones previas.\n"
-      f"- Prioriza siempre la información más reciente y relevante para la cotización.\n"
+      f"📌 **Importante — Fuentes de información (en orden de prioridad):**\n"
+      f"1. **Catálogo de productos actual** (base de datos) — precios más confiables y actualizados\n"
+      f"2. **Cotizaciones previas** (documentos COT-IMPAG) — precios reales que se han ofrecido a clientes\n"
+      f"3. **Conversaciones WhatsApp** — precios mencionados en negociaciones reales, condiciones de envío, tiempos de entrega\n"
+      f"4. **Facturas/CFDIs** — costos reales de compra (SOLO para cotización interna, NUNCA mostrar al cliente)\n"
+      f"5. **Catálogos de proveedores** — especificaciones técnicas y rangos de precio\n"
+      f"- No asumas que un producto no existe solo porque no está en el catálogo. Busca en cotizaciones previas y conversaciones.\n"
       f"- Responde en español.\n"
       f"- Asegúrate de que las tablas sean compatibles con markdown y tengan un formato adecuado.\n"
 
@@ -429,7 +524,12 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
       f"- Usar nombres de productos concisos en la columna CONCEPTO\n"
       f"- Si el nombre es muy largo, abreviarlo manteniendo claridad\n"
       
-      f"**📄 Contexto adicional (productos previamente cotizados):**\n{context}\n\n"
+      f"**📄 Contexto adicional (cotizaciones previas, conversaciones WhatsApp, documentos):**\n{context}\n\n"
+      f"📌 **Cómo usar el contexto de WhatsApp:**\n"
+      f"- Las conversaciones de WhatsApp muestran cómo IMPAG realmente vende: precios cotizados, condiciones de envío, seguimiento con clientes\n"
+      f"- Si el contexto incluye una conversación con el mismo cliente, usa esa información para personalizar la cotización\n"
+      f"- Los precios mencionados en WhatsApp son precios reales que se han ofrecido — úsalos como referencia si no hay precio en el catálogo\n"
+      f"- Las facturas muestran precios reales de compra a proveedores — NO mostrar estos al cliente\n\n"
       f"**📦 Catálogo de productos disponibles (para cliente):**\n{matched_products}\n\n"
       f"**📦 Catálogo de productos con detalles internos (para uso interno):**\n{matched_products_internal}\n\n"
       
