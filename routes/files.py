@@ -658,3 +658,110 @@ async def import_whatsapp_chat(
         participants=participants,
         date_range=date_range,
     )
+
+
+# ─── WhatsApp Bulk Import ────────────────────────────────────────
+
+
+class WhatsAppBulkConversation(BaseModel):
+    chat_name: str
+    file_id: Optional[int] = None
+    messages_total: int = 0
+    messages_new: int = 0
+    messages_skipped: int = 0
+    participants: List[str] = []
+    date_range: dict = {}
+    media_refs_count: int = 0
+    new_media_refs: int = 0
+    media_files_stored: int = 0
+    conversation_classification: Optional[dict] = None
+    media_classifications: List[dict] = []
+    error: Optional[str] = None
+
+
+class WhatsAppBulkSummary(BaseModel):
+    conversations_count: int = 0
+    messages_total: int = 0
+    messages_new: int = 0
+    messages_skipped: int = 0
+    media_refs_found: int = 0
+    media_files_in_zip: int = 0
+    media_files_stored: int = 0
+
+
+class WhatsAppBulkResponse(BaseModel):
+    conversations: List[WhatsAppBulkConversation] = []
+    media_files_processed: int = 0
+    media_files_classified: int = 0
+    summary: WhatsAppBulkSummary = WhatsAppBulkSummary()
+    error: Optional[str] = None
+
+
+@router.post("/import-whatsapp-bulk", response_model=WhatsAppBulkResponse)
+async def import_whatsapp_bulk(
+    file: UploadFile = File(...),
+    skip_classification: bool = Form(False),
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token),
+):
+    """
+    Bulk import WhatsApp conversations from a .zip or .txt file.
+
+    - ZIP: extracts all chat .txt files + media, matches media to messages, classifies everything
+    - TXT: processes a single chat export with deduplication
+
+    Features:
+    - Deduplication: re-importing the same chat only processes new messages
+    - Media matching: matches zip media files to chat messages by timestamp
+    - AI classification: classifies conversations and media files (set skip_classification=true to skip)
+    """
+    from services.whatsapp_bulk import process_whatsapp_zip, process_whatsapp_txt
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+
+    content = await file.read()
+    max_size = 100 * 1024 * 1024  # 100MB for bulk imports
+    if len(content) > max_size:
+        raise HTTPException(status_code=400, detail="File too large (max 100MB)")
+
+    filename_lower = file.filename.lower()
+
+    if filename_lower.endswith('.zip'):
+        result = process_whatsapp_zip(
+            zip_bytes=content,
+            uploaded_by_email=user["email"],
+            uploaded_by_name=user.get("name"),
+            db=db,
+            skip_classification=skip_classification,
+        )
+    elif filename_lower.endswith('.txt'):
+        single_result = process_whatsapp_txt(
+            txt_bytes=content,
+            filename=file.filename,
+            uploaded_by_email=user["email"],
+            uploaded_by_name=user.get("name"),
+            db=db,
+            skip_classification=skip_classification,
+        )
+        result = {
+            "conversations": [single_result],
+            "media_files_processed": 0,
+            "media_files_classified": 0,
+            "summary": {
+                "conversations_count": 1,
+                "messages_total": single_result.get("messages_total", 0),
+                "messages_new": single_result.get("messages_new", 0),
+                "messages_skipped": single_result.get("messages_skipped", 0),
+                "media_refs_found": single_result.get("media_refs_count", 0),
+                "media_files_in_zip": 0,
+                "media_files_stored": 0,
+            },
+        }
+    else:
+        raise HTTPException(status_code=400, detail="Only .zip or .txt files are supported")
+
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return result

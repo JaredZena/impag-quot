@@ -16,6 +16,10 @@ from routes.quotation_history import router as quotation_history_router
 from routes.social import router as social_router
 from routes.files import router as files_router
 from routes.logistics import router as logistics_router
+from routes.tasks_mgmt import router as tasks_mgmt_router
+from routes.task_categories import router as task_categories_router
+from routes.task_comments import router as task_comments_router
+from routes.task_users import router as task_users_router
 from auth import verify_google_token
 
 # Lazy import for RAG system to ensure route registration even if import fails
@@ -56,6 +60,10 @@ app.include_router(quotation_history_router)
 app.include_router(social_router, prefix="/social", tags=["Social"])
 app.include_router(files_router)
 app.include_router(logistics_router)
+app.include_router(tasks_mgmt_router)
+app.include_router(task_categories_router)
+app.include_router(task_comments_router)
+app.include_router(task_users_router)
 
 class Message(BaseModel):
     role: str  # 'user' or 'assistant'

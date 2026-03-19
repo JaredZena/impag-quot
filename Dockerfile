@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     # For EasyOCR and image processing
     libjpeg62-turbo \
     libfreetype6 \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     # Cleanup to reduce image size
     && rm -rf /var/lib/apt/lists/* \
@@ -37,4 +37,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
 
 # Run with reduced workers for memory efficiency
-CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000", "main:app", "--timeout", "120"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "120"]

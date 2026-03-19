@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, create_engine, Boolean, Text, Numeric, JSON, Enum, Date
+from sqlalchemy import Column, Integer, SmallInteger, String, DateTime, Float, ForeignKey, create_engine, Boolean, Text, Numeric, JSON, Enum, Date
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -346,6 +346,99 @@ class LogisticsMetadata(Base):
     raw_extraction = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+# --- Task Management Models ---
+
+class TaskUser(Base):
+    __tablename__ = "task_user"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), unique=True, nullable=False)
+    display_name = Column(String(100), nullable=False)
+    avatar_url = Column(String(500), nullable=True)
+    role = Column(String(20), default="member", nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+    tasks_created = relationship("Task", foreign_keys="Task.created_by", back_populates="creator")
+    tasks_assigned = relationship("Task", foreign_keys="Task.assigned_to", back_populates="assignee")
+    comments = relationship("TaskComment", back_populates="user")
+    categories_created = relationship("TaskCategory", back_populates="creator")
+
+
+class TaskCategory(Base):
+    __tablename__ = "task_category"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    color = Column(String(7), default="#6366f1", nullable=False)
+    icon = Column(String(50), nullable=True)
+    created_by = Column(Integer, ForeignKey("task_user.id"), nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+    creator = relationship("TaskUser", back_populates="categories_created")
+    tasks = relationship("Task", back_populates="category")
+
+
+class Task(Base):
+    __tablename__ = "task"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(300), nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(String(20), default="pending", nullable=False, index=True)
+    priority = Column(String(10), default="medium", nullable=False)
+    due_date = Column(Date, nullable=True)
+    category_id = Column(Integer, ForeignKey("task_category.id"), nullable=True, index=True)
+    created_by = Column(Integer, ForeignKey("task_user.id"), nullable=False, index=True)
+    assigned_to = Column(Integer, ForeignKey("task_user.id"), nullable=True, index=True)
+    task_number = Column(SmallInteger, nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+    creator = relationship("TaskUser", foreign_keys=[created_by], back_populates="tasks_created")
+    assignee = relationship("TaskUser", foreign_keys=[assigned_to], back_populates="tasks_assigned")
+    category = relationship("TaskCategory", back_populates="tasks")
+    comments = relationship("TaskComment", back_populates="task", cascade="all, delete-orphan",
+                            order_by="TaskComment.created_at.asc()")
+
+
+class TaskComment(Base):
+    __tablename__ = "task_comment"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("task.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("task_user.id"), nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+    task = relationship("Task", back_populates="comments")
+    user = relationship("TaskUser", back_populates="comments")
+
+
+def get_current_task_user(db, email: str):
+    """Get the TaskUser record for the given email."""
+    return db.query(TaskUser).filter(
+        TaskUser.email == email,
+        TaskUser.is_active == True
+    ).first()
+
+
+def get_next_task_number(db):
+    """Find the lowest available task_number (1-based) not used by any active task."""
+    used = {r[0] for r in db.query(Task.task_number).filter(Task.task_number.isnot(None)).all()}
+    n = 1
+    while n in used:
+        n += 1
+    return n
 
 
 # Parse the database URL to get the endpoint ID
