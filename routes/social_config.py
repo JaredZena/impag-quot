@@ -546,6 +546,127 @@ Solo quien vive del campo entiende ese peso.
 🌾 IMPAG — Agricultura Inteligente
 Nuevo Ideal, Durango"""
     },
+    'Saturday_plant': {
+        'topic_hint': 'frijol temporal',
+        'caption': """Durango tiene 301,375 hectáreas de frijol.
+Y sin embargo, los rendimientos siguen siendo de los más bajos del país.
+
+No es un problema de tierra. Es un problema de timing y de decisiones en los primeros 30 días del ciclo.
+
+Con 79% de superficie temporal — completamente dependiente de lluvia — el margen de error es mínimo. La ventana de siembra correcta en Durango es estrecha: demasiado temprano y el suelo no tiene humedad suficiente para una germinación uniforme; demasiado tarde y las heladas de octubre cortan el ciclo antes de madurez.
+
+Lo que define el rendimiento antes de que caiga la primera gota:
+
+1. VARIEDAD CORRECTA — No toda semilla certificada es igual. La variedad debe estar adaptada al ciclo de lluvias de tu zona específica dentro de Durango. Pinto Saltillo, Flor de Junio, Flor de Mayo — cada una tiene su ventana.
+
+2. DENSIDAD DE SIEMBRA — En temporal, sembrar de más es tan dañino como sembrar de menos. Las plantas compiten por la misma agua. Calcula la densidad según el ciclo esperado de lluvia, no según el año anterior.
+
+3. FERTILIZACIÓN BASAL — El fósforo y potasio van al fondo del surco antes de sembrar. Si esperas a que llueva para fertilizar, ya perdiste las primeras semanas críticas de desarrollo radicular.
+
+4. CONTROL DE MALEZA TEMPRANO — Los primeros 21 días, la maleza compite directamente con la plántula por humedad. Un preemergente aplicado correctamente puede definir el stand del ciclo completo.
+
+El temporal no perdona errores de preparación. Lo que se hace en abril define lo que se cosecha en octubre.
+
+¿Qué variedad siembras en tu zona?
+
+📲 677-119-7737
+🌐 todoparaelcampo.com.mx
+
+#FrijolTemporal #AgriculturaDurango #Siembra2026 #IMPAG #AgriculturaInteligente"""
+    },
+    'Saturday_animal': {
+        'topic_hint': 'ganadería lechera',
+        'caption': """En la Comarca Lagunera se producen alrededor de 5.6 millones de litros de leche al día.
+Eso representa el 21.7% de la producción láctea nacional — desde Durango y Coahuila.
+
+Con esos volúmenes, un punto porcentual de eficiencia en conversión de forraje representa millones de litros al año.
+
+El problema que más dinero cuesta y menos se mide: la calidad del agua para el hato.
+
+Una vaca de alta producción consume entre 100 y 150 litros de agua al día. En verano, bajo estrés térmico, ese número sube. Y cuando el agua está turbia, tibia o contaminada, la vaca bebe menos — y lo primero que cae es la producción láctea, no la salud visible del animal.
+
+Lo que muchos ganaderos no conectan: la vaca que "produce menos en verano" no siempre es estrés térmico. A veces es simplemente que no está bebiendo suficiente.
+
+Puntos críticos en el sistema de agua para ganado lechero:
+
+1. BEBEDEROS — Limpios, a la sombra, con flujo suficiente para que varias vacas beban simultáneamente sin competencia
+2. CALIDAD — Agua con algas, sedimento o contaminación bacteriana reduce el consumo voluntario
+3. TEMPERATURA — Agua fresca aumenta el consumo. En sistemas expuestos al sol, la temperatura del agua puede subir considerablemente al mediodía
+4. ACCESO — En corrales densamente poblados, las vacas de menor jerarquía no llegan al bebedero. Más puntos de acceso = consumo más uniforme del hato
+
+La producción láctea es directamente proporcional al consumo de agua. No hay suplemento que compense un sistema de agua deficiente.
+
+¿Cómo tienes tu sistema de agua en el corral?
+
+📲 677-119-7737
+🌐 todoparaelcampo.com.mx
+
+#GanaderíaLechera #ComarcaLagunera #ProducciónLáctea #IMPAG #Durango"""
+    },
+    'Saturday_forestry': {
+        'topic_hint': 'forestal',
+        'caption': """Durango es el estado con mayor producción forestal del país.
+4 millones de hectáreas con uso forestal. Líder nacional en aserrado de pino y encino.
+
+Y cada año, entre abril y junio, parte de eso arde.
+
+La temporada de incendios forestales en Durango no es una sorpresa — es un calendario. El mismo periodo, los mismos factores: vegetación seca de invierno, vientos de primavera, humedad baja antes de que lleguen las lluvias de junio. Lo que cambia es qué tan preparado está cada predio cuando llega.
+
+Los incendios que destruyen superficies grandes casi siempre tienen algo en común: nadie los detectó a tiempo o no había forma de contenerlos en las primeras horas.
+
+Lo que sí está en manos del productor forestal:
+
+1. BRECHAS CORTAFUEGO — Mantenidas y ampliadas antes de abril. Una brecha descuidada no detiene nada.
+
+2. HERRAMIENTA EN CAMPO — Palas, azadones, bombas de mochila con agua. El primer equipo en llegar al foco define si se controla en media hectárea o en cincuenta.
+
+3. VIGILANCIA EN HORAS CRÍTICAS — Los incendios inician más entre las 12 y las 17 horas, con viento. Ese es el horario de mayor riesgo.
+
+4. COORDINACIÓN CON VECINOS — Un incendio que entra de predio vecino no respeta linderos. La comunicación anticipada puede ser la diferencia entre una llamada a tiempo y una pérdida total.
+
+5. REGISTRO Y REPORTE — Conocer los puntos de mayor riesgo dentro del predio y tener el contacto de CONAFOR actualizado.
+
+La madera que no se quema es la que llega al aserradero. La prevención es la inversión forestal más barata que existe.
+
+¿Tienes tus brechas listas para este ciclo?
+
+📲 677-119-7737
+🌐 todoparaelcampo.com.mx
+
+#ForestalDurango #IncendiosForestales #PrevenciónForestal #IMPAG #ManejoForestal"""
+    },
+    'Sunday': {
+        'topic_hint': 'bombeo solar',
+        'caption': """Hace cinco años, instalar un sistema de bombeo solar en una parcela era una conversación para grandes productores o proyectos con subsidio.
+
+Hoy es una decisión que cualquier productor con más de 5 hectáreas debería estar evaluando.
+
+¿Qué cambió? El costo de los paneles cayó. La tecnología de inversores y bombas se estandarizó. Y los productores que instalaron hace tres años ya están viendo los números reales — no las proyecciones del vendedor.
+
+Lo que un sistema de bombeo solar realmente resuelve en una operación agrícola en Durango:
+
+EL PROBLEMA QUE SÍ RESUELVE:
+Riego en parcelas sin acceso a electricidad de la CFE, o donde el costo de la tarifa agrícola hace el riego prohibitivo en los meses de mayor demanda (mayo-agosto).
+
+EL PROBLEMA QUE NO RESUELVE:
+No es para riego continuo de alta demanda sin almacenamiento. Un sistema sin tanque de reserva riega mientras hay sol — y para cuando más se necesita el agua (madrugada, tarde noche), no bombea.
+
+LO QUE DETERMINA SI EL ROI TIENE SENTIDO:
+— ¿Cuántas horas de bombeo necesitas al día?
+— ¿Tienes dónde almacenar el agua bombeada durante el día?
+— ¿Tu cultivo tolera el horario de bombeo solar o necesita riego nocturno?
+
+Un sistema bien dimensionado para las condiciones reales del predio tiene retorno en 2-4 ciclos. Uno mal dimensionado es un gasto que no rinde.
+
+Antes de comprar, dimensiona. Antes de dimensionar, mide tu consumo real.
+
+¿Estás evaluando bombeo solar para este ciclo?
+
+📲 677-119-7737
+🌐 todoparaelcampo.com.mx
+
+#BombeoSolar #EnergíaSolar #AgriculturaDurango #IMPAG #TecnologíaAgrícola"""
+    },
 }
 
 # ===================================================================

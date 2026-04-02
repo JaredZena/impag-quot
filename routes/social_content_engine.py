@@ -11,11 +11,28 @@ from typing import Optional, Dict, Any
 import anthropic
 import json
 import re
-from social_config import CHANNEL_FORMATS, CONTENT_RULES, CONTACT_INFO, IMPAG_BRAND_CONTEXT
+from social_config import CHANNEL_FORMATS, CONTENT_RULES, CONTACT_INFO, IMPAG_BRAND_CONTEXT, FEW_SHOT_USER_TOPIC_EXAMPLES
 import social_image_prompt
 
 
 # ── STEP 4a: CAPTION ─────────────────────────────────────────────────────────
+
+def _get_day_example(weekday_theme: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Return the few-shot caption example for the current day, or None."""
+    if not weekday_theme:
+        return None
+    day = weekday_theme.get('day_name', '')
+    sector = weekday_theme.get('sector', '')
+
+    # Saturday has three sector-specific examples
+    if day == 'Saturday' and sector:
+        key = f'Saturday_{sector}'
+        ex = FEW_SHOT_USER_TOPIC_EXAMPLES.get(key)
+    else:
+        ex = FEW_SHOT_USER_TOPIC_EXAMPLES.get(day)
+
+    return ex['caption'] if ex else None
+
 
 def _build_caption_prompt(
     topic_strategy,
@@ -27,10 +44,21 @@ def _build_caption_prompt(
     """Build the caption-only prompt."""
     channel_format = CHANNEL_FORMATS.get(content_strategy.channel, {})
 
+    # Inject day-matched few-shot example when available
+    example = _get_day_example(weekday_theme)
+    example_block = ""
+    if example:
+        example_block = f"""EJEMPLO DE REFERENCIA (estilo, profundidad y formato esperados — NO copies el contenido, adapta el estilo al tema actual):
+---
+{example}
+---
+
+"""
+
     prompt = f"""Genera el caption para este post.
 
 {IMPAG_BRAND_CONTEXT}
-TEMA: {topic_strategy.topic}
+{example_block}TEMA: {topic_strategy.topic}
 PROBLEMA: {topic_strategy.problem_identified}
 
 ESTRATEGIA:

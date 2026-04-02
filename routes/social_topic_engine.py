@@ -38,7 +38,7 @@ def _call_topic_llm(client: anthropic.Anthropic, prompt: str, temperature: float
 
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
-        max_tokens=512,
+        max_tokens=1024,
         temperature=temperature,
         messages=[{"role": "user", "content": prompt}]
     )
