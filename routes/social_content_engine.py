@@ -457,7 +457,7 @@ def _generate_caption(
         pass
 
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=2048,
         temperature=0.8,
         messages=[{"role": "user", "content": prompt}]
@@ -618,7 +618,7 @@ RESPONDE SOLO CON JSON (sin markdown):
         pass
 
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=2048,
         temperature=0.7,
         messages=[{"role": "user", "content": prompt}]

@@ -1,7 +1,6 @@
 """
 Social Media LLM Module
-Handles LLM calls with strict JSON parsing, retry logic, and validation.
-Topic validation is CRITICAL - topic must be in format "Error → Daño concreto → Solución" (preferred) or "Problema → Solución" (backward compatible).
+Handles LLM calls with strict JSON parsing and retry logic.
 """
 
 import json
@@ -11,8 +10,6 @@ import logging
 from typing import Dict, Any, Optional
 from pydantic import BaseModel, ValidationError
 from fastapi import HTTPException
-from routes.social_topic import validate_topic
-
 logger = logging.getLogger(__name__)
 
 
@@ -95,24 +92,6 @@ class ViralAngleResponse(BaseModel):
     hook_sentence: str
     visual_concept: str
     curiosity_gap: str
-
-
-class StrategyResponse(BaseModel):
-    """Strict schema for strategy phase response."""
-    problem_identified: str
-    topic: str  # Must be in format "Error → Daño concreto → Solución" (preferred) or "Problema → Solución" (backward compatible)
-    post_type: str
-    channel: str
-    content_tone: str  # Content tone: Motivational, Promotional, Technical, Educational, Problem-Solving, Seasonal, Humorous, etc. (REQUIRED, non-empty)
-    preferred_category: Optional[str] = ""
-    search_needed: bool = True
-    search_keywords: Optional[str] = ""
-    
-    def __init__(self, **data):
-        super().__init__(**data)
-        # Ensure content_tone is never empty (validation)
-        if not self.content_tone or not self.content_tone.strip():
-            raise ValueError("content_tone cannot be empty")
 
 
 class ContentResponse(BaseModel):
@@ -228,7 +207,7 @@ def parse_json_with_retry(
                 # Retry with fix prompt (include enough context for content LLM; schema_class hint for length)
                 snippet_len = 2000 if schema_class.__name__ == "ContentResponse" else 500
                 retry_response = client.messages.create(
-                    model="claude-sonnet-4-5-20250929",
+                    model="claude-sonnet-4-6",
                     max_tokens=500 if schema_class.__name__ != "ContentResponse" else 2500,
                     temperature=0.3,
                     system="You are a JSON formatter. Fix the JSON and output ONLY valid JSON, no other text. Inside strings use \\n for newlines and \\\" for quotes. No trailing commas.",
@@ -245,7 +224,7 @@ def parse_json_with_retry(
                 logger.warning(f"Validation error (attempt {attempt + 1}): {e}. Retrying...")
                 snippet_len = 2000 if schema_class.__name__ == "ContentResponse" else 500
                 retry_response = client.messages.create(
-                    model="claude-sonnet-4-5-20250929",
+                    model="claude-sonnet-4-6",
                     max_tokens=500 if schema_class.__name__ != "ContentResponse" else 2500,
                     temperature=0.3,
                     system="You are a JSON formatter. Fix the JSON to match the required schema and output ONLY valid JSON, no other text. Inside strings use \\n for newlines and \\\" for quotes.",
@@ -280,7 +259,7 @@ def call_viral_angle_llm(
     """
     try:
         response = client.messages.create(
-            model="claude-sonnet-4-5-20250929",
+            model="claude-sonnet-4-6",
             max_tokens=400,
             temperature=0.8,
             system="Eres un Growth Hacker especializado en viralización de contenido agrícola. Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional antes o después. No incluyas explicaciones, solo el JSON.",
@@ -306,96 +285,6 @@ def call_viral_angle_llm(
         )
 
 
-def call_strategy_llm(
-    client: anthropic.Client,
-    prompt: str
-) -> StrategyResponse:
-    """
-    Call LLM for strategy phase with strict JSON parsing and topic validation.
-    
-    Topic validation rules:
-    - topic must contain →
-    - problem part >= 10 chars
-    - solution part >= 8 chars
-    - reject vague topics
-    
-    Returns:
-        Validated StrategyResponse with valid topic
-    
-    Raises:
-        HTTPException(500): If topic validation fails after retry
-    """
-    try:
-        response = client.messages.create(
-            model="claude-sonnet-4-5-20250929",
-            max_tokens=300,
-            temperature=0.5,
-            system="Eres un cerebro estratégico. Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional antes o después. No incluyas explicaciones, solo el JSON. El campo 'topic' DEBE seguir el formato: 'Error → Daño concreto → Solución' (con 2 flechas →). Ejemplo: 'Regar por surco → Pierdes 40% de agua → Riego por goteo presurizado'.",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        response_text = response.content[0].text
-        
-        # Parse with retry
-        retry_prompt = "Fix the JSON. Output only valid JSON matching this schema: {problem_identified: string, topic: string (MUST be in format 'Error → Daño concreto → Solución' with 2 arrows →, e.g., 'Regar por surco → Pierdes 40% de agua → Riego por goteo presurizado'), post_type: string, channel: string, content_tone: string (one of: Motivational, Promotional, Technical, Educational, Problem-Solving, Seasonal, Humorous, Informative, Inspirational), preferred_category: string (optional), search_needed: boolean, search_keywords: string (optional)}"
-        
-        validated_response = parse_json_with_retry(
-            client,
-            response_text,
-            StrategyResponse,
-            retry_prompt=retry_prompt,
-            max_retries=1
-        )
-        
-        # Validate topic format
-        is_valid, error_msg = validate_topic(validated_response.topic)
-        if not is_valid:
-            # Retry ONCE with topic validation instruction
-            logger.warning(f"Topic validation failed: {error_msg}. Retrying with fix instruction...")
-            fix_prompt = f"Fix topic format and return valid JSON only. The topic '{validated_response.topic}' is invalid: {error_msg}. Topic MUST be in format 'Error → Daño concreto → Solución' with 2 arrows →. Example: 'Regar por surco → Pierdes 40% de agua → Riego por goteo presurizado'. Error >= 8 chars, Damage >= 10 chars (must include concrete numbers/percentages), Solution >= 8 chars. Return only valid JSON."
-            
-            retry_response = client.messages.create(
-                model="claude-sonnet-4-5-20250929",
-                max_tokens=300,
-                temperature=0.3,
-                system="You are a JSON formatter. Fix the topic format and output ONLY valid JSON, no other text.",
-                messages=[
-                    {"role": "user", "content": f"{prompt}\n\n{fix_prompt}"}
-                ]
-            )
-            retry_text = retry_response.content[0].text
-            
-            # Parse retry response
-            validated_response = parse_json_with_retry(
-                client,
-                retry_text,
-                StrategyResponse,
-                retry_prompt=retry_prompt,
-                max_retries=0  # No more retries
-            )
-            
-            # Validate again
-            is_valid, error_msg = validate_topic(validated_response.topic)
-            if not is_valid:
-                # Still invalid after retry - fail loudly
-                logger.error(f"Topic validation failed after retry: {error_msg}. Topic: {validated_response.topic}")
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Topic validation failed: {error_msg}. Topic must be in format 'Problema → Solución'."
-                )
-        
-        return validated_response
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Strategy LLM call failed: {e}", exc_info=True)
-        # DO NOT silently fallback - fail loudly
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to generate strategy. Error: {str(e)}"
-        )
-
-
 def call_content_llm(
     client: anthropic.Client,
     prompt: str
@@ -408,7 +297,7 @@ def call_content_llm(
     """
     try:
         response = client.messages.create(
-            model="claude-sonnet-4-5-20250929",
+            model="claude-sonnet-4-6",
             max_tokens=2000,
             temperature=0.7,
             system="""Eres un Social Media Manager profesional. CRÍTICO: Debes responder ÚNICAMENTE con un objeto JSON válido y bien formateado.

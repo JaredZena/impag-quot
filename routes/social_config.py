@@ -722,136 +722,48 @@ SATURDAY_SECTORS = ['forestry', 'plant', 'animal']
 # DURANGO SEASONALITY CONTEXT (FOR FRIDAY POSTS)
 # ===================================================================
 
-DURANGO_SEASONALITY_CONTEXT = """Durango's Primary Sector and Agroindustry: Current Conditions, Seasonality, and Growth Potential
+DURANGO_SEASONALITY_CONTEXT = """Durango — Contexto Agrícola Regional (referencia para posts de viernes)
 
-Geographic and climate context shaping production
-Durango sits in the transition zone that defines much of northern Mexico's primary-sector reality: strong climatic gradients, a short "reliable" rainy window, and a structural dependence on groundwater where irrigation exists. In fact, 40% of the state's territory is classified as dry to semi‑dry, another 14% as very dry, while about 34% is temperate sub‑humid (with smaller shares warm sub‑humid and temperate humid).
+CLIMA Y CICLOS:
+- Lluvia: ~500 mm/año, concentrada en verano (jun–sep). Sistema temporal domina (79% del área agrícola).
+- Ciclo principal: Primavera–Verano. Riego reservado a forrajes y horticultura de alto valor.
+- Temperatura media ~17°C. Sequía primaveral frecuente (feb–may).
 
-That mix drives a simple operational truth: most field agriculture is scheduled around summer rainfall. INEGI reports an average annual temperature around 17°C and average annual precipitation about 500 mm, with rains occurring "mainly during summer."  This is why the state's annual cropping is organized around the Primavera–Verano cycle (rainy season), with irrigation mainly used to stabilize forage and high-value crops where water access exists.
+CALENDARIOS DE SIEMBRA CLAVE:
+- Maíz forrajero (riego): siembra mar 20–abr 15 (primavera) o jun 20–jul 30 (verano)
+- Sorgo forrajero (riego): siembra mar 20–abr 30 (primavera) o jun 1–jul 15 (verano)
+- Maíz temporal: siembra con lluvias, límite ~25 jul (después se destina a forraje)
+- Frijol temporal: siembra jun–jul, cosecha otoño (301k ha, rendimiento bajo por sequía)
+- Alfalfa: producción perenne, pilar del sistema lechero
+- Manzana (zona Canatlán/Nuevo Ideal): cosecha jul–ago
 
-Water governance and infrastructure matter because irrigation and agroindustry both depend on stable supply. An older but still structurally relevant INEGI profile notes that, for public water supply, most collection points are wells (about 90% in 2010), i.e., groundwater is not a marginal input—it is the backbone wherever "reliable" water exists.
+GANADERÍA Y LÁCTEOS (eje económico del estado):
+- ~1.58 millones de cabezas bovinas; ~5.6 millones litros de leche/día
+- 3er productor nacional de leche (11.4% nacional, 2023); Comarca Lagunera = 21.7% nacional
+- La cadena láctea depende directamente de forrajes: alfalfa, maíz, sorgo, avena forrajera
+- Producción de leche sube en verano (más forraje disponible)
 
-Current primary sector structure and economic weight
-The "primary sector" matters in Durango not as a small rural side-story, but as a pillar of the state economy. In 2024, Durango's nominal GDP was 451,314 million pesos, and primary activities contributed 9.0% of total state GDP—an unusually high share compared with many Mexican states.
+AGRICULTURA PROTEGIDA (pequeña pero concentrada):
+- Solo 389 ha: 39.7% mallasombra, 36.4% invernadero
+- Tomate: 84.2% de su producción total viene de ag. protegida
+- Oportunidad real en zonas con agua segura: tomate, pimientos, berries
 
-Recent growth also signals what matters inside that primary sector. INEGI's state GDP-by-activity report shows that in 2024 the gross value added (VAB) of primary activities grew 2.4%, and it attributes the increase mainly to animal raising/exploitation (+4.1%), i.e., livestock-led momentum.  This is a consistent pattern with Durango's production structure (forage crops → animal systems → processing hubs).
+SECTOR FORESTAL:
+- 4 millones de ha con aprovechamiento forestal (mayor que el área agrícola)
+- Pino (~4.17M m³) y encino (~0.80M m³) dominan
+- Temporada de incendios: ene–jun, crítico abr–jun (estiaje)
+- Durango lidera México en producción bruta de aserraderos
 
-Structurally, the official 2022 agricultural census results for Durango describe a state with large rural land but a limited share under crop use: out of 12.3 million hectares total, INEGI reports 4.0 million hectares with forest-use/forest management and 2.3 million hectares with agricultural vocation (with the rest outside agro/forest use categories).  This is crucial: Durango's competitive edge in the primary sector is not "row crops everywhere"—it is a combined forest + rangeland + forage + livestock system.
+PRINCIPALES PRESIONES DEL PRODUCTOR:
+- Costos altos de insumos y servicios (94.9% lo reportan como problema principal)
+- Solo 8.5% accede a crédito formal
+- Base productora envejecida (73.8% mayores de 45 años)
 
-Agriculture today: forage dominance, rainfed exposure, and small but real protected ag
-
-The core pattern: agriculture is built to feed animals
-INEGI's 2022 census results show that the largest annual crops by output are overwhelmingly forages: maize forage (2,328,168 t), oats forage (1,372,973 t), and sorghum forage (1,073,186 t).  When you compare these to other top annual crops—white maize grain (275,918 t), beans (127,706 t), and melon (84,049 t)—the signal is blunt: the "mass" of agricultural tonnage is forage.
-
-A useful way to say this without hand-waving: among the top six annual crops by production volume listed in the census for Durango, forages account for ~91% of total tonnage (calculated from the INEGI crop tonnage figures).  This is why any serious discussion of agroindustry in Durango must start with feed → milk/meat → processing, not with the assumption that the state is primarily a vegetable/fruit export platform.
-
-Perennial crops reinforce the same logic. The main perennial crop is alfalfa: 2,485,473 t over 31,670 ha.  After alfalfa, perennial volumes drop sharply into niche commodities like pecan (9,837 t) and apple (7,818 t).
-
-Rainfed dependence is still the system-level constraint
-Durango's agricultural surface is mostly temporal (rainfed). INEGI's census results show 943,024 ha of agricultural area in active production units, of which about 21% is irrigated (196,380 ha) and 79% rainfed (746,644 ha).
-
-The census also records meaningful "lost" area due to operational constraints: of the 943k ha, 70,235 ha were in rest, and 54,962 ha were "not sown" for reasons including bad weather, lack of credit, disease, lack of money/support, labor availability, etc.  This is not a footnote—this is what vulnerability looks like in a climate where the rainy season timing controls the entire Primavera–Verano calendar.
-
-Protected agriculture exists, but it is small and concentrated
-Durango has protected agriculture, but the scale is still modest relative to leading protected-ag states. INEGI reports 128 production units using protected agriculture across 389 ha. The largest structure types by area are shade mesh (39.7%) and greenhouses (36.4%), with nurseries (18.5%) and shade houses (10.7%) following.
-
-The leading protected-ag crop is tomato: of 27,012 t total tomato production recorded in the census period, 22,742 t (84.2%) came from protected agriculture.  In other words, where Durango invests in controlled environment production, yields and output concentrate fast—but the footprint is still too small to redefine the state's agricultural profile today.
-
-The "business reality" constraints: costs, finance access, and aging labor
-The census makes it hard to romanticize the sector. Producers report that the dominant problem is high input and service costs (94.9%), followed by loss of soil fertility (34.0%), and price/income shocks (e.g., COVID-19–related demand/price declines: 29.2%). Additional frictions include intermediaries affecting commercialization (16.7%), insecurity (13.1%), transport difficulties (12.4%) and labor scarcity (12.5%).
-
-Financial access is structurally thin: only 8.5% of production units reported obtaining credit and 1.0% reported having insurance.  Mechanization is improving (tractors owned more than doubled from 2007 to 2022), but that does not solve water risk, market power, or input-price exposure on its own.
-
-The labor pipeline is also a quiet crisis: 361,294 people participated as agricultural labor, with a strong male skew (89.2%), and the producer population is older (73.8% older than 45).  If you want vertical agroindustrial expansion, you need skills, workforce stability, and management depth—not just raw output.
-
-Livestock and dairy: the anchor for agroindustry
-Durango's primary sector becomes coherent once you accept that livestock—especially dairy—anchors the system. This is not an opinion; it shows up in both GDP decomposition and physical production structure. INEGI attributes Durango's 2024 primary-sector growth mainly to animal raising.
-
-Herd structure and scale
-At the 15 September 2022 census reference date, Durango recorded approximately 1.58 million head of cattle, plus very large poultry inventories (~31.0 million birds) and smaller but meaningful sheep/goat/beekeeping numbers.
-
-Milk production and the Comarca Lagunera effect
-INEGI's dairy infographic (based on census results) reports Durango among the highest milk-producing states, with ~5.6 million liters per day.  A simple annualized translation is about 2.0 billion liters/year (5.6M × 365)—useful as an order-of-magnitude indicator, not as a precise SIAP annual total.
-
-For the market-facing annual framing, industry and SIAP-based compilations put Durango consistently among the top producers. CANILEC's 2013–2023 compendium lists Durango as third nationally by share in 2023 (11.4%, behind Jalisco and Coahuila).  The same compendium also documents that national milk production shows seasonality, with higher volumes in summer months.
-
-A key reason Durango's dairy system is not "just Durango" is Comarca Lagunera—a bi-state dairy basin integrated across suppliers, feed systems, and processors. Academic work using SIAP data estimates the Comarca's 2023 production around 2.896 billion liters, about 21.7% of national production.  That scale explains why forage production (alfalfa, maize forage, oats forage, sorghum forage) is not optional in Durango—it is the dairy system's operating substrate.
-
-Where the value is captured: processing and institutions
-Durango's dairy agroindustry is not theoretical; it exists as institutional and corporate infrastructure. Grupo Lala has its corporate offices in Gómez Palacio (address published in official company documents and on the BMV issuer profile).  This is proof of a mature processing-and-distribution anchor inside the state, not merely a production zone shipping raw milk out.
-
-Public-sector demand and distribution also matter. LICONSA continues to expand local "lechería" points of sale/distribution in Gómez Palacio as part of the national milk support system.  This reinforces Durango's dairy linkage: you have both commercial processors and state-supported distribution channels interacting with producer economics.
-
-Forestry and forest-based industry: Durango's other primary-sector pillar
-Durango is not just a livestock state; it is also a forest state. The 2022 census state results report 4.0 million hectares with forest exploitation/management use—larger than the area described as having agricultural vocation.
-
-Wood production scale and composition
-INEGI reports very large wood volumes in the census period (Oct 2021–Sep 2022): pine ~4.17 million m³, oak ~0.80 million m³, with smaller volumes for juniper and other species.  This lines up with Durango's position in the Sierra belt, where conifer–oak systems dominate commercially relevant forests.
-
-The same census summary shows that forest production units are not passive: large majorities report firebreaks/access, prevention activities, and compliance practices related to fire use and forest protection.  This matters because fire is not a random shock; it is a seasonal operational constraint across northern/central Mexico.
-
-Forest industry: Durango captures value in sawmilling, but the ceiling is higher
-On the industrial side, Durango stands out nationally in sawmilling economics. The federal DataMéxico portal (built on economic census data) reports that in the 2019 Economic Census, Durango had the highest gross production in "Sawmills and Wood Preservation" (~$1,512M MX) and also the highest income (~$1,569M MX), ahead of Chihuahua.  This is one of the clearest signals that Durango already has meaningful industrial capture beyond raw log extraction.
-
-At the same time, national policy diagnostics repeatedly flag a known structural weakness: Mexico's forest production is often low-diversification and low value-added relative to potential. A federal CONAFOR institutional publication explicitly points to low diversification/low value added as a recurring sector limitation (national framing, but directly relevant to Durango given its scale).  This is exactly where vertical growth opportunities live—if the governance and investment conditions allow it.
-
-Seasonality in Durango and how it constrains—or enables—growth
-Durango's seasonality is not just "weather trivia"; it decides cash timing, labor demand, feed availability, processing utilization, and working-capital stress. The best way to understand it is as overlapping calendars: rainfed grains/legumes, irrigated forage, perennial fruit/nuts, dairy output, and forest operations.
-
-Climate seasonality you can actually plan around
-INEGI's baseline climate profile is straightforward: precipitation is modest (~500 mm/year) and falls mainly in summer.  Operationally, that means:
-- Planting windows compress into the onset of rains for temporal systems.
-- Spring is a risk window for forests (dry fuels) and for feed systems dependent on irrigated forage.
-
-Crop calendars (what typically happens when)
-Forage maize (irrigated, dairy-linked): INIFAP technical guidance for the Lagunera production system indicates the temperature-suitable period for maize runs roughly late March to late October, with recommended sowing windows Mar 20–Apr 15 (spring) and Jun 20–Jul 30 (summer).  This matches Durango's massive forage maize volumes in the census.
-
-Forage sorghum (irrigated, heat-tolerant feed): INIFAP recommends sowing Mar 20–Apr 30 for spring and Jun 1–Jul 15 for summer, aligned to heat requirements and the production calendar.
-
-Rainfed maize (temporal): INIFAP's Durango agenda notes that sowing depends on the regular start of rains, with a practical sowing limit around July 25 (after which plantings may be directed to forage rather than grain).
-
-Beans (frijol): Durango's beans are largely a Primavera–Verano rainfed crop in practice (and therefore drought-sensitive). The 2022 census shows huge bean area (301,375 ha) but modest output (127,706 t), implying low average yields consistent with rainfed exposure. For irrigated beans, an INIFAP technical note states sowing typically falls from the last week of June to about July 10, assuming pre-irrigation and adequate soil moisture.  This aligns with the general farm logic: beans begin with rains and finish into the autumn harvest window.
-
-Apples (Canatlán/Nuevo Ideal zone): Apples are a smaller-tonnage crop than forages, but they are strategically important because they can support packing, cold storage, and processing. INEGI's census records 7,818 t over 4,435 ha in the reference year. Government agricultural outreach material (SADER portal) notes that apple harvest ("pizca") begins in July and August in the Durango fruit region.
-
-Dairy seasonality (why summer rains still matter even if you irrigate)
-Dairy production has its own seasonality curve. CANILEC's SIAP-based statistical compendium explicitly states that national milk production shows seasonal patterns, with higher volumes in summer.  Practically, in Durango that seasonal uplift is tightly linked to forage availability and heat stress management: summer rains support pasture/rainfed forage where it exists, but they also raise animal heat loads—so the net effect depends on infrastructure, water access, and feed strategy.
-
-Forestry seasonality (fire risk is the binding constraint)
-Forests in Durango face a predictable dry-season risk cycle. SEMARNAT describes two national fire seasons, with the north/center/northeast season running January–June. Durango's own civil protection "estiaje/drought/fire" program describes the critical dry period as January–June, with the most critical months April–June due to heat and wind conditions.  This reality affects:
-- timing and cost of forest operations and transport,
-- the need to finance prevention brigades and infrastructure,
-- and the reliability of log supply into sawmills (i.e., agroindustry utilization risk).
-
-Growth potential: 30% future-focused, but grounded in what the system is today
-The right way to think about "potential" is not generic diversification—it is horizontal expansion where water/climate allow it and vertical integration where Durango already has scale (dairy, forestry, selected crops).
-
-Horizontal growth: add products only where constraints won't choke them
-Expand controlled environment horticulture in targeted corridors. Protected agriculture is only 389 ha today, yet when used it drives high output concentration (e.g., tomato).  If Durango wants horizontal growth into higher-value produce, it should not aim for "more acres of everything." It should pick water-secured zones (irrigation districts / groundwater-stable areas) and build greenhouse + cold-chain + packout systems around a few crops with proven market pull (tomato, peppers, berries are already present in the census protected-ag list).
-
-Improve bean productivity before expanding bean area. The bean footprint is huge but yields implied by census totals are low (large hectares, modest tons).  More hectares of low-yield beans is not a growth strategy; it is a working-capital sink. Horizontal growth here means seed quality + agronomic timing + drought-risk management, not acreage expansion. Federal agriculture programs have recently emphasized distributing improved/certified bean seed for the Primavera–Verano cycle, which matters directly for Durango's rainfed systems.
-
-Vertical growth: capture value where Durango already has scale
-Dairy vertical integration is the cleanest path. Durango already sits inside a mega-cluster (Comarca Lagunera) with national significance, and it already hosts major corporate infrastructure (Grupo Lala corporate offices in Gómez Palacio).  The vertical playbook is clear:
-- stabilize and lower feed costs via forage efficiency (water-efficient alfalfa/maize systems),
-- invest in higher-margin processing (cheeses, specialized powders, ingredients),
-- and industrialize waste-to-value (manure → biogas/energy; whey utilization).
-
-The "hard truth" constraint is that this requires financing depth, stable water, and professional operations—not just more milk. Low credit penetration (8.5%) is a direct friction against this transition.
-
-Forestry vertical integration is Durango's second major opportunity—if fire risk and governance are handled. Durango already leads Mexico in sawmilling gross production value (economic census) and produces massive pine/oak volumes.  Moving up the value chain into engineered wood, furniture components, certified products, and biomass/pellets is the classic vertical move—especially given federal acknowledgment that the sector tends to be low in diversification and value added.  But the binding risk is seasonal fire exposure (Jan–Jun, critical Apr–Jun), which can disrupt supply and elevate costs. Any serious vertical strategy must embed prevention, monitoring, and logistics resilience as non-negotiables.
-
-Apple value chain: fix the orchard base first, then industrialize. In census terms, apples are smaller than forages, but they can drive cold storage + sorting + branded packing + processing.  The state also publicly pushes technology improvements (e.g., drone-assisted application programs in Canatlán).  The weak link is structural: local reporting highlights aging orchards and the investment gap to renovate into higher-density, higher-yield systems.  Vertical growth here should be staged: (1) orchard renewal + water efficiency + pest management, (2) packing/cold chain utilization, (3) processing for grade-outs ("industrial fruit") into concentrates or derivatives only once consistent volume is secured.
-
-The non-negotiable constraints you must price into any "potential" story
-If you ignore these, you'll overestimate Durango's upside:
-- Water & climate risk: summer-dependent rainfall and a groundwater-heavy supply structure mean water stability is the gating factor for both more crops and more processing.
-- Input-cost pressure: producers report input/service costs as the dominant constraint (94.9%). Any expansion model must show how margins survive cost volatility.
-- Finance depth: low credit and essentially negligible insurance constrain modernization speed, especially for capital-intensive agroindustry.
-- Labor and management pipeline: an aging producer base and limited youth participation increase execution risk for complex vertical projects.
-- Fire seasonality in forests: the Jan–Jun dry season (especially Apr–Jun in Durango) is a recurring operational hazard.
-
-The fastest route to "more agroindustria" is not dispersing into dozens of new crops—it is deepening value capture in the two systems the state already runs at scale (dairy and forestry), while selectively scaling protected horticulture where water and logistics are defensible.
+OPORTUNIDADES DE VALOR AGREGADO:
+- Lácteos: integración vertical (quesos, procesados, biogás de estiércol)
+- Manzana: empaque, cadena de frío, industrialización de fruta de rechazo
+- Hortalizas protegidas donde hay agua segura
+- Productos con identidad regional: chile pasado, frijol pinto, manzana serrana
 """
 
 SECTOR_EMOJIS = {
