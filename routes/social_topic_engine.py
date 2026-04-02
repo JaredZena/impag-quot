@@ -329,9 +329,16 @@ Ejemplos del razonamiento correcto:
 - Tema "frijol" → fases: siembra → crecimiento → cosecha → secado → almacenamiento → comercialización
   → Oportunidad en ALMACENAMIENTO: "Almacenar frijol sin control de humedad → Hongos arruinan lotes en bodega → Silo metálico hermético con ventilación controlada"
 
+⚠️ FORMATO OBLIGATORIO DEL CAMPO "topic":
+- USA EXACTAMENTE: "Práctica incorrecta → Consecuencia → Solución"
+- El separador ES "→" (flecha) — NO uses "=", ":", "-" ni ningún otro símbolo
+- DEBE haber exactamente 2 flechas "→" (3 partes)
+- Ejemplo válido: "Tostar chile a mano → Quemado desigual baja calidad → Tostador rotativo con temperatura controlada"
+- Ejemplo INVÁLIDO: "Chile inconsistente = contratos perdidos = clasificar mejor" ❌
+
 RESPONDE SOLO CON JSON (sin markdown):
 {{
-  "topic": "Error específico → Consecuencia concreta y descriptiva → Solución técnica accionable (sobre {user_suggested_topic})",
+  "topic": "Práctica incorrecta → Consecuencia concreta → Solución técnica (usa → no =)",
   "problem_identified": "Descripción del problema real relacionado con {user_suggested_topic}",
   "angle": "tema principal del contenido",
   "urgency_level": "high|medium|low",
