@@ -188,7 +188,19 @@ enfrentan en CUALQUIER área de su operación.
     # Add detailed Durango seasonality context for FRIDAY posts only (Seasonal Focus theme)
     day_name = weekday_theme['day_name']
     if day_name == 'Friday':
-        prompt += f"""CONTEXTO ESTACIONAL DURANGO (CRÍTICO PARA VIERNES):
+        if user_suggested_topic:
+            # When user provides a specific topic, seasonality context is background only —
+            # do NOT instruct the LLM to generate a seasonal/calendar topic from it.
+            prompt += f"""CONTEXTO REGIONAL DURANGO (referencia de fondo):
+
+{DURANGO_SEASONALITY_CONTEXT}
+
+ℹ️ Usa este contexto solo como REFERENCIA REGIONAL si es relevante para el tema del usuario.
+No generes un calendario de siembra ni un post estacional genérico — el tema ya está definido por el usuario.
+
+"""
+        else:
+            prompt += f"""CONTEXTO ESTACIONAL DURANGO (CRÍTICO PARA VIERNES):
 
 {DURANGO_SEASONALITY_CONTEXT}
 
@@ -276,22 +288,46 @@ RESPONDE SOLO CON JSON (sin markdown):
             prompt += f"""🔴 TEMA OBLIGATORIO DEL USUARIO: "{user_suggested_topic}"
 El post DEBE ser sobre este tema. NO lo ignores ni lo reemplaces.
 
-TU TAREA:
-Formula el tema del usuario en el formato "Error → Consecuencia → Solución":
-   - ERROR: La acción incorrecta relacionada con "{user_suggested_topic}"
-   - CONSECUENCIA: Daño concreto y descriptivo — NO inventes porcentajes ni cifras
-   - SOLUCIÓN: Técnica específica y accionable
+TU TAREA — PENSAMIENTO EN DOS PASOS:
 
-⚠️ FORMATO CRÍTICO:
+PASO 1 — MAPEA EL PROCESO:
+Antes de generar el tema, descompón mentalmente "{user_suggested_topic}" en sus fases.
+Todo producto agrícola o agro-industrial tiene un proceso completo, por ejemplo:
+  - Cultivo básico: preparación de suelo → siembra → riego/nutrición → control de plagas → cosecha
+  - Valor agregado: cosecha → selección → transformación (tostado, pelado, secado, etc.) → almacenamiento → empaque → comercialización
+  - Ganadería: alimentación → salud animal → ordeña/engorde → procesamiento → distribución
+
+Identifica TODAS las fases que aplican a "{user_suggested_topic}".
+
+PASO 2 — ENCUENTRA LA OPORTUNIDAD DE MEJORA:
+En cada fase, pregúntate:
+  - ¿Qué se hace manualmente que podría mecanizarse?
+  - ¿Qué se hace de forma artesanal que podría estandarizarse?
+  - ¿Qué cuello de botella limita el volumen o la calidad?
+  - ¿Qué práctica obsoleta tiene una solución moderna disponible?
+  - ¿Qué infraestructura falta para proteger el producto o el proceso?
+
+Elige la fase con mayor oportunidad de impacto y formula el tema ahí.
+
+FORMATO DE SALIDA:
+   - ERROR: La práctica ineficiente, obsoleta o ausente en esa fase
+   - CONSECUENCIA: El daño concreto — calidad, volumen, costo, tiempo — sin inventar cifras
+   - SOLUCIÓN: La técnica, equipo, maquinaria o infraestructura que optimiza esa fase
+
+⚠️ REGLAS:
 - DEBES usar EXACTAMENTE este formato: "Error → Consecuencia → Solución"
-- DEBES incluir los símbolos "→" para separar las tres partes
 - El tema DEBE estar relacionado con: "{user_suggested_topic}"
-- NO uses preguntas como "¿Sabías que...?" o "¿Te has preguntado...?"
-- NO inventes porcentajes ("30%", "hasta 40%") — describe el daño sin cifras fabricadas
+- La solución puede ser cualquier cosa que mejore el proceso: práctica agronómica, equipo de campo, maquinaria de procesamiento, infraestructura de almacenamiento, tecnología de comercialización
+- NO inventes porcentajes ni cifras fabricadas
+- NO uses preguntas como "¿Sabías que...?"
 
-Ejemplos CORRECTOS:
-- "Almacenar grano sin secar → Hongos arruinan lotes completos en clima húmedo → Secar a 14% de humedad antes de almacenar"
-- "No calibrar la aspersora → Aplicación desigual desperdicia producto y deja zonas sin proteger → Calibrar antes de cada ciclo de aplicación"
+Ejemplos del razonamiento correcto:
+- Tema "chile pasado" → fases: cultivo → cosecha → tostado → pelado → secado (El Sereno) → empaque
+  → Oportunidad en TOSTADO: "Tostar chile a mano → Quemado desigual baja la calidad del producto final → Tostador rotativo con control de temperatura"
+  → Oportunidad en SECADO: "Secar chile sin estructura adecuada → Lluvia o humedad nocturna arruina el lote en proceso → Secador solar con plástico de invernadero UV + estructura metálica"
+  → Oportunidad en PELADO: "Pelar chile manualmente → Cuello de botella que limita el volumen procesado → Peladora mecánica de volteo semi-industrial"
+- Tema "frijol" → fases: siembra → crecimiento → cosecha → secado → almacenamiento → comercialización
+  → Oportunidad en ALMACENAMIENTO: "Almacenar frijol sin control de humedad → Hongos arruinan lotes en bodega → Silo metálico hermético con ventilación controlada"
 
 RESPONDE SOLO CON JSON (sin markdown):
 {{
@@ -332,22 +368,85 @@ RESPONDE SOLO CON JSON (sin markdown):
 }
 """
     else:
-        # Other days - use descriptive topic format appropriate to the day's theme
-        if user_suggested_topic:
-            prompt += f"""🔴 TEMA OBLIGATORIO DEL USUARIO: "{user_suggested_topic}"
-El post DEBE ser sobre este tema. NO lo ignores ni lo reemplaces con otro.
+        # Other days — day theme determines TONE/LENS, not the subject.
+        # When user provides a topic, that topic is the subject; the day only shapes how it's presented.
 
+        if user_suggested_topic:
+            # ── USER TOPIC PATH ───────────────────────────────────────────────
+            # The user's topic drives generation. Day format becomes a lens, not an override.
+            prompt += f"""🔴 TEMA OBLIGATORIO DEL USUARIO: "{user_suggested_topic}"
+
+El tema es "{user_suggested_topic}" — no lo cambies, no lo reemplaces, no lo interpretes como otra cosa.
+El día de la semana solo define el TONO con que presentas este tema.
+
+TU TAREA:
+Genera un título para un post sobre "{user_suggested_topic}" aplicando el ángulo de {day_name} ({weekday_theme['theme']}).
+
+ÁNGULO DEL DÍA:
 """
-        prompt += f"""TU TAREA:
+            if day_name == 'Monday':
+                if is_second_post and weekday_theme.get('theme') == '🌾 La Vida en el Rancho':
+                    prompt += f"""Encuentra el lado EMOCIONAL y HUMANO de "{user_suggested_topic}".
+- ¿Qué significa este tema para la vida, el sacrificio o el legado del productor?
+- Elige un pilar: Fe, Sacrificio sin reconocimiento, Legado generacional, o Melancolía rural
+- Tono: poético, rural, auténtico — no motivacional ni comercial
+"""
+                else:
+                    prompt += f"""Encuentra el lado INSPIRADOR o MOTIVACIONAL de "{user_suggested_topic}".
+- ¿Qué lección, perspectiva positiva o historia de éxito puede salir de este tema?
+- Tono: motivador, esperanzador, orientado al logro del productor
+"""
+            elif day_name == 'Wednesday':
+                prompt += f"""Encuentra el lado EDUCATIVO o PRÁCTICO de "{user_suggested_topic}".
+- ¿Qué debe saber el productor sobre este tema? ¿Cuál es el proceso, la guía, los pasos?
+- Tono: enseñanza clara, práctica, accionable
+"""
+            elif day_name == 'Friday':
+                prompt += f"""Encuentra la relevancia ESTACIONAL o REGIONAL de "{user_suggested_topic}" para Durango.
+- ¿Qué oportunidad económica, valor agregado o contexto estacional tiene este tema en la región?
+- Conecta con el ciclo agrícola o la cultura local si es natural
+- NO generes un calendario de siembra genérico — el foco es "{user_suggested_topic}"
+"""
+            elif day_name == 'Saturday':
+                sector = weekday_theme.get('sector', 'general')
+                prompt += f"""Presenta "{user_suggested_topic}" desde la perspectiva del sector {sector.upper()}.
+- ¿Cómo aplica este tema a productores de {sector} en Durango?
+- ¿Qué ángulo técnico o práctico es más relevante para este sector?
+"""
+            elif day_name == 'Sunday':
+                prompt += f"""Encuentra el ángulo de INNOVACIÓN o TENDENCIA en "{user_suggested_topic}".
+- ¿Qué hay de nuevo, moderno o emergente en este tema?
+- ¿Cómo está evolucionando en la industria agrícola?
+"""
+
+            prompt += f"""
+⚠️ REGLAS:
+- NO uses "Error → Consecuencia → Solución" (ese es formato de Martes/Jueves)
+- NO ignores ni reemplaces "{user_suggested_topic}" por otro tema
+- El título debe nombrar explícitamente "{user_suggested_topic}" o referirse directamente a él
+
+RESPONDE SOLO CON JSON (sin markdown):
+{{
+  "topic": "Título específico sobre {user_suggested_topic} con el ángulo de {day_name}",
+  "problem_identified": "Descripción del contexto o valor de {user_suggested_topic} para el productor",
+  "angle": "tema principal del contenido",
+  "urgency_level": "high|medium|low",
+  "target_audience": "plant|animal|forestry|general"
+}}
+"""
+
+        else:
+            # ── FREE GENERATION PATH ──────────────────────────────────────────
+            # No user topic — day determines both WHAT and HOW.
+            prompt += f"""TU TAREA:
 Genera un tema apropiado para {day_name} ({weekday_theme['theme']}).
 
 ⚠️ FORMATO PARA {day_name.upper()}:
 """
-
-        if day_name == 'Monday':
-            # Check if this is the second post for Monday ("La Vida en el Rancho")
-            if is_second_post and weekday_theme.get('theme') == '🌾 La Vida en el Rancho':
-                prompt += """- Este es un post de "La Vida en el Rancho" - literatura emocional rural
+            if day_name == 'Monday':
+                # Check if this is the second post for Monday ("La Vida en el Rancho")
+                if is_second_post and weekday_theme.get('theme') == '🌾 La Vida en el Rancho':
+                    prompt += """- Este es un post de "La Vida en el Rancho" - literatura emocional rural
 - NO es motivacional tradicional, NO es humor, NO es liderazgo
 - Es poesía rural auténtica que conecta emocionalmente con la vida del rancho
 
@@ -396,37 +495,37 @@ Genera un tema apropiado para {day_name} ({weekday_theme['theme']}).
 - "Sembrar hoy para que otros coman mañana" (Sacrificio + Legado)
 - "El campo es la primera línea de batalla" (Fe + Sacrificio)
 """
-            else:
-                # Standard Monday motivational post
-                prompt += """- Usa un título inspirador o motivacional (NO usar "Error → Daño → Solución")
+                else:
+                    # Standard Monday motivational post
+                    prompt += """- Usa un título inspirador o motivacional (NO usar "Error → Daño → Solución")
 - Enfoque: Motivación, inspiración, perspectiva positiva
 - Ejemplos CORRECTOS:
   * "5 lecciones de productores exitosos que transformaron su operación"
   * "Por qué la persistencia vale más que la perfección en agricultura"
   * "Cómo convertir un mal año en aprendizaje valioso"
 """
-        elif day_name == 'Wednesday':
-            prompt += """- Usa un título educativo claro (NO usar "Error → Daño → Solución")
+            elif day_name == 'Wednesday':
+                prompt += """- Usa un título educativo claro (NO usar "Error → Daño → Solución")
 - Enfoque: Enseñanza, explicación, guía práctica
 - Ejemplos CORRECTOS:
   * "Guía completa de fertilización nitrogenada por etapa fenológica"
   * "Cómo interpretar un análisis de suelo sin ser agrónomo"
   * "3 métodos de control biológico que realmente funcionan"
 """
-        elif day_name == 'Friday':
-            prompt += """- Usa un título estacional/calendario (NO usar "Error → Daño → Solución")
+            elif day_name == 'Friday':
+                prompt += """- Usa un título estacional/calendario (NO usar "Error → Daño → Solución")
 - Enfoque: Temporada actual, clima, fechas importantes
 - Ejemplos CORRECTOS:
   * "Calendario de siembra para ciclo primavera-verano 2026"
   * "Preparativos esenciales para temporada de heladas"
   * "Qué plantar ahora para cosechar en 90 días"
 """
-        elif day_name == 'Saturday':
-            # Check if this is a sector-specific post (forestry, plant, or animal)
-            sector = weekday_theme.get('sector', 'general')
+            elif day_name == 'Saturday':
+                # Check if this is a sector-specific post (forestry, plant, or animal)
+                sector = weekday_theme.get('sector', 'general')
 
-            if sector == 'forestry':
-                prompt += """- Este es un post SECTOR-ESPECÍFICO para FORESTAL 🌲
+                if sector == 'forestry':
+                    prompt += """- Este es un post SECTOR-ESPECÍFICO para FORESTAL 🌲
 - NO usar "Error → Daño → Solución" - usa título técnico-práctico
 - Enfoque: Problemas reales que enfrentan productores forestales/viveros
 
@@ -457,8 +556,8 @@ Genera un tema apropiado para {day_name} ({weekday_theme['theme']}).
 - Enfoque práctico y accionable para productores forestales
 - Considera estacionalidad (incendios, corte, transporte)
 """
-            elif sector == 'plant':
-                prompt += """- Este es un post SECTOR-ESPECÍFICO para PLANTAS/CULTIVOS 🌾
+                elif sector == 'plant':
+                    prompt += """- Este es un post SECTOR-ESPECÍFICO para PLANTAS/CULTIVOS 🌾
 - NO usar "Error → Daño → Solución" - usa título técnico-práctico
 - Enfoque: Problemas reales que enfrentan agricultores de cultivos
 
@@ -491,8 +590,8 @@ Genera un tema apropiado para {day_name} ({weekday_theme['theme']}).
 - Considera ciclo Primavera-Verano (lluvia domina calendario)
 - Aborda costos altos - problema #1 reportado por productores
 """
-            elif sector == 'animal':
-                prompt += """- Este es un post SECTOR-ESPECÍFICO para GANADERÍA/ANIMAL 🐄
+                elif sector == 'animal':
+                    prompt += """- Este es un post SECTOR-ESPECÍFICO para GANADERÍA/ANIMAL 🐄
 - NO usar "Error → Daño → Solución" - usa título técnico-práctico
 - Enfoque: Problemas reales que enfrentan ganaderos y productores lácteos
 
@@ -525,17 +624,17 @@ Genera un tema apropiado para {day_name} ({weekday_theme['theme']}).
 - Comarca Lagunera es contexto regional crítico
 - Enfoque en economía operativa (costos, eficiencia, conversión)
 """
-            else:
-                # Fallback for general Saturday (should not happen with new config)
-                prompt += """- Usa un título específico del sector (NO usar "Error → Daño → Solución")
+                else:
+                    # Fallback for general Saturday (should not happen with new config)
+                    prompt += """- Usa un título específico del sector (NO usar "Error → Daño → Solución")
 - Enfoque: Información relevante para el sector del día (forestry/plant/animal)
 - Ejemplos CORRECTOS:
   * "Manejo de reforestación con especies nativas: supervivencia real"
   * "Rotación de potreros: cálculo de carga animal óptima"
   * "Variedades de maíz más resistentes a sequía en el Bajío"
 """
-        elif day_name == 'Sunday':
-            prompt += """- Usa un título informativo sobre innovación/industria (NO usar "Error → Daño → Solución")
+            elif day_name == 'Sunday':
+                prompt += """- Usa un título informativo sobre innovación/industria (NO usar "Error → Daño → Solución")
 - Enfoque: Novedades, tendencias, estadísticas, tecnología
 - Ejemplos CORRECTOS:
   * "Drones agrícolas: cuándo sí valen la inversión en 2026"
@@ -543,7 +642,7 @@ Genera un tema apropiado para {day_name} ({weekday_theme['theme']}).
   * "Agricultura de precisión accesible para productores pequeños"
 """
 
-        prompt += """
+            prompt += """
 Ejemplos INCORRECTOS para estos días:
 - "No usar fertilizante → Pierdes 40% de rendimiento → Programa de fertilización" ❌ (este es formato de Martes/Jueves)
 - "❄️ ¿Sabías que...? Te explico cómo" ❌ (clickbait)
