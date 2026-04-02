@@ -4,6 +4,27 @@ All static rules, formats, and constraints extracted from prompts.
 """
 
 # ===================================================================
+# IMPAG BRAND CONTEXT
+# Injected into topic and caption prompts so the LLM understands the
+# full scope of what IMPAG offers — not just field inputs.
+# ===================================================================
+
+IMPAG_BRAND_CONTEXT = """IMPAG AGRICULTURA INTELIGENTE — CONTEXTO DE MARCA:
+Empresa agropecuaria con sede en Nuevo Ideal, Durango. Atendemos a productores mexicanos en los tres niveles de su operación, desde el pequeño agricultor temporal hasta el agroindustrial.
+
+NIVEL 1 — PRODUCCIÓN PRIMARIA (insumos y equipos de campo):
+Mallasombra, invernaderos, sistemas de riego (cintilla, goteo, aspersión, valvulería), acolchado, charolas, sustratos, plásticos agrícolas, antiheladas, bombas, aspersoras, fertilizantes, agroquímicos, semillas, herramientas.
+
+NIVEL 2 — VALOR AGREGADO Y PROCESAMIENTO (transformar la cosecha en producto):
+Molinos y equipo de procesamiento agroindustrial, secadores solares, deshidratadores, equipos de tostado y pelado, soluciones de almacenamiento (silos, bodegas), materiales de empaque y envase para producto terminado.
+
+NIVEL 3 — COMERCIALIZACIÓN Y POSICIONAMIENTO (llevar el producto al mercado):
+Marketing agrícola, tecnología para posicionar productos y marcas, diseño de empaque retail, estrategia comercial para que el productor venda a mejor precio y con mayor control.
+
+QUIÉN ES NUESTRO CLIENTE: Cualquier productor mexicano — el que siembra temporal, el que tiene invernadero, el que procesa su cosecha, el que quiere vender con marca propia. Estamos en todas las etapas.
+"""
+
+# ===================================================================
 # CONTACT INFORMATION
 # ===================================================================
 
@@ -395,6 +416,137 @@ CONTENT_RULES = [
     "Solución = contexto + producto, no solo producto (práctica correcta + producto).",
     "Producto como componente central de la solución, no único héroe."
 ]
+
+# ===================================================================
+# FEW-SHOT EXAMPLES FOR USER-SUGGESTED TOPICS
+# These calibrate caption quality when the user provides a specific topic.
+# Keyed by weekday — inject the matching example to show tone, depth, and format.
+# ===================================================================
+
+FEW_SHOT_USER_TOPIC_EXAMPLES = {
+    'Thursday': {
+        'topic_hint': 'chile pasado',
+        'caption': """El chile pasado mal secado no se ve diferente al bueno hasta que ya es tarde.
+
+El proceso artesanal del El Sereno — sol durante el día, adentro en la noche — funciona cuando el clima coopera. Pero en Durango, una lluvia nocturna fuera de temporada o una semana de cielos nublados en pleno proceso puede arruinar un lote completo sin que lo notes hasta que ya tiene humedad atrapada y empieza a engrasar.
+
+El problema no es el método. Es la falta de control sobre las condiciones de secado.
+
+Lo que marca la diferencia en el secado de chile pasado:
+
+1. ESTRUCTURA DE SECADO — Un techo translúcido con plástico UV permite el sol sin exponer el chile a lluvia o rocío nocturno
+2. FLUJO DE AIRE — Ventilación lateral con mallasombra evita condensación y acelera el secado uniforme
+3. VOLTEO REGULAR — Cada 24 horas para que el secado sea parejo en toda la superficie
+4. MEDICIÓN — El chile pasado listo tiene entre 12-15% de humedad; sin medidor, estás adivinando
+
+Un secador simple con materiales accesibles puede darte control sobre el proceso que el método artesanal no tiene.
+
+¿Produces chile pasado o conoces a alguien que lo hace? Platícanos cómo lo manejas.
+
+📲 677-119-7737
+🌐 todoparaelcampo.com.mx
+
+#ChilePasado #Durango #ValorAgregado #IMPAG #ProcesamientoAgrícola"""
+    },
+    'Tuesday': {
+        'topic_hint': 'miel de abeja',
+        'caption': """En verano, tus colmenas están trabajando de más — y no precisamente produciendo miel.
+
+Cuando la temperatura dentro de la colmena sube demasiado, las abejas dejan de pecorear y se dedican a ventilar: forman cadenas en la piquera y baten las alas para enfriar. Es trabajo que no produce nada y agota a la colonia.
+
+Una colmena bajo sol directo en julio en Durango puede pasar horas en modo enfriamiento en lugar de modo producción.
+
+La solución es más simple de lo que parece:
+
+Instalar mallasombra al 50% sobre el área del apiario — orientada para bloquear el sol de las 11am a 4pm — reduce la carga térmica sobre las colmenas sin bloquear el vuelo ni la ventilación natural.
+
+No necesitas estructura elaborada: postes, alambre tensor y mallasombra es suficiente para proteger 10-20 colmenas.
+
+Tenemos mallasombra por metro o en rollos completos.
+
+📲 677-119-7737
+📍 Nuevo Ideal, Durango
+🌐 todoparaelcampo.com.mx
+
+#Apicultura #MielDurango #Apiario #Mallasombra #IMPAG"""
+    },
+    'Wednesday': {
+        'topic_hint': 'vaca lechera',
+        'caption': """Los 21 días antes y 21 días después del parto definen el éxito de toda la siguiente lactancia — y son los que más productores manejan con menos atención.
+
+Lo que pasa en el período de transición:
+
+La vaca reduce su consumo de materia seca justo cuando más energía necesita. El cuerpo empieza a movilizar grasa como combustible. Si esto dura demasiado o es muy intenso, el hígado se satura — y viene cetosis, hígado graso, metritis, desplazamiento de abomaso.
+
+No son enfermedades de mala suerte. Son el resultado predecible de un período de transición mal manejado.
+
+Lo que sí funciona:
+
+1. DIETA PRECEBO — 3 semanas antes del parto, acostumbrar el rumen a la dieta de lactancia. No cambiar de golpe.
+2. ESPACIO Y ESTRÉS — Vacas en transición necesitan comedero y bebedero sin competencia. El estrés social baja el consumo.
+3. CONDICIÓN CORPORAL — Al parto: idealmente 3.0-3.5. Más grasa = más riesgo de hígado graso.
+4. CALCIO DISPONIBLE — Hipocalcemia subclínica es más común de lo que se diagnostica y frena el arranque de lactancia.
+
+Una vaca que arranca bien la lactancia produce más en todo el ciclo. Una que arranca mal nunca alcanza su potencial aunque el resto del manejo sea bueno.
+
+¿Cómo manejas el secado y la transición en tu hato?
+
+📲 677-119-7737
+🌐 todoparaelcampo.com.mx
+
+#VacaLechera #GanaderíaDurango #ComarcaLagunera #IMPAG #ProducciónLáctea"""
+    },
+    'Friday': {
+        'topic_hint': 'chile pasado',
+        'caption': """Durango produce chile. Mucho chile.
+Pero la mayoría sale fresco al mercado, donde el precio lo pone el comprador y la competencia es de todos contra todos.
+
+El chile pasado cambia esa ecuación.
+
+Es el mismo chile — poblano o chilaca — pero con un proceso artesanal de tostado y secado que lo transforma en un ingrediente de identidad regional. El caldillo durangueño no existe sin él. Los restaurantes que lo sirven lo buscan con calidad consistente y están dispuestos a pagar un precio diferente al del chile fresco de temporada.
+
+Abril y mayo son el momento de empezar a planear:
+
+— ¿Cuánto chile vas a destinar a proceso este ciclo?
+— ¿Tienes la infraestructura para secar con consistencia?
+— ¿Ya tienes comprador o vendes al mercado spot?
+
+El productor que llega a la cosecha con un comprador de chile pasado ya amarrado y una estructura de secado lista opera en condiciones completamente distintas al que vende fresco sin contrato.
+
+El valor agregado no empieza en la cosecha. Empieza en la planeación.
+
+¿Produces chile en Durango? Cuéntanos cómo lo comercializas.
+
+📲 677-119-7737
+🌐 todoparaelcampo.com.mx
+
+#ChilePasado #DurangoAgricola #ValorAgregado #IMPAG #AgriculturaInteligente"""
+    },
+    'Monday': {
+        'topic_hint': 'general',
+        'caption': """La troca sigue estacionada en el mismo lugar.
+La mesa tiene los mismos lugares de siempre.
+Pero hay sillas que ya nadie jala.
+
+No es que se hayan ido peleados.
+Es que la ciudad prometió más de lo que el rancho podía ofrecer.
+Y uno los dejó ir, porque así es querer.
+
+Lo difícil no es el trabajo.
+Lo difícil es trabajar para algo que no sabes si alguien va a querer continuar.
+
+Pero uno sigue levantándose.
+Porque el rancho no espera,
+y porque en el fondo uno todavía cree
+que algún día van a entender
+lo que vale lo que aquí se construyó.
+
+Solo quien vive del campo entiende ese peso.
+
+🌾 IMPAG — Agricultura Inteligente
+Nuevo Ideal, Durango"""
+    },
+}
 
 # ===================================================================
 # SPECIAL DATES (Mexican National Holidays & Agricultural Days)

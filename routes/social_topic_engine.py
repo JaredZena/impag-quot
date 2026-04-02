@@ -11,7 +11,7 @@ from typing import Optional
 import anthropic
 import json
 import re
-from social_config import DURANGO_SEASONALITY_CONTEXT
+from social_config import DURANGO_SEASONALITY_CONTEXT, IMPAG_BRAND_CONTEXT
 
 
 class TopicStrategy(BaseModel):
@@ -138,6 +138,7 @@ RESPONDE SOLO CON JSON (sin markdown):
     # Build compact prompt (~800 tokens) for normal (non-social-date) days
     prompt = f"""Identifica un problema agrícola real para productores comerciales.
 
+{IMPAG_BRAND_CONTEXT}
 FECHA: {date_str}
 DÍA DE LA SEMANA: {weekday_theme['day_name']}
 TEMA DEL DÍA: {weekday_theme['theme']}

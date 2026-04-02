@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any
 import anthropic
 import json
 import re
-from social_config import CHANNEL_FORMATS, CONTENT_RULES, CONTACT_INFO
+from social_config import CHANNEL_FORMATS, CONTENT_RULES, CONTACT_INFO, IMPAG_BRAND_CONTEXT
 import social_image_prompt
 
 
@@ -29,6 +29,7 @@ def _build_caption_prompt(
 
     prompt = f"""Genera el caption para este post.
 
+{IMPAG_BRAND_CONTEXT}
 TEMA: {topic_strategy.topic}
 PROBLEMA: {topic_strategy.problem_identified}
 
