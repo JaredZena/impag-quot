@@ -262,7 +262,7 @@ def _search_all_namespaces(query_embedding, customer_name=None, top_k=7):
     results = search_vectors(
         query_embedding=query_embedding,
         namespaces=namespaces,
-        top_k=top_k * 2,  # Get more results, we'll filter and organize
+        top_k=top_k,
     )
 
     # Organize by source type for the prompt
@@ -366,178 +366,106 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
             chat_history_text += f"\n{role}: {content}\n"
         chat_history_text += "\n"
 
-    # Step 3: Construct the final prompt with conversation awareness
-    prompt = (f"Genera DOS cotizaciones en formato markdown basada en el REPORTE DE ANÁLISIS, los productos de la base de datos y cotizaciones previas. "
-      f"Incluye especificaciones completas de los productos y precios disponibles.\n\n"
-      
-      f"🔥🔥 **INFORMACIÓN CRÍTICA - REPORTE DE ANÁLISIS Y CÁLCULO:** 🔥🔥\n"
-      f"{calculation_report}\n"
-      f"⚠️ **INSTRUCCIÓN 1 (CANTIDADES):** Usa las cantidades del reporte como la VERDAD TÉCNICA.\n"
-      f"⚠️ **INSTRUCCIÓN 2 (NOTAS):** Usa las 'CONDICIONES COMERCIALES SUGERIDAS' del reporte para la sección de Notas. NO uses notas genéricas si el reporte sugiere otras específicas.\n\n"
-      
-      f"{chat_history_text}"
-      
-      f"📌 **IMPORTANTE - Manejo de Conversación:**\n"
-      f"**Si existe una conversación previa:**\n"
-      f"- Analiza TODA la conversación para entender el contexto completo\n"
-      f"- Si el usuario proporciona información adicional (ej. 'cultivo de chile', 'son 2 hectáreas'), "
-      f"REFINA la cotización anterior incorporando estos nuevos detalles\n"
-      f"- NO generes una cotización completamente nueva si ya existe contexto previo relevante\n"
-      f"- Mantén la estructura y productos mencionados anteriormente, pero ajusta con la nueva información\n"
-      f"- Si el usuario cambia completamente de tema, entonces sí genera una nueva cotización\n\n"
-      
-      f"**Ejemplos de manejo de contexto:**\n"
-      f"- Usuario: 'Cotización para acolchado agrícola' → Cotización general de acolchado\n"
-      f"- Usuario: 'para cultivo de chile' → REFINAR cotización de acolchado específicamente para chile\n"
-      f"- Usuario: 'son 2 hectáreas' → CALCULAR cantidades de acolchado para 2 hectáreas basado en el cultivo mencionado\n"
-      f"- Usuario: 'ahora necesito charolas' → NUEVA cotización (cambio de tema)\n\n"
-      
-      f"📌 **Reglas para la cotización:**\n"
-      f"1️⃣ **Si el usuario usa un término general** (ej. geomembranas, sistemas de riego, drones agrícolas), "
-      f"genera varias opciones con diferentes modelos, especificaciones y precios.\n"
-      
-      f"2️⃣ **Si el usuario no especifica una variante (color, modelo, etc.),** "
-      f"incluye **todas las opciones disponibles** en la cotización. "
-      f"Ejemplo: si solicita 'acolchado 1.2m', muestra **negro/plata y negro/blanco** en lugar de solo la opción más barata.\n"
-      
-      f"3️⃣ **Si el usuario especifica un producto exacto** (modelo, capacidad, dimensiones, color, etc.), "
-      f"incluye solo esa opción con su descripción, especificaciones y precio correspondiente.\n"
-      
-      f"4️⃣ **Usa tanto el catálogo de productos como las cotizaciones previas.** "
-      f"Si un producto no aparece en el catálogo actual, pero ha sido cotizado previamente, usa esos datos históricos.\n"
-      
-      f"5️⃣ **Si el usuario proporciona datos técnicos para calcular un producto** (ej. acolchado agrícola para dos hectáreas), "
-      f"usa el REPORTE DE CÁLCULO para determinar las cantidades y luego las metodologías de cálculo y cotizaciones previas del contexto para estimar los productos y costos.\n"
+    # Shared preamble used by both calls
+    shared_context = (
+        f"🔥🔥 **REPORTE DE ANÁLISIS Y CÁLCULO:** 🔥🔥\n"
+        f"{calculation_report}\n"
+        f"⚠️ Usa las cantidades del reporte como VERDAD TÉCNICA.\n"
+        f"⚠️ Usa las 'CONDICIONES COMERCIALES SUGERIDAS' del reporte para la sección de Notas.\n\n"
+        f"{chat_history_text}"
+        f"📌 **Manejo de conversación previa:**\n"
+        f"- Si hay contexto previo, REFINA la cotización incorporando nuevos detalles\n"
+        f"- Solo genera una cotización nueva si el usuario cambia completamente de tema\n\n"
+        f"📌 **Reglas de productos:**\n"
+        f"1. Término general → muestra todas las variantes disponibles\n"
+        f"2. Sin variante especificada → incluye todas las opciones (ej. negro/plata y negro/blanco)\n"
+        f"3. Producto exacto → solo esa opción\n"
+        f"4. Si no está en catálogo, usa cotizaciones previas\n"
+        f"5. Usa REPORTE DE CÁLCULO para cantidades cuando hay datos técnicos\n"
+        f"6. Precios: catálogo actual > cotizaciones previas > WhatsApp > 'Consultar'\n\n"
+        f"📌 **Fuentes (orden de prioridad):**\n"
+        f"1. Catálogo actual (base de datos)\n"
+        f"2. Cotizaciones previas (COT-IMPAG)\n"
+        f"3. Conversaciones WhatsApp\n"
+        f"4. Facturas/CFDIs (SOLO interno, NUNCA al cliente)\n"
+        f"5. Catálogos de proveedores\n\n"
+        f"📌 Productos agrícolas e insumos están exentos de IVA en México. Responde en español.\n\n"
+        f"**📄 Contexto (cotizaciones previas, WhatsApp, documentos):**\n{context}\n\n"
+        f"**👤 Cliente:** {customer_name if customer_name else 'A quien corresponda'} | "
+        f"Ubicación: {customer_location if customer_location else 'A convenir'}\n\n"
+        f"**🔍 Consulta:** {query}"
+    )
 
-      f"6️⃣ **Usa los precios más actualizados disponibles.** "
-      f"Prioriza los precios del catálogo actual. Si no hay precio disponible, usa referencias de cotizaciones previas. "
-      f"Si no hay referencia de precio en ninguna fuente, indica 'Consultar'.\n"
+    table_rules = (
+        f"📌 **FORMATO ESTRICTO DE TABLA (5 columnas):**\n"
+        f"| Descripción | Unidad | Cantidad | Precio Unitario | Importe |\n"
+        f"|:---|:---:|:---:|:---:|:---:|\n"
+        f"| Nombre del producto (especificaciones) | ROLLO | 28 | $2,250.00 MXN | $63,000.00 MXN |\n"
+        f"- SIEMPRE 5 columnas. Info extra del producto va en Descripción, no en columnas extra.\n"
+        f"- Precio Unitario e Importe: incluir $ y MXN. Sin precio: 'Consultar'.\n"
+        f"- Números con comas como separadores de miles.\n"
+        f"- Doble salto de línea entre secciones principales.\n"
+    )
 
-      f"📌 **Estructura esperada en la cotización:**\n"
-      f"- Usa # para el título principal, ## para secciones principales, y ### para subsecciones. Asegúrate de incluir espacios después de los símbolos #.\n"
-      f"- **Cálculos completos** (si aplica).\n"
-      f"- **Especificaciones técnicas** detalladas de cada producto.\n"
-      f"- **Tabla de precios** con cantidad, unidad y total, mostrando múltiples opciones (si aplica).\n"
-      f"- **Notas importantes** (Dinámicas según el reporte).\n"
-      f"- Usa saltos de línea simples entre elementos relacionados y dobles entre secciones principales.\n"
+    # ── CALL 1: INTERNAL QUOTATION ──────────────────────────────────────────
+    internal_prompt = (
+        f"Genera la COTIZACIÓN INTERNA de IMPAG en formato markdown.\n\n"
+        f"{shared_context}\n\n"
+        f"**📦 Catálogo con detalles internos:**\n{matched_products_internal}\n\n"
+        f"{table_rules}\n"
+        f"**COTIZACIÓN INTERNA — incluye:**\n"
+        f"- Proveedor, costo unitario, margen aplicado, precio final por producto\n"
+        f"- Fuente de cada precio: 'Fuente: Base de Datos (ID: X)' o 'Fuente: Histórico'\n"
+        f"- Costos de instalación y logística si aplican\n"
+        f"- Notas internas (verificar disponibilidad, contactar proveedor, etc.)\n"
+        f"- Tabla de 8 columnas:\n"
+        f"| Descripción | Fuente | Proveedor | Costo Unitario | Margen | Precio Unitario | Cantidad | Importe |\n"
+        f"|:---|:---|:---|:---:|:---:|:---:|:---:|:---:|\n"
+        f"| Producto | Base de Datos | Proveedor ABC | $1,000.00 MXN | 30% | $1,300.00 MXN | 28 | $36,400.00 MXN |\n"
+    )
 
-      f"📌 **FORMATO ESTRICTO DE TABLA:**\n"
-      f"La tabla de precios DEBE usar EXACTAMENTE este formato de 5 columnas:\n"
-      f"| Descripción | Unidad | Cantidad | Precio Unitario | Importe |\n"
-      f"|:---|:---:|:---:|:---:|:---:|\n"
-      f"| Nombre del producto | ROLLO/PIEZA/METRO | 28 | $2,250.00 MXN | $63,000.00 MXN |\n"
-      f"\n"
-      f"**Reglas críticas para la tabla:**\n"
-      f"- SIEMPRE usar exactamente 5 columnas (no más, no menos)\n"
-      f"- NO incluir columnas adicionales como 'Ancho', 'Largo por Rollo', etc. - esa info va en la Descripción\n"
-      f"- Descripción: Incluir TODA la info del producto (nombre, ancho, color, especificaciones)\n"
-      f"- Precio Unitario e Importe: SIEMPRE incluir el símbolo $ y MXN, ejemplo: $45,000.00 MXN\n"
-      f"- Si no hay precio disponible, usar: 'Consultar' (sin símbolo $)\n"
-      f"- Formato de números: Usar comas como separadores de miles\n"
+    print("🔹 Generating internal quotation...")
+    internal_response = llm.complete(internal_prompt)
+    internal_quotation = internal_response.text
 
-      f"📌 **Formato del documento:**\n"
-      f"Estructura el documento en este orden exacto:\n"
-      f"1. Título (nombre del producto en mayúsculas)\n" 
-      f"2. Especificaciones técnicas\n"
-      f"3. Tabla de precios (usar formato de 5 columnas estricto)\n"
-      f"4. Notas importantes\n"
-      f"- Por favor usa **doble salto de línea** entre cada sección principal.\n"
-      f"- Usa un único # para el título principal y limita su longitud a no más de 5 palabras.\n"
+    # ── CALL 2: CUSTOMER QUOTATION ──────────────────────────────────────────
+    customer_prompt = (
+        f"Genera la COTIZACIÓN PARA CLIENTE de IMPAG en formato markdown limpio y profesional.\n\n"
+        f"{shared_context}\n\n"
+        f"**📦 Catálogo de productos:**\n{matched_products}\n\n"
+        f"{table_rules}\n"
+        f"**COTIZACIÓN CLIENTE — reglas:**\n"
+        f"- NO incluir proveedor, costo unitario ni margen\n"
+        f"- NO incluir especificaciones técnicas detalladas (solo dimensiones básicas si son necesarias)\n"
+        f"- Tabla de 5 columnas:\n"
+        f"| CONCEPTO | UNIDAD | CANTIDAD | P. UNITARIO | IMPORTE |\n"
+        f"|:---|:---:|:---:|:---:|:---:|\n"
+        f"| Nombre del producto (dimensiones básicas) | ROLLO | 10 | $63,500.00 MXN | $635,000.00 MXN |\n"
+        f"- Incluir fila TOTAL al final de la tabla\n\n"
+        f"**ESTRUCTURA DESPUÉS DE LA TABLA (en este orden exacto, cada sección UNA SOLA VEZ):**\n"
+        f"1. Monto en palabras (una línea): (SEISCIENTOS TREINTA Y CINCO MIL PESOS 00/100 MXN)\n"
+        f"2. ## Nota: — copia las 'CONDICIONES COMERCIALES SUGERIDAS' del reporte. Incluye ubicación: {customer_location if customer_location else 'A convenir'}\n"
+        f"3. ## DATOS BANCARIOS\n"
+        f"   DATOS BANCARIOS IMPAG TECH SAPI DE C V\n"
+        f"   BBVA BANCOMER\n"
+        f"   CUENTA CLABE: 012 180 001193473561\n"
+        f"   NUMERO DE CUENTA: 011 934 7356\n"
+        f"4. Firma (sin encabezado):\n"
+        f"   Atentamente\n"
+        f"   Juan Daniel Betancourt González\n"
+        f"   Director de proyectos\n"
+    )
 
-      f"📌 **Importante — Fuentes de información (en orden de prioridad):**\n"
-      f"1. **Catálogo de productos actual** (base de datos) — precios más confiables y actualizados\n"
-      f"2. **Cotizaciones previas** (documentos COT-IMPAG) — precios reales que se han ofrecido a clientes\n"
-      f"3. **Conversaciones WhatsApp** — precios mencionados en negociaciones reales, condiciones de envío, tiempos de entrega\n"
-      f"4. **Facturas/CFDIs** — costos reales de compra (SOLO para cotización interna, NUNCA mostrar al cliente)\n"
-      f"5. **Catálogos de proveedores** — especificaciones técnicas y rangos de precio\n"
-      f"- No asumas que un producto no existe solo porque no está en el catálogo. Busca en cotizaciones previas y conversaciones.\n"
-      f"- Responde en español.\n"
-      f"- Asegúrate de que las tablas sean compatibles con markdown y tengan un formato adecuado.\n"
+    print("🔹 Generating customer quotation...")
+    customer_response = llm.complete(customer_prompt)
+    customer_quotation = customer_response.text
 
-      f"📌 **Nota:** Los productos agrícolas, insumos agrícolas y equipo técnico agrícola están exentos de IVA en México.\n\n"
-      
-      f"**📋 FORMATO DE RESPUESTA - DEBES GENERAR DOS COTIZACIONES:**\n\n"
-      f"Tu respuesta DEBE contener DOS cotizaciones separadas con el siguiente formato:\n\n"
-      f"```\n"
-      f"<!-- INTERNAL_QUOTATION_START -->\n"
-      f"[COTIZACIÓN INTERNA DETALLADA AQUÍ]\n"
-      f"<!-- INTERNAL_QUOTATION_END -->\n\n"
-      f"<!-- CUSTOMER_QUOTATION_START -->\n"
-      f"[COTIZACIÓN PARA CLIENTE AQUÍ]\n"
-      f"<!-- CUSTOMER_QUOTATION_END -->\n"
-      f"```\n\n"
-      
-      f"**COTIZACIÓN INTERNA (para uso interno de IMPAG):**\n"
-      f"- Incluye TODOS los detalles: proveedor, costo unitario, margen aplicado, precio final\n"
-      f"- **FUENTE DE DATOS:** Debes indicar explícitamente de dónde obtuviste la información de cada producto.\n"
-      f"  * Si viene del catálogo actual, indica: 'Fuente: Base de Datos (ID: X)'\n"
-      f"  * Si viene de una cotización histórica, indica: 'Fuente: Histórico (Cotización previa)'\n"
-      f"- Incluye costos de instalación si aplican\n"
-      f"- Incluye notas internas (ej: 'Contactar proveedor para precio actualizado', 'Verificar disponibilidad', etc.)\n"
-      f"- Incluye información de envío y logística detallada\n"
-      f"- Tabla con columnas: Descripción | Fuente | Proveedor | Costo Unitario | Margen | Precio Unitario | Cantidad | Importe\n"
-      f"- Formato de tabla interna:\n"
-      f"| Descripción | Fuente | Proveedor | Costo Unitario | Margen | Precio Unitario | Cantidad | Importe |\n"
-      f"|:---|:---|:---|:---:|:---:|:---:|:---:|:---:|\n"
-      f"| Producto | Base de Datos | Proveedor ABC | $1,000.00 MXN | 30% | $1,300.00 MXN | 28 | $36,400.00 MXN |\n\n"
-      
-      f"**COTIZACIÓN PARA CLIENTE (lista para compartir):**\n"
-      f"- Formato limpio y profesional, sin información interna\n"
-      f"- NO incluir proveedor, costo unitario, ni margen\n"
-      f"- Solo incluir: Descripción, Unidad, Cantidad, Precio Unitario, Importe\n"
-      f"- En la columna CONCEPTO, incluir el nombre del producto en la primera línea.\n"
-      f"- **IMPORTANTE:** NO incluir especificaciones técnicas detalladas en la cotización al cliente a menos que sean críticas para distinguir el producto (ej. dimensiones básicas). El cliente final no necesita saber detalles técnicos complejos.\n"
-      f"- Formato de tabla cliente (5 columnas con encabezado azul):\n"
-      f"| CONCEPTO | UNIDAD | CANTIDAD | P. UNITARIO | IMPORTE |\n"
-      f"|:---|:---:|:---:|:---:|:---:|\n"
-      f"| Nombre del producto (Dimensiones básicas) | ROLLO | 10 | $63,500.00 MXN | $635,000.00 MXN |\n"
-      f"- Incluir fila de TOTAL con fondo azul al final de la tabla\n"
-      f"\n"
-      f"**ESTRUCTURA DESPUÉS DE LA TABLA:**\n"
-      f"1. **Monto en palabras** (en una sola línea, sin viñetas):\n"
-      f"   (SEISCIENTOS TREINTA Y CINCO MIL PESOS 00/100 MXN)\n"
-      f"\n"
-      f"2. **Sección de Notas** (usar ## Nota: como encabezado):\n"
-      f"   - **IMPORTANTE:** Copia aquí las 'CONDICIONES COMERCIALES SUGERIDAS' del reporte de análisis.\n"
-      f"   - Asegúrate de incluir la ubicación de entrega: {customer_location if customer_location else 'A convenir'}\n"
-      f"\n"
-      f"3. **Sección de Datos Bancarios** (usar ## DATOS BANCARIOS como encabezado):\n"
-      f"   DATOS BANCARIOS IMPAG TECH SAPI DE C V\n"
-      f"   BBVA BANCOMER\n"
-      f"   CUENTA CLABE: 012 180 001193473561\n"
-      f"   NUMERO DE CUENTA: 011 934 7356\n"
-      f"\n"
-      f"4. **Firma** (sin encabezado, solo el texto):\n"
-      f"   Atentamente\n"
-      f"   Juan Daniel Betancourt González\n"
-      f"   Director de proyectos\n"
-      f"\n"
-      f"**REGLAS CRÍTICAS PARA EVITAR DUPLICACIÓN:**\n"
-      f"- NO repetir el monto en palabras en la sección de Notas\n"
-      f"- NO repetir los datos bancarios en la sección de Notas\n"
-      f"- NO incluir la firma en la sección de Notas\n"
-      f"- Cada sección debe aparecer UNA SOLA VEZ en el orden especificado\n"
-      f"- Las notas deben ser SOLO las sugeridas en el reporte, nada más\n"
-      f"\n"
-      f"**FORMATO PARA PDF:**\n"
-      f"- La tabla debe caber en una página A4 (210mm de ancho)\n"
-      f"- Usar nombres de productos concisos en la columna CONCEPTO\n"
-      f"- Si el nombre es muy largo, abreviarlo manteniendo claridad\n"
-      
-      f"**📄 Contexto adicional (cotizaciones previas, conversaciones WhatsApp, documentos):**\n{context}\n\n"
-      f"📌 **Cómo usar el contexto de WhatsApp:**\n"
-      f"- Las conversaciones de WhatsApp muestran cómo IMPAG realmente vende: precios cotizados, condiciones de envío, seguimiento con clientes\n"
-      f"- Si el contexto incluye una conversación con el mismo cliente, usa esa información para personalizar la cotización\n"
-      f"- Los precios mencionados en WhatsApp son precios reales que se han ofrecido — úsalos como referencia si no hay precio en el catálogo\n"
-      f"- Las facturas muestran precios reales de compra a proveedores — NO mostrar estos al cliente\n\n"
-      f"**📦 Catálogo de productos disponibles (para cliente):**\n{matched_products}\n\n"
-      f"**📦 Catálogo de productos con detalles internos (para uso interno):**\n{matched_products_internal}\n\n"
-      
-      f"**👤 Información del Cliente:**\n"
-      f"- Nombre: {customer_name if customer_name else 'A quien corresponda'}\n"
-      f"- Ubicación: {customer_location if customer_location else 'No especificada'}\n\n"
-      
-      f"**🔍 Consulta actual:** {query}")
-
-    response = llm.complete(prompt)
-    return response.text
+    # Return in same format as before so frontend parsing is unchanged
+    return (
+        f"<!-- INTERNAL_QUOTATION_START -->\n"
+        f"{internal_quotation}\n"
+        f"<!-- INTERNAL_QUOTATION_END -->\n\n"
+        f"<!-- CUSTOMER_QUOTATION_START -->\n"
+        f"{customer_quotation}\n"
+        f"<!-- CUSTOMER_QUOTATION_END -->"
+    )

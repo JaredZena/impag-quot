@@ -50,7 +50,7 @@ def extract_text_from_image_bytes(file_bytes: bytes, media_type: str) -> str:
     image_base64 = base64.b64encode(file_bytes).decode('utf-8')
 
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=20000,
         temperature=0,
         messages=[{

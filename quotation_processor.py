@@ -125,7 +125,7 @@ class QuotationProcessor:
             use_claude_opus: True for claude-3-opus (highest accuracy), False for claude-3-sonnet (faster, cheaper)
         """
         self.client = anthropic.Anthropic(api_key=anthropic_api_key)
-        self.model = "claude-sonnet-4-20250514"
+        self.model = "claude-sonnet-4-6"
         self.sku_generator = HybridSKUGenerator()
         
     def get_categories(self, session: Session) -> List[Dict]:
