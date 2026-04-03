@@ -361,15 +361,6 @@ POST_TYPES_DEFINITIONS = """
 CHANNEL_FORMATS = """
 FORMATOS POR CANAL (CRÍTICO - ADAPTA EL CONTENIDO):
 
-📱 WA STATUS (wa-status):
-  - Aspecto: Vertical 9:16 (1080×1920)
-  - Música: ✅ OBLIGATORIO (corridos mexicanos, regional)
-  - ⚠️ CAPTION: MÍNIMO O VACÍO (máximo 50 caracteres). El contenido visual/imagen debe comunicar TODO.
-  - ⚠️ PRIORIDAD: La imagen/video es lo más importante, NO el texto.
-  - Duración: 15-30 segundos si es video
-  - Efímero: Desaparece en 24h
-  - Ejemplo: Alerta urgente, "Llegó X producto", UGC rápido
-
 📨 WA BROADCAST (wa-broadcast):
   - Aspecto: Cuadrado 1:1 (1080×1080)
   - Música: ❌ No aplica

@@ -69,7 +69,9 @@ ESTRATEGIA:
 """
 
     if product_details:
-        prompt += f"""PRODUCTO SELECCIONADO:
+        prompt += f"""PRODUCTO DE APOYO (apoya el tema — NO es el protagonista del caption):
+⚠️ El caption debe hablar del TEMA: "{topic_strategy.topic}"
+⚠️ El producto aparece como la solución o herramienta — no como el sujeto principal.
 - Nombre: {product_details.get('name', 'N/A')}
 - Categoría: {product_details.get('category', 'N/A')}
 """
@@ -119,6 +121,12 @@ ESTRATEGIA:
     )
 
     is_rancho_post = weekday_theme and weekday_theme.get('theme') == '🌾 La Vida en el Rancho'
+    is_monday_motivational = (
+        weekday_theme and
+        weekday_theme.get('day_name') == 'Monday' and
+        weekday_theme.get('theme') == '✊ Motivational / Inspirational' and
+        topic_strategy.topic  # only when a real topic was provided
+    )
     is_social_celebration = special_date and special_date.get('special_date_type') == 'social'
 
     if is_social_celebration:
@@ -158,6 +166,30 @@ Porque detrás de muchos cultivos exitosos hay una mujer tomando decisiones, res
 📲 WhatsApp: 677-119-7737
 
 #DiaInternacionalDeLaMujer #MujeresEnElCampo #AgriculturaMexicana #IMPAG"
+
+{caption_json}"""
+
+    elif is_monday_motivational:
+        prompt += f"""TU TAREA - POST MOTIVACIONAL DE LUNES:
+El tema es "{topic_strategy.topic}". Escribe una historia o reflexión HUMANA sobre este tema — no un artículo de tips.
+
+🎯 ESTRUCTURA (sigue este orden):
+1. ESCENA CONCRETA: Abre con un momento visual específico relacionado al tema (no una pregunta retórica)
+2. EL PESO REAL: Expande al significado humano detrás de esa escena — qué carga, qué sacrifica, qué representa
+3. EL RECONOCIMIENTO: Nombralo — "pocos lo ven", "nadie aplaude", "el campo lo sabe"
+4. UNIVERSALIZA: Una línea que conecta con todo productor ("Solo quien vive del campo entiende")
+5. CIERRE SUAVE: Una frase de cierre que deje algo, no que empuje a comprar
+
+⚠️ REGLAS CRÍTICAS:
+- Caption LARGO (300-600 palabras) — fb-post premia dwell time
+- NO uses estructura "5 lecciones de..." ni "Te explico cómo..."
+- NO menciones productos IMPAG ni hagas ventas
+- NO uses lenguaje corporativo o motivacional tipo "¡Tú puedes!"
+- IMPAG aparece solo al final, con un cierre de marca suave (1-2 líneas máximo)
+- Hashtags: simples y rurales — #ElCampo #Durango #VidaRural #Rancho
+
+✅ TONO CORRECTO: narrativo, cálido, con peso emocional real — como alguien que lo vivió y lo cuenta
+❌ TONO INCORRECTO: publicitario, motivacional hueco, listicle de consejos
 
 {caption_json}"""
 
@@ -400,7 +432,7 @@ IMPORTANTE - REGLAS DE CAPTION SECTOR-ESPECÍFICO:
     else:
         prompt += f"""IMPORTANTE - REGLAS DE CAPTION:
 - Caption debe respetar el límite de caracteres del canal
-- Para canales visuales (wa-status, tiktok, reels, stories): caption CORTO, contenido en imagen
+- Para canales visuales (tiktok, reels, stories): caption CORTO, contenido en imagen
 - Para canales de texto (fb-post, ig-post): caption DEBE ser LARGO y SUSTANCIAL
   * NO uses solo preguntas o teasers como "¿Sabías que...? Te explico cómo"
   * DEBES EXPLICAR el concepto completo en el caption

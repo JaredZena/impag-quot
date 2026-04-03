@@ -61,7 +61,7 @@ Tipos de post recomendados: {', '.join(weekday_theme['recommended_post_types'])}
         prompt += "CANALES USADOS RECIENTEMENTE:\n"
         for ch in recent_channels[:5]:
             prompt += f"- {ch}\n"
-        prompt += "\n⚠️ Elige un canal DIFERENTE al usado ayer (varía entre fb-post, tiktok, wa-status, ig-reel, etc.)\n\n"
+        prompt += "\n⚠️ Elige un canal DIFERENTE al usado ayer (varía entre fb-post, tiktok, ig-reel, etc.)\n\n"
     else:
         prompt += "No hay canales recientes.\n\n"
 
@@ -106,7 +106,7 @@ TONOS DISPONIBLES:
   Seasonal, Humorous, Informative, Inspirational
 
 CANALES DISPONIBLES:
-- fb-post, ig-post, tiktok, wa-status, fb-reel, ig-reel, wa-broadcast
+- fb-post, ig-post, tiktok, fb-reel, ig-reel, wa-broadcast
 
 RESPONDE SOLO CON JSON (sin markdown):
 {
