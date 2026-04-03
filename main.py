@@ -96,6 +96,7 @@ class QueryResponse(BaseModel):
     id: int
     query_text: str
     response_text: str
+    complexity_tier: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -210,7 +211,7 @@ async def query(request: QueryRequest, db: Session = Depends(get_db)):
 
     # Get response from RAG system with conversation context
     try:
-        response = query_rag_system_with_history(
+        result = query_rag_system_with_history(
             query=request.query,
             chat_history=chat_history,
             customer_name=request.customer_name,
@@ -224,11 +225,15 @@ async def query(request: QueryRequest, db: Session = Depends(get_db)):
                 detail="ANTHROPIC_CREDITS_EXHAUSTED: Los créditos de la API de Claude se agotaron. Recarga en https://console.anthropic.com/settings/billing"
             )
         raise HTTPException(status_code=500, detail=f"Error generando cotización: {error_str[:300]}")
-    
+
+    response = result['quotation']
+    complexity_tier = result.get('complexity_tier')
+
     # Save query and response to database
     db_query = Query(
         query_text=request.query,
-        response_text=response
+        response_text=response,
+        complexity_tier=complexity_tier,
     )
     db.add(db_query)
     db.commit()
@@ -261,7 +266,7 @@ async def query(request: QueryRequest, db: Session = Depends(get_db)):
             conversation.updated_at = datetime.utcnow()
             db.commit()
     
-    return {"response": response, "conversation_id": request.conversation_id}
+    return {"response": response, "complexity_tier": complexity_tier, "conversation_id": request.conversation_id}
 
 @app.get("/queries", response_model=List[QueryResponse])
 async def get_queries(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):

@@ -204,6 +204,7 @@ class Query(Base):
     id = Column(Integer, primary_key=True, index=True)
     query_text = Column(Text, nullable=False)
     response_text = Column(Text, nullable=False)
+    complexity_tier = Column(String(20), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class Conversation(Base):

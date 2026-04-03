@@ -3,6 +3,54 @@ from .pinecone_setup import index
 from .claude_llm_setup import llm
 from models import Product, Supplier, SupplierProduct, SessionLocal
 
+# ── QUOTATION COMPLEXITY TIERS ──────────────────────────────────────────────
+# Sencilla:     known products, no shipping, 1-3 product lines
+# Mediana:      known products, no shipping, 4+ product lines
+# Mediana Alta: known products, WITH shipping
+# Alta:         any unknown product (no cost in SupplierProduct), with or without shipping
+
+SHIPPING_KEYWORDS = ['envío', 'envio', 'flete', 'mandar', 'enviar', 'ocurre', 'a domicilio', 'entregar en', 'con envío', 'con flete']
+MULTI_PRODUCT_KEYWORDS = [' y ', ', ', 'más ', 'también', 'además', 'junto con', 'incluyendo']
+
+
+def _get_raw_products_for_classification(query_embedding, limit=10):
+    """Return raw SupplierProduct objects for the top matches — used for tier classification."""
+    db = SessionLocal()
+    try:
+        return db.query(SupplierProduct).join(Product).join(Supplier).filter(
+            SupplierProduct.is_active == True,
+            SupplierProduct.embedding != None
+        ).order_by(
+            SupplierProduct.embedding.cosine_distance(query_embedding)
+        ).limit(limit).all()
+    except Exception as e:
+        print(f"⚠️ Classification query failed: {e}")
+        return []
+    finally:
+        db.close()
+
+
+def classify_quotation_tier(query_text, raw_products):
+    """
+    Classify quotation complexity based on products and query content.
+    Returns: 'sencilla' | 'mediana' | 'mediana_alta' | 'alta'
+    """
+    # Any product without a cost → unknown → Alta
+    if not raw_products or any(sp.cost is None for sp in raw_products[:5]):
+        return 'alta'
+
+    has_shipping = any(kw in query_text.lower() for kw in SHIPPING_KEYWORDS)
+    if has_shipping:
+        return 'mediana_alta'
+
+    # Estimate product line count from query phrasing
+    multi_count = sum(1 for kw in MULTI_PRODUCT_KEYWORDS if kw in query_text.lower())
+    estimated_lines = 1 + multi_count
+
+    if estimated_lines >= 4:
+        return 'mediana'
+    return 'sencilla'
+
 def get_products_from_db(fallback_margin=30.0, include_internal_details=False):
     """
     Fetch products from supplier-product table and calculate prices with margin.
@@ -200,9 +248,57 @@ def get_category(product_name):
         return "Otros insumos agrícolas"
 
 
+def generate_simple_quotation(query, matched_products, matched_products_internal,
+                              customer_name, customer_location, chat_history_text):
+    """
+    Lightweight single-LLM-call quotation for Sencilla tier.
+    Skips Pinecone and analysis step — uses DB products directly.
+    Returns the combined quotation string (same HTML comment format as full pipeline).
+    """
+    table_rules = (
+        "📌 **TABLA INTERNA (8 columnas):**\n"
+        "| Descripción | Fuente | Proveedor | Costo Unitario | Margen | Precio Unitario | Cantidad | Importe |\n"
+        "|:---|:---|:---|:---:|:---:|:---:|:---:|:---:|\n\n"
+        "📌 **TABLA CLIENTE (5 columnas):**\n"
+        "| CONCEPTO | UNIDAD | CANTIDAD | P. UNITARIO | IMPORTE |\n"
+        "|:---|:---:|:---:|:---:|:---:|\n"
+        "- Precio Unitario e Importe: incluir $ y MXN. Sin precio: 'Consultar'.\n"
+        "- Fila TOTAL al final de la tabla cliente.\n"
+        "- Productos agrícolas exentos de IVA en México.\n"
+    )
+
+    prompt = (
+        f"Genera DOS cotizaciones para IMPAG en formato markdown.\n\n"
+        f"**CONSULTA:** {query}\n\n"
+        f"{chat_history_text}"
+        f"**INSTRUCCIONES:**\n"
+        f"1. Si la consulta incluye medidas, áreas o cantidades, calcula la cantidad de producto necesaria paso a paso.\n"
+        f"2. Usa los precios del catálogo directamente — no inventes precios.\n"
+        f"3. Si no hay precio disponible, usa 'Consultar'.\n"
+        f"4. Responde en español.\n\n"
+        f"{table_rules}\n"
+        f"**📦 Catálogo con detalles internos:**\n{matched_products_internal}\n\n"
+        f"**👤 Cliente:** {customer_name or 'A quien corresponda'} | "
+        f"Ubicación: {customer_location or 'A convenir'}\n\n"
+        f"**FORMATO DE RESPUESTA — DOS COTIZACIONES SEPARADAS:**\n\n"
+        f"<!-- INTERNAL_QUOTATION_START -->\n"
+        f"[Cotización interna: incluye proveedor, costo, margen, fuente]\n"
+        f"<!-- INTERNAL_QUOTATION_END -->\n\n"
+        f"<!-- CUSTOMER_QUOTATION_START -->\n"
+        f"[Cotización cliente: limpia, sin datos internos. Incluye monto en palabras, "
+        f"## Nota: con condiciones, ## DATOS BANCARIOS, y firma de Juan Daniel Betancourt González]\n"
+        f"<!-- CUSTOMER_QUOTATION_END -->"
+    )
+
+    print("🟢 [SIMPLE] Single LLM call — no Pinecone, no analysis step")
+    response = llm.complete(prompt)
+    return response.text
+
+
 def query_rag_system(query):
     """Generate a response using database product search and historical context."""
-    return query_rag_system_with_history(query, chat_history=None)
+    result = query_rag_system_with_history(query, chat_history=None)
+    return result['quotation']
 
 
 def analyze_request_and_calculate(query, context):
@@ -339,8 +435,35 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
     if chat_history is None:
         chat_history = []
 
-    # Generate query embedding for Pinecone context search
+    # Generate query embedding (shared for both classification and Pinecone search)
     query_embedding = generate_embeddings([query])[0]
+
+    # ── CLASSIFY TIER BEFORE RUNNING FULL PIPELINE ───────────────────────────
+    raw_products = _get_raw_products_for_classification(query_embedding)
+    tier = classify_quotation_tier(query, raw_products)
+    print(f"🔹 Quotation tier: {tier}")
+
+    # Format chat history (shared between simple and full paths)
+    chat_history_text = ""
+    if chat_history:
+        chat_history_text = "\n\n**📝 Conversación previa:**\n"
+        for msg in chat_history[-4:]:
+            role = "Usuario" if msg["role"] == "user" else "Asistente"
+            content = msg["content"][:500] + "..." if len(msg["content"]) > 500 else msg["content"]
+            chat_history_text += f"\n{role}: {content}\n"
+        chat_history_text += "\n"
+
+    if tier == 'sencilla':
+        # Lightweight path: single LLM call, no Pinecone, no analysis step
+        matched_products = get_relevant_products(query_embedding)
+        matched_products_internal = get_relevant_products(query_embedding, include_internal_details=True)
+        quotation = generate_simple_quotation(
+            query, matched_products, matched_products_internal,
+            customer_name, customer_location, chat_history_text
+        )
+        return {'quotation': quotation, 'complexity_tier': tier}
+
+    # ── FULL PIPELINE (mediana / mediana_alta / alta) ─────────────────────────
 
     # Search across ALL namespaces: historical quotations, WhatsApp conversations,
     # quotation documents, facturas, catalogs
@@ -351,20 +474,9 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
     calculation_report = analyze_request_and_calculate(query, context)
     print(f"🔹 Calculation & Analysis Report:\n{calculation_report}")
 
-    # Step 1: Get products from database using semantic search
+    # Get products from database using semantic search
     matched_products = get_relevant_products(query_embedding)
     matched_products_internal = get_relevant_products(query_embedding, include_internal_details=True)
-    
-    # Step 2: Format chat history for prompt (last 4 messages)
-    chat_history_text = ""
-    if chat_history:
-        chat_history_text = "\n\n**📝 Conversación previa:**\n"
-        for msg in chat_history[-4:]:  # Last 4 messages (2 conversation turns)
-            role = "Usuario" if msg["role"] == "user" else "Asistente"
-            # Truncate long messages to avoid token bloat
-            content = msg["content"][:500] + "..." if len(msg["content"]) > 500 else msg["content"]
-            chat_history_text += f"\n{role}: {content}\n"
-        chat_history_text += "\n"
 
     # Shared preamble used by both calls
     shared_context = (
@@ -460,8 +572,7 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
     customer_response = llm.complete(customer_prompt)
     customer_quotation = customer_response.text
 
-    # Return in same format as before so frontend parsing is unchanged
-    return (
+    quotation = (
         f"<!-- INTERNAL_QUOTATION_START -->\n"
         f"{internal_quotation}\n"
         f"<!-- INTERNAL_QUOTATION_END -->\n\n"
@@ -469,3 +580,4 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
         f"{customer_quotation}\n"
         f"<!-- CUSTOMER_QUOTATION_END -->"
     )
+    return {'quotation': quotation, 'complexity_tier': tier}
