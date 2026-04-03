@@ -396,19 +396,6 @@ FORMATOS POR CANAL (CRÍTICO - ADAPTA EL CONTENIDO):
   - Efímero: Desaparece en 24h
   - Ejemplo: Alerta urgente, promoción flash, behind-the-scenes
 
-🎵 TIKTOK (tiktok) - ⚠️ FORMATO ESPECIAL:
-  - Aspecto: Vertical 9:16 (1080×1920)
-  - ⚠️ CARRUSEL DE 2-3 IMÁGENES (NO video)
-  - El usuario DESLIZA para ver siguiente imagen
-  - Música: ✅ OBLIGATORIO (corridos mexicanos, regional popular)
-  - ⚠️ CAPTION: MUY CORTO (máximo 150 caracteres). SOLO hashtags o texto mínimo.
-  - ⚠️ PRIORIDAD: TODO EL TEXTO PRINCIPAL VA EN LAS IMÁGENES DEL CARRUSEL, NO en caption.
-  - ⚠️ CRÍTICO: El caption es secundario, las imágenes con texto grande son lo importante.
-  - Estructura típica 3 slides:
-    1. HOOK/Problema (primera imagen engancha con texto grande visible)
-    2. CONTENIDO/Solución (texto en imagen)
-    3. CTA/Contacto (texto en imagen)
-  - Ejemplo: "3 errores al instalar" / "Antes→Después→Precio"
 """
 
 # --- Models ---

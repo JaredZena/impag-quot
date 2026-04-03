@@ -172,6 +172,7 @@ Porque detrás de muchos cultivos exitosos hay una mujer tomando decisiones, res
     elif is_monday_motivational:
         prompt += f"""TU TAREA - POST MOTIVACIONAL DE LUNES:
 El tema es "{topic_strategy.topic}". Escribe una historia o reflexión HUMANA sobre este tema — no un artículo de tips.
+⚠️ IGNORA el límite de caracteres del canal — este post requiere caption LARGO de 300-600 palabras independientemente del canal.
 
 🎯 ESTRUCTURA (sigue este orden):
 1. ESCENA CONCRETA: Abre con un momento visual específico relacionado al tema (no una pregunta retórica)
@@ -432,7 +433,7 @@ IMPORTANTE - REGLAS DE CAPTION SECTOR-ESPECÍFICO:
     else:
         prompt += f"""IMPORTANTE - REGLAS DE CAPTION:
 - Caption debe respetar el límite de caracteres del canal
-- Para canales visuales (tiktok, reels, stories): caption CORTO, contenido en imagen
+- Para canales visuales (reels, stories): caption CORTO, contenido en imagen
 - Para canales de texto (fb-post, ig-post): caption DEBE ser LARGO y SUSTANCIAL
   * NO uses solo preguntas o teasers como "¿Sabías que...? Te explico cómo"
   * DEBES EXPLICAR el concepto completo en el caption

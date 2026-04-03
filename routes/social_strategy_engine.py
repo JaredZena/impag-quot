@@ -61,7 +61,7 @@ Tipos de post recomendados: {', '.join(weekday_theme['recommended_post_types'])}
         prompt += "CANALES USADOS RECIENTEMENTE:\n"
         for ch in recent_channels[:5]:
             prompt += f"- {ch}\n"
-        prompt += "\n⚠️ Elige un canal DIFERENTE al usado ayer (varía entre fb-post, tiktok, ig-reel, etc.)\n\n"
+        prompt += "\n⚠️ Elige un canal DIFERENTE al usado ayer (varía entre fb-post, ig-post, fb-reel, ig-reel, wa-broadcast)\n\n"
     else:
         prompt += "No hay canales recientes.\n\n"
 
@@ -76,7 +76,14 @@ Tipos de post recomendados: {', '.join(weekday_theme['recommended_post_types'])}
 - El post debe enfocarse en promocionar o destacar productos
 
 """
-    elif weekday_theme['day_name'] in ['Monday', 'Wednesday', 'Saturday', 'Sunday']:
+    elif weekday_theme['day_name'] == 'Monday':
+        prompt += """📚 LUNES — POST EMOCIONAL/MOTIVACIONAL:
+- search_needed = false (sin productos)
+- Canal OBLIGATORIO: fb-post o ig-post — el lunes es narrativa emocional larga, NO TikTok ni reels
+- El caption debe ser largo (300-600 palabras) — elige el canal que lo permita
+
+"""
+    elif weekday_theme['day_name'] in ['Wednesday', 'Saturday', 'Sunday']:
         prompt += """📚 DÍA EDUCATIVO/INFORMATIVO:
 - search_needed puede ser false
 - Solo busca producto si el tema lo requiere naturalmente
@@ -106,7 +113,7 @@ TONOS DISPONIBLES:
   Seasonal, Humorous, Informative, Inspirational
 
 CANALES DISPONIBLES:
-- fb-post, ig-post, tiktok, fb-reel, ig-reel, wa-broadcast
+- fb-post, ig-post, fb-reel, ig-reel, wa-broadcast
 
 RESPONDE SOLO CON JSON (sin markdown):
 {
