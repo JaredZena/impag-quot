@@ -214,6 +214,58 @@ class Query(Base):
     feedback_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+
+# ── WhatsApp sales agent (human-in-the-loop) ─────────────────────────────────
+
+class WAConversation(Base):
+    __tablename__ = "wa_conversation"
+
+    id = Column(Integer, primary_key=True, index=True)
+    customer_phone = Column(String(20), nullable=False, unique=True, index=True)  # E.164
+    customer_name = Column(String(200), nullable=True)   # from WhatsApp profile
+    status = Column(String(20), default="active")        # active, archived
+    last_message_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    messages = relationship("WAMessage", back_populates="conversation",
+                            cascade="all, delete-orphan", order_by="WAMessage.created_at")
+
+
+class WAMessage(Base):
+    __tablename__ = "wa_message"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("wa_conversation.id", ondelete="CASCADE"),
+                            nullable=False, index=True)
+    wa_message_id = Column(String(128), unique=True, nullable=True)  # WhatsApp's id (dedup inbound)
+    direction = Column(String(10), nullable=False)       # inbound | outbound
+    content = Column(Text, nullable=False)
+    message_type = Column(String(20), default="text")    # text, image, document, audio, template
+    media_url = Column(String(500), nullable=True)
+    status = Column(String(20), default="received")      # received, draft, approved, sent, delivered, read, failed
+    drafted_by = Column(String(20), nullable=True)       # ai | human
+    approved_by = Column(String(255), nullable=True)     # operator email
+    sent_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    conversation = relationship("WAConversation", back_populates="messages")
+
+
+class WADraft(Base):
+    __tablename__ = "wa_draft"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("wa_conversation.id", ondelete="CASCADE"),
+                            nullable=False, index=True)
+    trigger_message_id = Column(Integer, ForeignKey("wa_message.id", ondelete="SET NULL"), nullable=True)
+    draft_text = Column(Text, nullable=False)
+    edited_text = Column(Text, nullable=True)            # operator's edit before sending
+    ai_context = Column(Text, nullable=True)             # product context used (operator visibility)
+    status = Column(String(20), default="pending", index=True)  # pending, approved, edited, rejected, sent, failed
+    reviewed_by = Column(String(255), nullable=True)     # operator email
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 class Conversation(Base):
     __tablename__ = "conversation"
 
