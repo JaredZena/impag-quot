@@ -20,6 +20,9 @@ def override_get_db():
 
 app.dependency_overrides[get_db] = override_get_db
 
+from auth import verify_google_token
+app.dependency_overrides[verify_google_token] = lambda: {"email": "tester@impag.mx"}
+
 @pytest.fixture(scope="function")
 def client():
     # Create tables

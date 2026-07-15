@@ -1,5 +1,7 @@
+import time
+
 from fastapi import FastAPI, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from models import get_db, Query, Conversation, ConversationMessage, Quotation
@@ -210,6 +212,7 @@ async def query(request: QueryRequest, db: Session = Depends(get_db), user: dict
     chat_history = [{"role": msg.role, "content": msg.content} for msg in (request.messages or [])]
 
     # Get response from RAG system with conversation context
+    t_start = time.perf_counter()
     try:
         result = query_rag_system_with_history(
             query=request.query,
@@ -229,15 +232,25 @@ async def query(request: QueryRequest, db: Session = Depends(get_db), user: dict
     response = result['quotation']
     complexity_tier = result.get('complexity_tier')
 
-    # Save query and response to database
-    db_query = Query(
-        query_text=request.query,
-        response_text=response,
-        complexity_tier=complexity_tier,
-    )
-    db.add(db_query)
-    db.commit()
-    db.refresh(db_query)
+    # Save query and response to database. Logging must never cost the user a
+    # successfully generated quotation (1-3 LLM calls already spent).
+    query_id = None
+    try:
+        db_query = Query(
+            query_text=request.query,
+            response_text=response,
+            complexity_tier=complexity_tier,
+            user_email=user.get("email"),
+            retrieved_chunk_ids=result.get("retrieved_chunk_ids") or [],
+            latency_ms=int((time.perf_counter() - t_start) * 1000),
+        )
+        db.add(db_query)
+        db.commit()
+        db.refresh(db_query)
+        query_id = db_query.id
+    except Exception as e:
+        db.rollback()
+        print(f"⚠️ Query logging failed (quotation still returned): {e}")
     
     # If conversation_id is provided, save messages to conversation
     if request.conversation_id:
@@ -266,7 +279,34 @@ async def query(request: QueryRequest, db: Session = Depends(get_db), user: dict
             conversation.updated_at = datetime.utcnow()
             db.commit()
     
-    return {"response": response, "complexity_tier": complexity_tier, "conversation_id": request.conversation_id}
+    return {"response": response, "complexity_tier": complexity_tier,
+            "conversation_id": request.conversation_id, "query_id": query_id}
+
+
+class QueryFeedbackRequest(BaseModel):
+    feedback: int  # 1 = útil, -1 = no útil
+    feedback_text: Optional[str] = Field(default=None, max_length=2000)
+
+
+@app.post("/queries/{query_id}/feedback")
+async def submit_query_feedback(
+    query_id: int,
+    request: QueryFeedbackRequest,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token),
+):
+    """Record thumbs up/down (and optional correction) on a generated quotation."""
+    if request.feedback not in (1, -1):
+        raise HTTPException(status_code=422, detail="feedback must be 1 or -1")
+    db_query = db.query(Query).filter(Query.id == query_id).first()
+    if not db_query:
+        raise HTTPException(status_code=404, detail="Query not found")
+    db_query.feedback = request.feedback
+    db_query.feedback_text = request.feedback_text
+    db_query.feedback_by = user.get("email")
+    db_query.feedback_at = datetime.utcnow()
+    db.commit()
+    return {"ok": True, "query_id": query_id, "feedback": request.feedback}
 
 @app.get("/queries", response_model=List[QueryResponse])
 async def get_queries(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, SmallInteger, String, DateTime, Float, ForeignKey, create_engine, Boolean, Text, Numeric, JSON, Enum, Date
+from sqlalchemy import Column, Integer, SmallInteger, String, DateTime, Float, ForeignKey, create_engine, Boolean, Text, Numeric, JSON, Enum, Date, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -205,6 +205,13 @@ class Query(Base):
     query_text = Column(Text, nullable=False)
     response_text = Column(Text, nullable=False)
     complexity_tier = Column(String(20), nullable=True)
+    user_email = Column(String(255), nullable=True)
+    retrieved_chunk_ids = Column(JSON, nullable=True)  # Pinecone vector ids injected into the prompt
+    latency_ms = Column(Integer, nullable=True)
+    feedback = Column(SmallInteger, nullable=True)  # 1 = útil, -1 = no útil
+    feedback_text = Column(Text, nullable=True)
+    feedback_by = Column(String(255), nullable=True)
+    feedback_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class Conversation(Base):
@@ -394,7 +401,10 @@ class Task(Base):
     status = Column(String(20), default="pending", nullable=False, index=True)
     priority = Column(String(10), default="medium", nullable=False)
     due_date = Column(Date, nullable=True)
-    category_id = Column(Integer, ForeignKey("task_category.id"), nullable=True, index=True)
+    # Explicit index name: the auto-generated one (ix_task_category_id) collides
+    # with task_category.id's index, breaking create_all on fresh databases.
+    category_id = Column(Integer, ForeignKey("task_category.id"), nullable=True)
+    __table_args__ = (Index("ix_task_category_fk", "category_id"),)
     created_by = Column(Integer, ForeignKey("task_user.id"), nullable=False, index=True)
     assigned_to = Column(Integer, ForeignKey("task_user.id"), nullable=True, index=True)
     task_number = Column(SmallInteger, nullable=True)

@@ -133,105 +133,144 @@ def get_products_from_db(fallback_margin=30.0, include_internal_details=False):
     finally:
         db.close()
 
-def get_relevant_products(query_embedding, limit=30, include_internal_details=False, fallback_margin=30.0):
-    """
-    Fetch relevant products using vector similarity search.
-    Prioritizes database pricing (SupplierProduct). 
-    """
+def _select_relevant_supplier_products(db, query_embedding, limit, query_text, max_products):
+    """ANN candidates by cosine distance, optionally reranked ONCE with the
+    cross-encoder and cut to max_products — otherwise every candidate lands
+    in the quotation prompt regardless of relevance."""
+    supplier_products = db.query(SupplierProduct).join(Product).join(Supplier).filter(
+        SupplierProduct.is_active == True,
+        SupplierProduct.embedding != None
+    ).order_by(
+        SupplierProduct.embedding.cosine_distance(query_embedding)
+    ).limit(limit).all()
+
+    if query_text and supplier_products:
+        from services.pinecone_service import rerank_results
+        candidates = [
+            {"metadata": {"text": f"{sp.product.name}. {sp.product.description or ''}"},
+             "score": 0.0, "_sp": sp}
+            for sp in supplier_products
+        ]
+        kept = rerank_results(query_text, candidates, top_n=max_products)
+        supplier_products = [c["_sp"] for c in kept]
+    return supplier_products
+
+
+def _format_product_lines(supplier_products, include_internal_details, fallback_margin):
+    """Format one selected product list as prompt lines (customer or internal
+    view). Formatting is split from selection so both views are guaranteed to
+    describe the SAME product set."""
+
+    # Create compact product list
+    product_lines = []
+    for sp in supplier_products:
+        product = sp.product
+        supplier = sp.supplier
+        
+        # Calculate final price from supplier cost + shipping + margin
+        if sp.cost:
+            # Calculate shipping (Direct + Stages 1-4)
+            shipping_total = (
+                float(sp.shipping_cost_direct or 0) + 
+                float(sp.shipping_stage1_cost or 0) + 
+                float(sp.shipping_stage2_cost or 0) + 
+                float(sp.shipping_stage3_cost or 0) + 
+                float(sp.shipping_stage4_cost or 0)
+            )
+
+            # Use product's default_margin, or fallback if not set
+            # NOTE: default_margin is stored as DECIMAL (0.20 = 20%, not as percentage 20.00)
+            margin_decimal = float(sp.default_margin) if sp.default_margin else (fallback_margin / 100)
+            
+            # Convert to percentage for display
+            margin_percentage = margin_decimal * 100
+            
+            # IMPORTANT: Enforce minimum margin of 15% to prevent selling at cost
+            MIN_MARGIN = 15.0
+            margin_source = "DB"
+            if margin_percentage < MIN_MARGIN:
+                margin_decimal = fallback_margin / 100
+                margin_percentage = fallback_margin
+                margin_source = f"FALLBACK (DB margin {float(sp.default_margin) * 100:.1f}% too low)"
+            
+            # Calculate Basis: Cost + Shipping
+            cost_basis = float(sp.cost) + shipping_total
+
+            # Standardized formula: price = cost / (1 - margin)
+            final_price = cost_basis / (1 - margin_decimal) if margin_decimal < 1 else cost_basis
+            
+            price_str = f"${final_price:,.2f} MXN"
+            
+            # Include internal details if requested
+            if include_internal_details:
+                cost_str = f"${float(sp.cost):,.2f} {sp.currency or 'MXN'}"
+                shipping_str = f"${shipping_total:,.2f}"
+                
+                shipping_warning = ""
+                if shipping_total == 0:
+                    shipping_warning = " ⚠️ VERIFICAR ENVÍO (Costo $0.00)"
+
+                margin_str = f"{margin_percentage:.1f}% ({margin_source})"
+                # Internal view: Detailed specs + commercial info + SOURCE
+                specs_str = ""
+                if product.specifications:
+                    specs_str = ", ".join([f"{k}: {v}" for k, v in product.specifications.items()])
+                
+                # Explicitly state source is DATABASE
+                line = f"SOURCE: DATABASE (SupplierProduct ID: {sp.id}) | {product.name} | {supplier.name} | Costo Base: {cost_str} | Envío: {shipping_str}{shipping_warning} | Costo Total: ${cost_basis:,.2f} | Margen: {margin_str} | Precio Final: {price_str} | {product.unit.value} | SKU: {product.sku} | Specs: {specs_str}"
+            else:
+                # Customer view: Simplified for quotation generation
+                # We still provide specs to the AI so it can describe the product, 
+                # but we'll instruct the AI to be concise in the prompt.
+                line = f"PRODUCT: {product.name} | Precio: {price_str} | Unidad: {product.unit.value} | SKU: {product.sku}"
+                if product.specifications:
+                    # Filter for key specs only for customer context if needed, 
+                    # but usually better to give AI context and tell it to summarize.
+                    specs = ", ".join([f"{k}: {v}" for k, v in product.specifications.items()])
+                    line += f" | Specs: {specs}"
+        else:
+            # No cost available - fallback to "Consultar"
+            price_str = "Consultar"
+            if include_internal_details:
+                line = f"SOURCE: DATABASE (SupplierProduct ID: {sp.id}) | {product.name} | {supplier.name} | Costo: Consultar | Margen: N/A | Precio Final: {price_str} | {product.unit.value} | SKU: {product.sku}"
+            else:
+                line = f"PRODUCT: {product.name} | Precio: {price_str} | Unidad: {product.unit.value} | SKU: {product.sku}"
+        
+        product_lines.append(line)
+    
+    if not product_lines:
+        return "No matching products found in catalog."
+
+    return "\n".join(product_lines)
+
+
+def get_relevant_products(query_embedding, limit=30, include_internal_details=False, fallback_margin=30.0,
+                          query_text=None, max_products=15):
+    """Single-view product context. Prefer get_relevant_products_views when
+    both customer and internal views are needed."""
     db = SessionLocal()
     try:
-        # Semantic search using cosine distance
-        supplier_products = db.query(SupplierProduct).join(Product).join(Supplier).filter(
-            SupplierProduct.is_active == True,
-            SupplierProduct.embedding != None
-        ).order_by(
-            SupplierProduct.embedding.cosine_distance(query_embedding)
-        ).limit(limit).all()
-        
-        # Create compact product list
-        product_lines = []
-        for sp in supplier_products:
-            product = sp.product
-            supplier = sp.supplier
-            
-            # Calculate final price from supplier cost + shipping + margin
-            if sp.cost:
-                # Calculate shipping (Direct + Stages 1-4)
-                shipping_total = (
-                    float(sp.shipping_cost_direct or 0) + 
-                    float(sp.shipping_stage1_cost or 0) + 
-                    float(sp.shipping_stage2_cost or 0) + 
-                    float(sp.shipping_stage3_cost or 0) + 
-                    float(sp.shipping_stage4_cost or 0)
-                )
-
-                # Use product's default_margin, or fallback if not set
-                # NOTE: default_margin is stored as DECIMAL (0.20 = 20%, not as percentage 20.00)
-                margin_decimal = float(sp.default_margin) if sp.default_margin else (fallback_margin / 100)
-                
-                # Convert to percentage for display
-                margin_percentage = margin_decimal * 100
-                
-                # IMPORTANT: Enforce minimum margin of 15% to prevent selling at cost
-                MIN_MARGIN = 15.0
-                margin_source = "DB"
-                if margin_percentage < MIN_MARGIN:
-                    margin_decimal = fallback_margin / 100
-                    margin_percentage = fallback_margin
-                    margin_source = f"FALLBACK (DB margin {float(sp.default_margin) * 100:.1f}% too low)"
-                
-                # Calculate Basis: Cost + Shipping
-                cost_basis = float(sp.cost) + shipping_total
-
-                # Standardized formula: price = cost / (1 - margin)
-                final_price = cost_basis / (1 - margin_decimal) if margin_decimal < 1 else cost_basis
-                
-                price_str = f"${final_price:,.2f} MXN"
-                
-                # Include internal details if requested
-                if include_internal_details:
-                    cost_str = f"${float(sp.cost):,.2f} {sp.currency or 'MXN'}"
-                    shipping_str = f"${shipping_total:,.2f}"
-                    
-                    shipping_warning = ""
-                    if shipping_total == 0:
-                        shipping_warning = " ⚠️ VERIFICAR ENVÍO (Costo $0.00)"
-
-                    margin_str = f"{margin_percentage:.1f}% ({margin_source})"
-                    # Internal view: Detailed specs + commercial info + SOURCE
-                    specs_str = ""
-                    if product.specifications:
-                        specs_str = ", ".join([f"{k}: {v}" for k, v in product.specifications.items()])
-                    
-                    # Explicitly state source is DATABASE
-                    line = f"SOURCE: DATABASE (SupplierProduct ID: {sp.id}) | {product.name} | {supplier.name} | Costo Base: {cost_str} | Envío: {shipping_str}{shipping_warning} | Costo Total: ${cost_basis:,.2f} | Margen: {margin_str} | Precio Final: {price_str} | {product.unit.value} | SKU: {product.sku} | Specs: {specs_str}"
-                else:
-                    # Customer view: Simplified for quotation generation
-                    # We still provide specs to the AI so it can describe the product, 
-                    # but we'll instruct the AI to be concise in the prompt.
-                    line = f"PRODUCT: {product.name} | Precio: {price_str} | Unidad: {product.unit.value} | SKU: {product.sku}"
-                    if product.specifications:
-                        # Filter for key specs only for customer context if needed, 
-                        # but usually better to give AI context and tell it to summarize.
-                        specs = ", ".join([f"{k}: {v}" for k, v in product.specifications.items()])
-                        line += f" | Specs: {specs}"
-            else:
-                # No cost available - fallback to "Consultar"
-                price_str = "Consultar"
-                if include_internal_details:
-                    line = f"SOURCE: DATABASE (SupplierProduct ID: {sp.id}) | {product.name} | {supplier.name} | Costo: Consultar | Margen: N/A | Precio Final: {price_str} | {product.unit.value} | SKU: {product.sku}"
-                else:
-                    line = f"PRODUCT: {product.name} | Precio: {price_str} | Unidad: {product.unit.value} | SKU: {product.sku}"
-            
-            product_lines.append(line)
-        
-        if not product_lines:
-            return "No matching products found in catalog."
-            
-        return "\n".join(product_lines)
+        sps = _select_relevant_supplier_products(db, query_embedding, limit, query_text, max_products)
+        return _format_product_lines(sps, include_internal_details, fallback_margin)
     except Exception as e:
         print(f"Error in vector search: {e}")
-        return "" # Return empty if fails, so we rely on Pinecone history
+        return ""  # Rely on Pinecone history if product search fails
+    finally:
+        db.close()
+
+
+def get_relevant_products_views(query_embedding, query_text=None, limit=30, max_products=15, fallback_margin=30.0):
+    """One retrieval + ONE rerank pass, two formatted views (customer, internal).
+    Guarantees both prompt sections describe the same product set and halves
+    cross-encoder calls versus calling get_relevant_products twice."""
+    db = SessionLocal()
+    try:
+        sps = _select_relevant_supplier_products(db, query_embedding, limit, query_text, max_products)
+        return (_format_product_lines(sps, False, fallback_margin),
+                _format_product_lines(sps, True, fallback_margin))
+    except Exception as e:
+        print(f"Error in vector search: {e}")
+        return "", ""
     finally:
         db.close()
 
@@ -337,7 +376,7 @@ def analyze_request_and_calculate(query, context):
     return response.text
 
 
-def _search_all_namespaces(query_embedding, customer_name=None, top_k=7):
+def _search_all_namespaces(query_embedding, customer_name=None, top_k=7, query_text=None):
     """
     Search across all relevant Pinecone namespaces for quotation context.
     Returns structured context from: historical quotations, WhatsApp conversations,
@@ -355,7 +394,13 @@ def _search_all_namespaces(query_embedding, customer_name=None, top_k=7):
         'notas',               # Sales notes
     ]
 
-    results = search_vectors(
+    from services.hybrid_search import hybrid_search
+    results = hybrid_search(
+        query_text=query_text or "",
+        query_embedding=query_embedding,
+        top_k=top_k,
+        namespaces=namespaces,
+    ) if query_text else search_vectors(
         query_embedding=query_embedding,
         namespaces=namespaces,
         top_k=top_k,
@@ -376,7 +421,7 @@ def _search_all_namespaces(query_embedding, customer_name=None, top_k=7):
             continue
 
         # If customer name is provided, boost results that mention them
-        entry = {"text": text, "score": score, "source": ns, "filename": filename}
+        entry = {"text": text, "score": score, "source": ns, "filename": filename, "id": r.get("id")}
 
         if ns == "whatsapp-chats":
             whatsapp_context.append(entry)
@@ -394,13 +439,14 @@ def _search_all_namespaces(query_embedding, customer_name=None, top_k=7):
             query_embedding=customer_embedding,
             namespaces=["whatsapp-chats"],
             top_k=5,
+            query_text=customer_query,
         )
         for r in customer_results:
             text = r.get("metadata", {}).get("text", "")
             if text and customer_name.lower() in text.lower():
                 whatsapp_context.insert(0, {
                     "text": text, "score": r.get("score", 0),
-                    "source": "whatsapp-chats", "filename": "",
+                    "source": "whatsapp-chats", "filename": "", "id": r.get("id"),
                 })
 
     # Build structured context string
@@ -423,9 +469,12 @@ def _search_all_namespaces(query_embedding, customer_name=None, top_k=7):
 
     combined = "\n\n".join(context_parts)
 
+    used_entries = historical_context[:top_k] + whatsapp_context[:5] + document_context[:5]
+    used_ids = [e["id"] for e in used_entries if e.get("id")]
+
     print(f"🔹 Context sources: {len(historical_context)} historical, {len(whatsapp_context)} whatsapp, {len(document_context)} documents")
 
-    return combined
+    return combined, used_ids
 
 
 def query_rag_system_with_history(query, chat_history=None, customer_name=None, customer_location=None):
@@ -455,19 +504,18 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
 
     if tier == 'sencilla':
         # Lightweight path: single LLM call, no Pinecone, no analysis step
-        matched_products = get_relevant_products(query_embedding)
-        matched_products_internal = get_relevant_products(query_embedding, include_internal_details=True)
+        matched_products, matched_products_internal = get_relevant_products_views(query_embedding, query_text=query)
         quotation = generate_simple_quotation(
             query, matched_products, matched_products_internal,
             customer_name, customer_location, chat_history_text
         )
-        return {'quotation': quotation, 'complexity_tier': tier}
+        return {'quotation': quotation, 'complexity_tier': tier, 'retrieved_chunk_ids': []}
 
     # ── FULL PIPELINE (mediana / mediana_alta / alta) ─────────────────────────
 
     # Search across ALL namespaces: historical quotations, WhatsApp conversations,
     # quotation documents, facturas, catalogs
-    context = _search_all_namespaces(query_embedding, customer_name=customer_name)
+    context, retrieved_chunk_ids = _search_all_namespaces(query_embedding, customer_name=customer_name, query_text=query)
 
     # PHASE 1: Analyze and Calculate
     # We use the full context (including WhatsApp + documents) for math/logic AND dynamic notes
@@ -475,8 +523,7 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
     print(f"🔹 Calculation & Analysis Report:\n{calculation_report}")
 
     # Get products from database using semantic search
-    matched_products = get_relevant_products(query_embedding)
-    matched_products_internal = get_relevant_products(query_embedding, include_internal_details=True)
+    matched_products, matched_products_internal = get_relevant_products_views(query_embedding, query_text=query)
 
     # Shared preamble used by both calls
     shared_context = (
@@ -580,4 +627,4 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
         f"{customer_quotation}\n"
         f"<!-- CUSTOMER_QUOTATION_END -->"
     )
-    return {'quotation': quotation, 'complexity_tier': tier}
+    return {'quotation': quotation, 'complexity_tier': tier, 'retrieved_chunk_ids': retrieved_chunk_ids}

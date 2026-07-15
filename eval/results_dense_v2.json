@@ -1,0 +1,377 @@
+{
+ "summary": {
+  "label": "dense_v2",
+  "timestamp": "2026-07-15T10:21:49",
+  "semantic_cases": 38,
+  "semantic_unlabeled_skipped": 0,
+  "recall@7": 0.47,
+  "mrr@7": 0.732,
+  "lexical_cases": 12,
+  "lexical_hit@3": 0.25,
+  "lexical_hit@7": 0.333
+ },
+ "cases": [
+  {
+   "id": "g001",
+   "type": "semantic",
+   "query": "Tengo camas de 1.8 metros quiero acolchado tres bolillo de 1.2 m para una area q",
+   "recall@7": 0.75,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g002",
+   "type": "semantic",
+   "query": "que incluye el kit fotovoltaico aislado",
+   "recall@7": 0.412,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g003",
+   "type": "semantic",
+   "query": "mochila aspersora",
+   "recall@7": 0.417,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g004",
+   "type": "semantic",
+   "query": "BOMBA ELECTRICA 127 V TORNADO",
+   "recall@7": 0.5,
+   "mrr@7": 0.333
+  },
+  {
+   "id": "g005",
+   "type": "semantic",
+   "query": "Alvaro Romero ReQuiere cintilla enterrada, miro algunos videos en youtube y quie",
+   "recall@7": 0.364,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g006",
+   "type": "semantic",
+   "query": "Alvaro Romero ReQuiere cintilla enterrada, miro algunos videos en youtube y quie",
+   "recall@7": 0.4,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g007",
+   "type": "semantic",
+   "query": "400 piezas de NEBULIZADOR COOLPRO 'C' 4X5.5 HEAD ONLY MC 5.5",
+   "recall@7": 0.429,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g008",
+   "type": "semantic",
+   "query": "Cintilla de riego para una hectárea",
+   "recall@7": 0.5,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g009",
+   "type": "semantic",
+   "query": "cotizacion de 3 ha con cintilla y acolchado separacion entre camas de 1.6 metros",
+   "recall@7": 1.0,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g010",
+   "type": "semantic",
+   "query": "cotizacion de cintilla, acolhado, lay flat, conexiones, para 3 hectareas de chil",
+   "recall@7": 0.8,
+   "mrr@7": 0.5
+  },
+  {
+   "id": "g011",
+   "type": "semantic",
+   "query": "El cliente necesita un sistema solar aislado con baterias para un refrigerador, ",
+   "recall@7": 0.125,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g012",
+   "type": "semantic",
+   "query": "tanque de geomembrana de 40 m cubicos",
+   "recall@7": 0.0,
+   "mrr@7": 0.0
+  },
+  {
+   "id": "g013",
+   "type": "semantic",
+   "query": "kit de bombeo solar para subir agua a una colina de 110 m de altura desde el sue",
+   "recall@7": 0.333,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g014",
+   "type": "semantic",
+   "query": "Dame opciones de kit de bombeo para subir agua a una colina de 40m, 60m 80m de a",
+   "recall@7": 0.75,
+   "mrr@7": 0.333
+  },
+  {
+   "id": "g015",
+   "type": "semantic",
+   "query": "Dame opciones de kit de bombeo para subir agua a una colina de 40m, 60m, 70m, 80",
+   "recall@7": 0.368,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g016",
+   "type": "semantic",
+   "query": "Bolsa para plantula de pino 17 x 17",
+   "recall@7": 0.667,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g017",
+   "type": "semantic",
+   "query": "Sembradora 20 surcos",
+   "recall@7": 1.0,
+   "mrr@7": 0.25
+  },
+  {
+   "id": "g018",
+   "type": "semantic",
+   "query": "Plastico y estructura para iinvernadero de 40 m cuadrados tipo capilla",
+   "recall@7": 0.353,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g019",
+   "type": "semantic",
+   "query": "bombeo solar para suministrar 2040 litros por hora/110 metros de profundidad",
+   "recall@7": 0.4,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g020",
+   "type": "semantic",
+   "query": "Cotización para 2 hectáreas de acolchado agrícola",
+   "recall@7": 0.0,
+   "mrr@7": 0.0
+  },
+  {
+   "id": "g021",
+   "type": "semantic",
+   "query": "cultivo de chile",
+   "recall@7": 0.467,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g022",
+   "type": "semantic",
+   "query": "Cotización para malla sombra",
+   "recall@7": 0.269,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g023",
+   "type": "semantic",
+   "query": "necesito 100 metros",
+   "recall@7": 0.625,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g024",
+   "type": "semantic",
+   "query": "Distancia entre surcos de su cultivo específico 80 cm cultivo: chile",
+   "recall@7": 1.0,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g025",
+   "type": "semantic",
+   "query": "Necesito malla sombra 35% para 100 metros",
+   "recall@7": 0.0,
+   "mrr@7": 0.0
+  },
+  {
+   "id": "g026",
+   "type": "semantic",
+   "query": "que sea de 50% la quiero para un ivivero de 20 x 8 m tipo monofilamento",
+   "recall@7": 0.5,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g027",
+   "type": "semantic",
+   "query": "genera una cotizacion de geomembranas de estanque circular diferentes medidas di",
+   "recall@7": 0.438,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g028",
+   "type": "semantic",
+   "query": "1 rollo de geomembrana 7 m",
+   "recall@7": 0.333,
+   "mrr@7": 0.333
+  },
+  {
+   "id": "g029",
+   "type": "semantic",
+   "query": "Sistema solar aislado con baterias para mantener un congelador lleno de carne de",
+   "recall@7": 0.0,
+   "mrr@7": 0.0
+  },
+  {
+   "id": "g030",
+   "type": "semantic",
+   "query": "LAMPARA SOLAR 2400 W",
+   "recall@7": 0.143,
+   "mrr@7": 0.143
+  },
+  {
+   "id": "g031",
+   "type": "semantic",
+   "query": "plastico para invernadero tipo capilla de 24 m x 6 m y alambre zigzag",
+   "recall@7": 0.5,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g032",
+   "type": "semantic",
+   "query": "cintilla para regar maíz con un aproximado de 50 surcos con 200 metros lineales",
+   "recall@7": 0.5,
+   "mrr@7": 0.25
+  },
+  {
+   "id": "g033",
+   "type": "semantic",
+   "query": "NECESITO COTIZAR 5 ROLLOS DE PLASTICO CALIBRE 720 PARA INVERNADERO DE 6M X 100 D",
+   "recall@7": 0.583,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g034",
+   "type": "semantic",
+   "query": "Plastico para invernadero CALIBRE 720 PARA INVERNADERO DE 12M X 300 m DE LARGO",
+   "recall@7": 0.467,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g035",
+   "type": "semantic",
+   "query": "Sistema solar aislado con baterias para un congelador de 12 cubic fee y un micro",
+   "recall@7": 0.429,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g036",
+   "type": "semantic",
+   "query": "iNVERNADERO ESTANDAR PARA 10 MIL PLANTULAS DE CHILE",
+   "recall@7": 0.357,
+   "mrr@7": 0.333
+  },
+  {
+   "id": "g037",
+   "type": "semantic",
+   "query": "Olla de Captacion de Geomembrana de 1 mm de 20 metros de ancho por 20 metros de ",
+   "recall@7": 0.667,
+   "mrr@7": 0.333
+  },
+  {
+   "id": "g038",
+   "type": "semantic",
+   "query": "realiza cotizacion de olla de captacion de 37x34 por 2 metros de talud en tuxpan",
+   "recall@7": 1.0,
+   "mrr@7": 1.0
+  },
+  {
+   "id": "g039",
+   "type": "lexical",
+   "query": "COT-IMPAG-210326DGO-EUGENIO BATREZ-ACOLCHADO",
+   "hit@3": false,
+   "hit@7": false,
+   "first_rank": null
+  },
+  {
+   "id": "g040",
+   "type": "lexical",
+   "query": "COT-IMPAG-060326DGO-ALEJANDRO CAMPOS-GEOMEMBRANA 10 MIL LITROS INSTALADA",
+   "hit@3": false,
+   "hit@7": false,
+   "first_rank": null
+  },
+  {
+   "id": "g041",
+   "type": "lexical",
+   "query": "COT-IMPAG-401225ZAC-GONZALO DIAZ DE LEON-KIT BOMBEO SOLAR 180 M (SIN INSTALACION",
+   "hit@3": false,
+   "hit@7": false,
+   "first_rank": null
+  },
+  {
+   "id": "g042",
+   "type": "lexical",
+   "query": "COT-IMPAG-570426DGO-GEOVANY RESENDIZ-BOLSA PARA VIVERO 17X17",
+   "hit@3": false,
+   "hit@7": false,
+   "first_rank": null
+  },
+  {
+   "id": "g043",
+   "type": "lexical",
+   "query": "COT-IMPAG-450326DGO-JESUS CHAVEZ-POSTE METALICO 1.8 M (6 PIES)",
+   "hit@3": true,
+   "hit@7": true,
+   "first_rank": 2
+  },
+  {
+   "id": "g044",
+   "type": "lexical",
+   "query": "COT-IMPAG-610426DGO-HECTOR FAVELA-50 M MALLASOMBRA 50%",
+   "hit@3": false,
+   "hit@7": false,
+   "first_rank": null
+  },
+  {
+   "id": "g045",
+   "type": "lexical",
+   "query": "COT-IMPAG-600426DGO-LAURA ROCHA-ACCESORIOS COMPLEMENTO PARA KIT DE SISTEMA SOLAR",
+   "hit@3": true,
+   "hit@7": true,
+   "first_rank": 3
+  },
+  {
+   "id": "g046",
+   "type": "lexical",
+   "query": "COT-IMPAG-350326AGS-EDISSA-PLIEGOS DE GEOMEMBRANA PVC Y HDPE",
+   "hit@3": true,
+   "hit@7": true,
+   "first_rank": 2
+  },
+  {
+   "id": "g047",
+   "type": "lexical",
+   "query": "FFEN0000011960",
+   "hit@3": false,
+   "hit@7": false,
+   "first_rank": null
+  },
+  {
+   "id": "g048",
+   "type": "lexical",
+   "query": "COT-IMPAG-590526DGO-ELVIRA MENZODA MEDINA-MATERIALES PARA BIOFABRICA",
+   "hit@3": false,
+   "hit@7": true,
+   "first_rank": 4
+  },
+  {
+   "id": "g049",
+   "type": "lexical",
+   "query": "COT-IMPAG-680426MOR-MARCO-MICROASPERSORES",
+   "hit@3": false,
+   "hit@7": false,
+   "first_rank": null
+  },
+  {
+   "id": "g050",
+   "type": "lexical",
+   "query": "COT-IMPAG-380226DGO-GENARO BUENO-BOMBEO SUMERGIBLE 95 M.",
+   "hit@3": false,
+   "hit@7": false,
+   "first_rank": null
+  }
+ ]
+}

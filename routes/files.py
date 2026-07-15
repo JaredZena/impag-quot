@@ -457,10 +457,12 @@ async def semantic_search(
     if request.supplier_id is not None:
         filter_dict = {"supplier_id": {"$eq": request.supplier_id}}
 
-    matches = search_vectors(
+    from services.hybrid_search import hybrid_search
+    matches = hybrid_search(
+        query_text=request.query,
         query_embedding=query_embedding,
-        namespaces=namespaces,
         top_k=request.top_k,
+        namespaces=namespaces,
         filter_dict=filter_dict,
     )
 

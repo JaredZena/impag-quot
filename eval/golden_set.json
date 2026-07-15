@@ -1,0 +1,789 @@
+[
+ {
+  "id": "g001",
+  "query": "Tengo camas de 1.8 metros quiero acolchado tres bolillo de 1.2 m para una area que mide 158 metros de ancho por 50 de largo",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-2544-chunk-0",
+   "doc-1739-chunk-0",
+   "doc-3063-chunk-0",
+   "doc-2545-chunk-0",
+   "doc-1738-chunk-1",
+   "doc-1739-chunk-1",
+   "doc-2503-chunk-0",
+   "doc-3390-chunk-9"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g002",
+  "query": "que incluye el kit fotovoltaico aislado",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-3202-chunk-0",
+   "doc-311-chunk-0",
+   "doc-3187-chunk-0",
+   "doc-3344-chunk-0",
+   "doc-2682-chunk-0",
+   "doc-3342-chunk-0",
+   "doc-1370-chunk-0",
+   "doc-2680-chunk-0",
+   "doc-384-chunk-0",
+   "doc-1660-chunk-0",
+   "doc-1870-chunk-0",
+   "doc-382-chunk-0",
+   "doc-3143-chunk-0",
+   "doc-263-chunk-17",
+   "doc-1535-chunk-17",
+   "doc-1012-chunk-17",
+   "doc-3390-chunk-18"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g003",
+  "query": "mochila aspersora",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-4149-chunk-0",
+   "doc-3253-chunk-0",
+   "doc-545-chunk-0",
+   "doc-261-chunk-849",
+   "doc-2285-chunk-560",
+   "doc-299-chunk-849",
+   "doc-3254-chunk-0",
+   "doc-4245-chunk-0",
+   "doc-522-chunk-0",
+   "doc-3541-chunk-1",
+   "doc-3571-chunk-0",
+   "doc-2268-chunk-14"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g004",
+  "query": "BOMBA ELECTRICA 127 V TORNADO",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-3075-chunk-0",
+   "doc-4146-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g005",
+  "query": "Alvaro Romero ReQuiere cintilla enterrada, miro algunos videos en youtube y quiere probar, segun cuenta es marca toro 2.⁠ ⁠toma agua de una represa que esta a 1 km con un desnivel de 10 m, no tiene aforo, y no tiene el dato aproximado de caudal, tiene toma en la percela, me mandara ubicacion de la represa, toma de agua y parcela para checar distancias. 3.⁠ ⁠menciona que sale agua turbulenta es decir el chorro es fuerte. 4.⁠ ⁠menciona que tiene 2 aspersores de 3/4\" no sabe que marca, ni caudal tienen, los abre a 20 metros de diametro sin problemas, la linea para el aspersor es de 3/4\" 5.⁠ ⁠requiere cabecera principal para conectar valvulas para cintilla, co lineas de 50 metros a 50 cm por 100 metros de cabecera 6.⁠ ⁠es en Durango, Durango.",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-2036-chunk-2",
+   "doc-2037-chunk-2",
+   "doc-1328-chunk-1",
+   "doc-1973-chunk-1",
+   "doc-299-chunk-604",
+   "doc-2285-chunk-315",
+   "doc-1617-chunk-0",
+   "doc-1616-chunk-0",
+   "doc-261-chunk-603",
+   "doc-299-chunk-603",
+   "doc-2285-chunk-314"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g006",
+  "query": "Alvaro Romero ReQuiere cintilla enterrada, miro algunos videos en youtube y quiere probar, segun cuenta es marca toro 2.⁠ ⁠toma agua de una represa que esta a 1 km con un desnivel de 10 m, no tiene aforo, y no tiene el dato aproximado de caudal, tiene toma en la percela, me mandara ubicacion de la represa, toma de agua y parcela para checar distancias. 3.⁠ ⁠menciona que sale agua turbulenta es decir el chorro es fuerte. 4.⁠ ⁠menciona que tiene 2 aspersores de 3/4\" no sabe que marca, ni caudal tienen, los abre a 20 metros de diametro sin problemas, la linea para el aspersor es de 3/4\" 5.⁠ ⁠requiere cabecera principal para conectar valvulas para cintilla, co lineas de 50 metros a 50 cm por 100 metros de cabecera 6.⁠ ⁠es en Durango, Durango. Nota: El cliente ya cuenta con la tuberia desde la represa al cultivo",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-2036-chunk-2",
+   "doc-2037-chunk-2",
+   "doc-299-chunk-604",
+   "doc-2285-chunk-315",
+   "doc-261-chunk-604"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g007",
+  "query": "400 piezas de NEBULIZADOR COOLPRO 'C' 4X5.5 HEAD ONLY MC 5.5",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-3157-chunk-1",
+   "doc-576-chunk-0",
+   "doc-3198-chunk-0",
+   "doc-1493-chunk-2",
+   "doc-3193-chunk-0",
+   "doc-3195-chunk-0",
+   "doc-3194-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g008",
+  "query": "Cintilla de riego para una hectárea",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-1096-chunk-0",
+   "doc-565-chunk-0",
+   "doc-564-chunk-0",
+   "doc-261-chunk-644",
+   "doc-299-chunk-644",
+   "doc-2285-chunk-355"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g009",
+  "query": "cotizacion de 3 ha con cintilla y acolchado separacion entre camas de 1.6 metros, con cabecera de lay flat, conexiones cintilla para tres hectareas",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-261-chunk-644",
+   "doc-299-chunk-644",
+   "doc-2285-chunk-355"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g010",
+  "query": "cotizacion de cintilla, acolhado, lay flat, conexiones, para 3 hectareas de chile",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-3223-chunk-0",
+   "doc-3830-chunk-0",
+   "doc-261-chunk-644",
+   "doc-299-chunk-644",
+   "doc-2285-chunk-355"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g011",
+  "query": "El cliente necesita un sistema solar aislado con baterias para un refrigerador, un aire acondicionado, una tele, dos celulares y una licuadora ocasionalmente en la zona de nuevo ideal durango",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-381-chunk-0",
+   "doc-382-chunk-0",
+   "doc-383-chunk-0",
+   "doc-1869-chunk-0",
+   "doc-1969-chunk-0",
+   "doc-1369-chunk-0",
+   "doc-3143-chunk-0",
+   "doc-1370-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g012",
+  "query": "tanque de geomembrana de 40 m cubicos",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-3188-chunk-1",
+   "doc-2115-chunk-1",
+   "doc-1402-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g013",
+  "query": "kit de bombeo solar para subir agua a una colina de 110 m de altura desde el suelo",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-2140-chunk-38",
+   "doc-2141-chunk-38",
+   "doc-3247-chunk-38",
+   "doc-3071-chunk-38",
+   "doc-1012-chunk-14",
+   "doc-1535-chunk-14",
+   "doc-263-chunk-14",
+   "doc-3072-chunk-4",
+   "doc-3247-chunk-24",
+   "doc-2140-chunk-24",
+   "doc-2141-chunk-24",
+   "doc-3071-chunk-24",
+   "doc-3071-chunk-17",
+   "doc-3247-chunk-17",
+   "doc-2140-chunk-17",
+   "doc-2141-chunk-17",
+   "doc-3072-chunk-3",
+   "doc-2141-chunk-50",
+   "doc-2140-chunk-50",
+   "doc-3247-chunk-50",
+   "doc-3071-chunk-50"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g014",
+  "query": "Dame opciones de kit de bombeo para subir agua a una colina de 40m, 60m 80m de altura",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-3072-chunk-0",
+   "doc-1293-chunk-1",
+   "doc-4291-chunk-0",
+   "doc-2670-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g015",
+  "query": "Dame opciones de kit de bombeo para subir agua a una colina de 40m, 60m, 70m, 80m de altura",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-3071-chunk-48",
+   "doc-3247-chunk-48",
+   "doc-2141-chunk-48",
+   "doc-2140-chunk-48",
+   "doc-1293-chunk-1",
+   "doc-2141-chunk-22",
+   "doc-3247-chunk-22",
+   "doc-2140-chunk-22",
+   "doc-3249-chunk-40",
+   "doc-3071-chunk-22",
+   "doc-4291-chunk-0",
+   "doc-2140-chunk-36",
+   "doc-3247-chunk-36",
+   "doc-2141-chunk-36",
+   "doc-3071-chunk-36",
+   "doc-2141-chunk-55",
+   "doc-3071-chunk-55",
+   "doc-3247-chunk-55",
+   "doc-4293-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g016",
+  "query": "Bolsa para plantula de pino 17 x 17",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-1927-chunk-1",
+   "doc-2531-chunk-1",
+   "doc-1928-chunk-1",
+   "doc-2533-chunk-1",
+   "doc-1028-chunk-0",
+   "doc-3390-chunk-26",
+   "doc-263-chunk-25",
+   "doc-1535-chunk-25",
+   "doc-1012-chunk-25"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g017",
+  "query": "Sembradora 20 surcos",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-261-chunk-180"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g018",
+  "query": "Plastico y estructura para iinvernadero de 40 m cuadrados tipo capilla",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-4480-chunk-0",
+   "doc-687-chunk-10",
+   "doc-1833-chunk-1",
+   "doc-1834-chunk-0",
+   "doc-1834-chunk-2",
+   "doc-931-chunk-0",
+   "doc-832-chunk-0",
+   "doc-3390-chunk-4",
+   "doc-447-chunk-0",
+   "doc-687-chunk-8",
+   "doc-1774-chunk-1",
+   "doc-1772-chunk-1",
+   "doc-1770-chunk-1",
+   "doc-1012-chunk-5",
+   "doc-263-chunk-5",
+   "doc-1535-chunk-5",
+   "doc-2843-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g019",
+  "query": "bombeo solar para suministrar 2040 litros por hora/110 metros de profundidad",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-3313-chunk-0",
+   "doc-1012-chunk-14",
+   "doc-2674-chunk-0",
+   "doc-3225-chunk-0",
+   "doc-1195-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g020",
+  "query": "Cotización para 2 hectáreas de acolchado agrícola",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-1739-chunk-0",
+   "doc-261-chunk-644",
+   "doc-299-chunk-644",
+   "doc-2285-chunk-355"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g021",
+  "query": "cultivo de chile",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-2757-chunk-0",
+   "doc-395-chunk-0",
+   "doc-2960-chunk-0",
+   "doc-261-chunk-289",
+   "doc-356-chunk-0",
+   "doc-1612-chunk-1",
+   "doc-1781-chunk-2",
+   "doc-1762-chunk-2",
+   "doc-1779-chunk-2",
+   "doc-2039-chunk-2",
+   "doc-687-chunk-14",
+   "doc-1770-chunk-2",
+   "doc-1772-chunk-2",
+   "doc-1774-chunk-2",
+   "doc-1600-chunk-3"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g022",
+  "query": "Cotización para malla sombra",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-2822-chunk-0",
+   "doc-1821-chunk-0",
+   "doc-3515-chunk-0",
+   "doc-3551-chunk-0",
+   "doc-987-chunk-0",
+   "doc-2475-chunk-0",
+   "doc-348-chunk-0",
+   "doc-1809-chunk-0",
+   "doc-3477-chunk-0",
+   "doc-3437-chunk-0",
+   "doc-3407-chunk-0",
+   "doc-981-chunk-0",
+   "doc-3613-chunk-0",
+   "doc-1281-chunk-0",
+   "doc-3642-chunk-0",
+   "doc-988-chunk-0",
+   "doc-1229-chunk-0",
+   "doc-488-chunk-0",
+   "doc-3414-chunk-0",
+   "doc-3582-chunk-0",
+   "doc-4361-chunk-0",
+   "doc-3476-chunk-0",
+   "doc-3641-chunk-0",
+   "doc-4362-chunk-0",
+   "doc-2898-chunk-0",
+   "doc-2895-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g023",
+  "query": "necesito 100 metros",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-1456-chunk-0",
+   "doc-2285-chunk-265",
+   "doc-299-chunk-554",
+   "doc-261-chunk-554",
+   "doc-4548-chunk-7",
+   "doc-2285-chunk-1018",
+   "doc-2898-chunk-0",
+   "doc-3124-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g024",
+  "query": "Distancia entre surcos de su cultivo específico 80 cm cultivo: chile",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-261-chunk-289",
+   "doc-2285-chunk-0",
+   "doc-299-chunk-289",
+   "doc-1600-chunk-3"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g025",
+  "query": "Necesito malla sombra 35% para 100 metros",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-3477-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g026",
+  "query": "que sea de 50% la quiero para un ivivero de 20 x 8 m tipo monofilamento",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-299-chunk-1644",
+   "doc-2927-chunk-0",
+   "doc-2929-chunk-0",
+   "doc-3127-chunk-0",
+   "doc-2898-chunk-0",
+   "doc-3545-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g027",
+  "query": "genera una cotizacion de geomembranas de estanque circular diferentes medidas disponibles, genera una tabla con estas columnas: nombre, descripcion, precio por bolsa, costo de kit de accesorios de instalacion, instalacion y total",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-3001-chunk-0",
+   "doc-3906-chunk-0",
+   "doc-3917-chunk-0",
+   "doc-1440-chunk-0",
+   "doc-2763-chunk-0",
+   "doc-502-chunk-0",
+   "doc-2963-chunk-0",
+   "doc-2463-chunk-0",
+   "doc-500-chunk-0",
+   "doc-2765-chunk-0",
+   "doc-3188-chunk-0",
+   "doc-2115-chunk-0",
+   "doc-2839-chunk-0",
+   "doc-3269-chunk-0",
+   "doc-3296-chunk-0",
+   "doc-1199-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g028",
+  "query": "1 rollo de geomembrana 7 m",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-261-chunk-1145",
+   "doc-1468-chunk-0",
+   "doc-284-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g029",
+  "query": "Sistema solar aislado con baterias para mantener un congelador lleno de carne de 12 pies cubicos",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-382-chunk-0",
+   "doc-3142-chunk-1",
+   "doc-2156-chunk-1",
+   "doc-263-chunk-17",
+   "doc-1535-chunk-17",
+   "doc-1012-chunk-17",
+   "doc-3390-chunk-18"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g030",
+  "query": "LAMPARA SOLAR 2400 W",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-1305-chunk-0",
+   "doc-834-chunk-0",
+   "doc-859-chunk-0",
+   "doc-261-chunk-1200",
+   "doc-299-chunk-1200",
+   "doc-2285-chunk-911",
+   "doc-261-chunk-1091"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g031",
+  "query": "plastico para invernadero tipo capilla de 24 m x 6 m y alambre zigzag",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-3390-chunk-37",
+   "doc-4480-chunk-1",
+   "doc-1535-chunk-34",
+   "doc-3390-chunk-36",
+   "doc-650-chunk-0",
+   "doc-3320-chunk-0",
+   "doc-3319-chunk-1",
+   "doc-930-chunk-1"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g032",
+  "query": "cintilla para regar maíz con un aproximado de 50 surcos con 200 metros lineales",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-1096-chunk-0",
+   "doc-565-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g033",
+  "query": "NECESITO COTIZAR 5 ROLLOS DE PLASTICO CALIBRE 720 PARA INVERNADERO DE 6M X 100 DE LARGO",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-831-chunk-1",
+   "doc-1000-chunk-1",
+   "doc-2078-chunk-1",
+   "doc-2001-chunk-1",
+   "doc-930-chunk-1",
+   "doc-2013-chunk-1",
+   "doc-2060-chunk-1",
+   "doc-832-chunk-0",
+   "doc-931-chunk-0",
+   "doc-2060-chunk-0",
+   "doc-2001-chunk-0",
+   "doc-1000-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g034",
+  "query": "Plastico para invernadero CALIBRE 720 PARA INVERNADERO DE 12M X 300 m DE LARGO",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-2013-chunk-1",
+   "doc-2078-chunk-1",
+   "doc-1000-chunk-1",
+   "doc-831-chunk-1",
+   "doc-930-chunk-1",
+   "doc-2001-chunk-1",
+   "doc-2060-chunk-1",
+   "doc-1001-chunk-1",
+   "doc-832-chunk-1",
+   "doc-931-chunk-1",
+   "doc-4480-chunk-0",
+   "doc-1836-chunk-0",
+   "doc-641-chunk-0",
+   "doc-1435-chunk-0",
+   "doc-2059-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g035",
+  "query": "Sistema solar aislado con baterias para un congelador de 12 cubic fee y un microondas chico",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-605-chunk-0",
+   "doc-3390-chunk-25",
+   "doc-382-chunk-0",
+   "doc-606-chunk-0",
+   "doc-1012-chunk-16",
+   "doc-3142-chunk-1",
+   "doc-2156-chunk-1"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g036",
+  "query": "iNVERNADERO ESTANDAR PARA 10 MIL PLANTULAS DE CHILE",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-1762-chunk-2",
+   "doc-1779-chunk-2",
+   "doc-1781-chunk-2",
+   "doc-1770-chunk-2",
+   "doc-1772-chunk-2",
+   "doc-1774-chunk-2",
+   "doc-1777-chunk-2",
+   "doc-356-chunk-0",
+   "doc-1139-chunk-1",
+   "doc-353-chunk-0",
+   "doc-1126-chunk-1",
+   "doc-3544-chunk-1",
+   "doc-1711-chunk-0",
+   "doc-1833-chunk-7"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g037",
+  "query": "Olla de Captacion de Geomembrana de 1 mm de 20 metros de ancho por 20 metros de largo sin talud y 3 metros de profundidad.",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-967-chunk-0",
+   "doc-941-chunk-0",
+   "doc-967-chunk-1"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g038",
+  "query": "realiza cotizacion de olla de captacion de 37x34 por 2 metros de talud en tuxpan veracruz",
+  "type": "semantic",
+  "expected_file_ids": [],
+  "relevant_vector_ids": [
+   "doc-299-chunk-1655",
+   "doc-1295-chunk-0",
+   "doc-1294-chunk-0",
+   "doc-1320-chunk-0"
+  ],
+  "source": "query-log"
+ },
+ {
+  "id": "g039",
+  "query": "COT-IMPAG-210326DGO-EUGENIO BATREZ-ACOLCHADO",
+  "type": "lexical",
+  "expected_file_ids": [
+   1739
+  ],
+  "relevant_vector_ids": [],
+  "source": "filename:cotizacion"
+ },
+ {
+  "id": "g040",
+  "query": "COT-IMPAG-060326DGO-ALEJANDRO CAMPOS-GEOMEMBRANA 10 MIL LITROS INSTALADA",
+  "type": "lexical",
+  "expected_file_ids": [
+   2762
+  ],
+  "relevant_vector_ids": [],
+  "source": "filename:cotizacion"
+ },
+ {
+  "id": "g041",
+  "query": "COT-IMPAG-401225ZAC-GONZALO DIAZ DE LEON-KIT BOMBEO SOLAR 180 M (SIN INSTALACION)",
+  "type": "lexical",
+  "expected_file_ids": [
+   344
+  ],
+  "relevant_vector_ids": [],
+  "source": "filename:cotizacion"
+ },
+ {
+  "id": "g042",
+  "query": "COT-IMPAG-570426DGO-GEOVANY RESENDIZ-BOLSA PARA VIVERO 17X17",
+  "type": "lexical",
+  "expected_file_ids": [
+   3117
+  ],
+  "relevant_vector_ids": [],
+  "source": "filename:cotizacion"
+ },
+ {
+  "id": "g043",
+  "query": "COT-IMPAG-450326DGO-JESUS CHAVEZ-POSTE METALICO 1.8 M (6 PIES)",
+  "type": "lexical",
+  "expected_file_ids": [
+   2452
+  ],
+  "relevant_vector_ids": [],
+  "source": "filename:cotizacion"
+ },
+ {
+  "id": "g044",
+  "query": "COT-IMPAG-610426DGO-HECTOR FAVELA-50 M MALLASOMBRA 50%",
+  "type": "lexical",
+  "expected_file_ids": [
+   2109
+  ],
+  "relevant_vector_ids": [],
+  "source": "filename:cotizacion"
+ },
+ {
+  "id": "g045",
+  "query": "COT-IMPAG-600426DGO-LAURA ROCHA-ACCESORIOS COMPLEMENTO PARA KIT DE SISTEMA SOLAR 1,000 W",
+  "type": "lexical",
+  "expected_file_ids": [
+   3142
+  ],
+  "relevant_vector_ids": [],
+  "source": "filename:cotizacion"
+ },
+ {
+  "id": "g046",
+  "query": "COT-IMPAG-350326AGS-EDISSA-PLIEGOS DE GEOMEMBRANA PVC Y HDPE",
+  "type": "lexical",
+  "expected_file_ids": [
+   1873
+  ],
+  "relevant_vector_ids": [],
+  "source": "filename:cotizacion"
+ },
+ {
+  "id": "g047",
+  "query": "FFEN0000011960",
+  "type": "lexical",
+  "expected_file_ids": [
+   511
+  ],
+  "relevant_vector_ids": [],
+  "source": "filename:factura"
+ },
+ {
+  "id": "g048",
+  "query": "COT-IMPAG-590526DGO-ELVIRA MENZODA MEDINA-MATERIALES PARA BIOFABRICA",
+  "type": "lexical",
+  "expected_file_ids": [
+   3552
+  ],
+  "relevant_vector_ids": [],
+  "source": "filename:cotizacion"
+ },
+ {
+  "id": "g049",
+  "query": "COT-IMPAG-680426MOR-MARCO-MICROASPERSORES",
+  "type": "lexical",
+  "expected_file_ids": [
+   3198
+  ],
+  "relevant_vector_ids": [],
+  "source": "filename:cotizacion"
+ },
+ {
+  "id": "g050",
+  "query": "COT-IMPAG-380226DGO-GENARO BUENO-BOMBEO SUMERGIBLE 95 M.",
+  "type": "lexical",
+  "expected_file_ids": [
+   1194
+  ],
+  "relevant_vector_ids": [],
+  "source": "filename:cotizacion"
+ }
+]

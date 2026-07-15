@@ -24,14 +24,94 @@ CATEGORY_TO_NAMESPACE = {
 }
 
 _pinecone_index = None
+_pinecone_client = None
+
+# Multilingual cross-encoder hosted by Pinecone. Reranking the merged
+# cross-namespace candidates makes their scores actually comparable —
+# raw ANN scores from different namespaces are not.
+RERANK_MODEL = "bge-reranker-v2-m3"
+# bge raw scores are uncalibrated and run low (correct answers often <0.1).
+# A fixed floor measurably dropped true positives (eval: recall@7 0.505->0.404
+# with floor=0.02), so reranking only reorders by default. Revisit once logged
+# production feedback gives a score distribution to calibrate against.
+RERANK_MIN_SCORE = None
+
+
+def _get_client():
+    global _pinecone_client
+    if _pinecone_client is None:
+        _pinecone_client = Pinecone(api_key=pinecone_api_key)
+    return _pinecone_client
 
 
 def _get_index():
     global _pinecone_index
     if _pinecone_index is None:
-        pc = Pinecone(api_key=pinecone_api_key)
-        _pinecone_index = pc.Index("impag")
+        _pinecone_index = _get_client().Index("impag")
     return _pinecone_index
+
+
+def rerank_results(
+    query_text: str,
+    results: List[Dict],
+    top_n: int,
+    min_score: Optional[float] = RERANK_MIN_SCORE,
+) -> List[Dict]:
+    """
+    Rerank candidate matches with Pinecone's hosted cross-encoder and drop
+    everything below min_score. Falls back to vector-score order on any error
+    so search never breaks when the inference API is unavailable.
+    """
+    if not results:
+        return []
+
+    # Pinecone metadata stores only the first ~1000 chars of each chunk.
+    # Judge (and downstream, prompt-inject) the FULL chunk text from Postgres;
+    # fall back to metadata text for vectors without a DocumentChunk row.
+    full_texts = {}
+    try:
+        from models import SessionLocal, DocumentChunk
+        ids = [r["id"] for r in results if r.get("id")]
+        if ids:
+            db = SessionLocal()
+            try:
+                rows = db.query(DocumentChunk.pinecone_vector_id, DocumentChunk.chunk_text) \
+                         .filter(DocumentChunk.pinecone_vector_id.in_(ids)).all()
+                full_texts = {vid: txt for vid, txt in rows if txt}
+            finally:
+                db.close()
+    except Exception as e:
+        print(f"Chunk hydration failed, reranking on metadata text: {e}")
+
+    docs = []
+    for r in results:
+        md = r.get("metadata", {})
+        full = full_texts.get(r.get("id"))
+        if full:
+            md["text"] = full  # un-truncate for consumers downstream too
+        docs.append(str(full or md.get("text") or md.get("chunk_text") or "")[:2000])
+    try:
+        rr = _get_client().inference.rerank(
+            model=RERANK_MODEL,
+            query=query_text,
+            documents=docs,
+            top_n=min(top_n, len(docs)),
+            return_documents=False,
+        )
+        ranked = []
+        for row in rr.data:
+            item = results[row.index]
+            item["rerank_score"] = row.score
+            if min_score is not None and row.score < min_score:
+                continue
+            ranked.append(item)
+        return ranked
+    except Exception as e:
+        # Preserve the CALLER's ordering: for hybrid_search the input order is
+        # the RRF fusion order; raw scores from different arms/namespaces are
+        # not comparable, so re-sorting here would silently discard the fusion.
+        print(f"Rerank failed, keeping caller's ranking: {e}")
+        return results[:top_n]
 
 
 def get_namespace_for_category(category: str) -> str:
@@ -107,10 +187,16 @@ def search_vectors(
     namespaces: Optional[List[str]] = None,
     top_k: int = 10,
     filter_dict: Optional[Dict] = None,
+    query_text: Optional[str] = None,
 ) -> List[Dict]:
     """
     Search across one or more namespaces in Pinecone.
-    Returns a unified list of matches sorted by score.
+
+    When query_text is provided, the merged cross-namespace candidate pool
+    (top_k per namespace) is reranked with a hosted cross-encoder and cut to
+    top_k with a relevance floor. Without it, legacy behavior: raw ANN scores
+    sorted globally (scores from different namespaces are not comparable —
+    prefer passing query_text).
     """
     index = _get_index()
 
@@ -138,5 +224,9 @@ def search_vectors(
             print(f"Error querying namespace {ns}: {e}")
             continue
 
+    # Pre-sort by raw score so rerank_results' input-order fallback degrades
+    # to the legacy behavior for this caller.
     all_results.sort(key=lambda x: x["score"], reverse=True)
+    if query_text:
+        return rerank_results(query_text, all_results, top_n=top_k)
     return all_results[:top_k]
