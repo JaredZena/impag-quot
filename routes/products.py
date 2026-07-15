@@ -8,7 +8,7 @@ from models import get_db, Product, Supplier, SupplierProduct, ProductUnit
 from services.price_calculator import enrich_products_with_calculated_prices, get_product_display_price, calculate_product_price_with_currency, get_lowest_supplier_cost_with_currency
 from auth import verify_google_token
 
-router = APIRouter(prefix="/products", tags=["products"])
+router = APIRouter(prefix="/products", tags=["products"], dependencies=[Depends(verify_google_token)])
 
 # Pydantic models for request/response
 class ProductBase(BaseModel):

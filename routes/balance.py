@@ -8,7 +8,7 @@ from decimal import Decimal
 from models import get_db, Balance, BalanceItem, Product, Supplier, SupplierProduct
 from auth import verify_google_token
 
-router = APIRouter(prefix="/balance", tags=["balance"])
+router = APIRouter(prefix="/balance", tags=["balance"], dependencies=[Depends(verify_google_token)])
 
 # Helper functions
 def calculate_supplier_shipping_cost(supplier_product: SupplierProduct) -> float:

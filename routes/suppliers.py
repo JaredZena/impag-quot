@@ -7,7 +7,7 @@ from datetime import datetime
 from models import get_db, Supplier, SupplierProduct, Product
 from auth import verify_google_token
 
-router = APIRouter(prefix="/suppliers", tags=["suppliers"])
+router = APIRouter(prefix="/suppliers", tags=["suppliers"], dependencies=[Depends(verify_google_token)])
 
 # Pydantic models for request/response
 class SupplierBase(BaseModel):

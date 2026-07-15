@@ -7,7 +7,7 @@ from datetime import datetime
 from models import get_db, Kit, KitItem, Product, SupplierProduct
 from auth import verify_google_token
 
-router = APIRouter(prefix="/kits", tags=["kits"])
+router = APIRouter(prefix="/kits", tags=["kits"], dependencies=[Depends(verify_google_token)])
 
 # Pydantic models
 class KitItemCreate(BaseModel):

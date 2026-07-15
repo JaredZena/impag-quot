@@ -126,7 +126,7 @@ class ConversationCreate(BaseModel):
     title: str
 
 @app.post("/conversations", response_model=ConversationResponse)
-async def create_conversation(conversation: ConversationCreate, db: Session = Depends(get_db)):
+async def create_conversation(conversation: ConversationCreate, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     """Create a new conversation."""
     db_conversation = Conversation(title=conversation.title)
     db.add(db_conversation)
@@ -139,7 +139,7 @@ async def create_conversation(conversation: ConversationCreate, db: Session = De
     }
 
 @app.get("/conversations", response_model=List[ConversationResponse])
-async def get_conversations(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
+async def get_conversations(skip: int = 0, limit: int = 50, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     """Get all conversations, ordered by most recent."""
     conversations = db.query(Conversation).filter(
         Conversation.is_active == True
@@ -159,7 +159,7 @@ async def get_conversations(skip: int = 0, limit: int = 50, db: Session = Depend
     return result
 
 @app.get("/conversations/{conversation_id}", response_model=ConversationResponse)
-async def get_conversation(conversation_id: int, db: Session = Depends(get_db)):
+async def get_conversation(conversation_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     """Get a specific conversation."""
     conversation = db.query(Conversation).filter(
         Conversation.id == conversation_id
@@ -178,7 +178,7 @@ async def get_conversation(conversation_id: int, db: Session = Depends(get_db)):
     }
 
 @app.get("/conversations/{conversation_id}/messages", response_model=List[ConversationMessageResponse])
-async def get_conversation_messages(conversation_id: int, db: Session = Depends(get_db)):
+async def get_conversation_messages(conversation_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     """Get all messages in a conversation."""
     messages = db.query(ConversationMessage).filter(
         ConversationMessage.conversation_id == conversation_id
@@ -187,7 +187,7 @@ async def get_conversation_messages(conversation_id: int, db: Session = Depends(
     return messages
 
 @app.delete("/conversations/{conversation_id}")
-async def delete_conversation(conversation_id: int, db: Session = Depends(get_db)):
+async def delete_conversation(conversation_id: int, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     """Delete a conversation (soft delete)."""
     conversation = db.query(Conversation).filter(
         Conversation.id == conversation_id
@@ -202,7 +202,7 @@ async def delete_conversation(conversation_id: int, db: Session = Depends(get_db
     return {"message": "Conversation deleted successfully"}
 
 @app.post("/query")
-async def query(request: QueryRequest, db: Session = Depends(get_db)):
+async def query(request: QueryRequest, db: Session = Depends(get_db), user: dict = Depends(verify_google_token)):
     # Lazy import to ensure route is always registered
     query_rag_system_with_history = get_rag_query_function()
 
