@@ -158,8 +158,14 @@ def _extract_attachment_info(message: str) -> Optional[Dict]:
 
 
 def _hash_message(msg: Dict) -> str:
-    """Create a stable hash for deduplication. Uses timestamp + sender + message content."""
-    ts_str = msg["timestamp"].isoformat() if msg.get("timestamp") else ""
+    """Create a stable hash for deduplication. Uses timestamp + sender + message content.
+
+    Seconds are truncated: phone exports carry second precision but WhatsApp Web
+    scraping only exposes minutes, and hashes are always recomputed from stored
+    text, so minute precision keeps both sources in one dedup universe.
+    """
+    ts = msg.get("timestamp")
+    ts_str = ts.replace(second=0, microsecond=0).isoformat() if ts else ""
     raw = f"{ts_str}|{msg['sender']}|{msg['message']}"
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()[:16]
 
