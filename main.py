@@ -280,7 +280,8 @@ async def query(request: QueryRequest, db: Session = Depends(get_db), user: dict
             db.commit()
     
     return {"response": response, "complexity_tier": complexity_tier,
-            "conversation_id": request.conversation_id, "query_id": query_id}
+            "conversation_id": request.conversation_id, "query_id": query_id,
+            "quote_candidates": result.get("quote_candidates") or []}
 
 
 class QueryFeedbackRequest(BaseModel):

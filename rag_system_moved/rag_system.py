@@ -156,6 +156,73 @@ def _select_relevant_supplier_products(db, query_embedding, limit, query_text, m
     return supplier_products
 
 
+def _compute_final_price(sp, fallback_margin):
+    """Single source of truth for a SupplierProduct's customer price.
+
+    Returns (final_price|None, cost_basis|None, margin_pct|None, margin_source,
+    shipping_total). final_price is None when the supplier has no cost — those
+    line up as 'Consultar' / needs-review. Used by both the prompt formatter
+    and the quote-candidate builder so a quoted price never drifts from the
+    price the LLM was shown.
+    """
+    if not sp.cost:
+        return None, None, None, None, 0.0
+
+    shipping_total = (
+        float(sp.shipping_cost_direct or 0) +
+        float(sp.shipping_stage1_cost or 0) +
+        float(sp.shipping_stage2_cost or 0) +
+        float(sp.shipping_stage3_cost or 0) +
+        float(sp.shipping_stage4_cost or 0)
+    )
+    # default_margin is DECIMAL (0.20 = 20%), fallback_margin is a percentage.
+    margin_decimal = float(sp.default_margin) if sp.default_margin else (fallback_margin / 100)
+    margin_percentage = margin_decimal * 100
+
+    # Enforce a 15% floor so we never quote at (or below) cost.
+    MIN_MARGIN = 15.0
+    margin_source = "DB"
+    if margin_percentage < MIN_MARGIN:
+        margin_decimal = fallback_margin / 100
+        margin_percentage = fallback_margin
+        margin_source = f"FALLBACK (DB margin {float(sp.default_margin) * 100:.1f}% too low)"
+
+    cost_basis = float(sp.cost) + shipping_total
+    final_price = cost_basis / (1 - margin_decimal) if margin_decimal < 1 else cost_basis
+    return final_price, cost_basis, margin_percentage, margin_source, shipping_total
+
+
+def supplier_products_to_quote_candidates(supplier_products, fallback_margin=30.0):
+    """Turn the SAME SupplierProduct rows the quotation was built from into
+    QuoteItemCreate-shaped candidate line items, so the engineer can mint a
+    trackable Quote without re-typing anything. `unit_price` matches the
+    markdown price exactly (both go through _compute_final_price).
+
+    Fields prefixed with `_` are display hints for the review UI (margin
+    preview, needs-review flag) — the frontend must NOT send them to
+    POST /quotes.
+    """
+    candidates = []
+    for i, sp in enumerate(supplier_products):
+        product = sp.product
+        final_price, cost_basis, margin_pct, _src, _ship = _compute_final_price(sp, fallback_margin)
+        candidates.append({
+            "supplier_product_id": sp.id,
+            "product_id": sp.product_id,
+            "description": product.name,
+            "sku": product.sku,
+            "unit": product.unit.value if product.unit else None,
+            "quantity": 1,
+            "unit_price": round(final_price, 2) if final_price is not None else 0.0,
+            "iva_applicable": bool(product.iva) if product.iva is not None else True,
+            "sort_order": i,
+            "_cost_basis": round(cost_basis, 2) if cost_basis is not None else None,
+            "_margin_pct": round(margin_pct, 1) if margin_pct is not None else None,
+            "_needs_price_review": final_price is None,
+        })
+    return candidates
+
+
 def _format_product_lines(supplier_products, include_internal_details, fallback_margin):
     """Format one selected product list as prompt lines (customer or internal
     view). Formatting is split from selection so both views are guaranteed to
@@ -166,41 +233,14 @@ def _format_product_lines(supplier_products, include_internal_details, fallback_
     for sp in supplier_products:
         product = sp.product
         supplier = sp.supplier
-        
+
         # Calculate final price from supplier cost + shipping + margin
         if sp.cost:
-            # Calculate shipping (Direct + Stages 1-4)
-            shipping_total = (
-                float(sp.shipping_cost_direct or 0) + 
-                float(sp.shipping_stage1_cost or 0) + 
-                float(sp.shipping_stage2_cost or 0) + 
-                float(sp.shipping_stage3_cost or 0) + 
-                float(sp.shipping_stage4_cost or 0)
-            )
+            final_price, cost_basis, margin_percentage, margin_source, shipping_total = \
+                _compute_final_price(sp, fallback_margin)
 
-            # Use product's default_margin, or fallback if not set
-            # NOTE: default_margin is stored as DECIMAL (0.20 = 20%, not as percentage 20.00)
-            margin_decimal = float(sp.default_margin) if sp.default_margin else (fallback_margin / 100)
-            
-            # Convert to percentage for display
-            margin_percentage = margin_decimal * 100
-            
-            # IMPORTANT: Enforce minimum margin of 15% to prevent selling at cost
-            MIN_MARGIN = 15.0
-            margin_source = "DB"
-            if margin_percentage < MIN_MARGIN:
-                margin_decimal = fallback_margin / 100
-                margin_percentage = fallback_margin
-                margin_source = f"FALLBACK (DB margin {float(sp.default_margin) * 100:.1f}% too low)"
-            
-            # Calculate Basis: Cost + Shipping
-            cost_basis = float(sp.cost) + shipping_total
-
-            # Standardized formula: price = cost / (1 - margin)
-            final_price = cost_basis / (1 - margin_decimal) if margin_decimal < 1 else cost_basis
-            
             price_str = f"${final_price:,.2f} MXN"
-            
+
             # Include internal details if requested
             if include_internal_details:
                 cost_str = f"${float(sp.cost):,.2f} {sp.currency or 'MXN'}"
@@ -260,17 +300,18 @@ def get_relevant_products(query_embedding, limit=30, include_internal_details=Fa
 
 
 def get_relevant_products_views(query_embedding, query_text=None, limit=30, max_products=15, fallback_margin=30.0):
-    """One retrieval + ONE rerank pass, two formatted views (customer, internal).
-    Guarantees both prompt sections describe the same product set and halves
-    cross-encoder calls versus calling get_relevant_products twice."""
+    """One retrieval + ONE rerank pass -> (customer_md, internal_md, quote_candidates).
+    Guarantees both prompt sections AND the quote candidates describe the same
+    product set, and halves cross-encoder calls versus selecting twice."""
     db = SessionLocal()
     try:
         sps = _select_relevant_supplier_products(db, query_embedding, limit, query_text, max_products)
         return (_format_product_lines(sps, False, fallback_margin),
-                _format_product_lines(sps, True, fallback_margin))
+                _format_product_lines(sps, True, fallback_margin),
+                supplier_products_to_quote_candidates(sps, fallback_margin))
     except Exception as e:
         print(f"Error in vector search: {e}")
-        return "", ""
+        return "", "", []
     finally:
         db.close()
 
@@ -504,12 +545,13 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
 
     if tier == 'sencilla':
         # Lightweight path: single LLM call, no Pinecone, no analysis step
-        matched_products, matched_products_internal = get_relevant_products_views(query_embedding, query_text=query)
+        matched_products, matched_products_internal, quote_candidates = get_relevant_products_views(query_embedding, query_text=query)
         quotation = generate_simple_quotation(
             query, matched_products, matched_products_internal,
             customer_name, customer_location, chat_history_text
         )
-        return {'quotation': quotation, 'complexity_tier': tier, 'retrieved_chunk_ids': []}
+        return {'quotation': quotation, 'complexity_tier': tier, 'retrieved_chunk_ids': [],
+                'quote_candidates': quote_candidates}
 
     # ── FULL PIPELINE (mediana / mediana_alta / alta) ─────────────────────────
 
@@ -523,7 +565,7 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
     print(f"🔹 Calculation & Analysis Report:\n{calculation_report}")
 
     # Get products from database using semantic search
-    matched_products, matched_products_internal = get_relevant_products_views(query_embedding, query_text=query)
+    matched_products, matched_products_internal, quote_candidates = get_relevant_products_views(query_embedding, query_text=query)
 
     # Shared preamble used by both calls
     shared_context = (
@@ -627,4 +669,5 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
         f"{customer_quotation}\n"
         f"<!-- CUSTOMER_QUOTATION_END -->"
     )
-    return {'quotation': quotation, 'complexity_tier': tier, 'retrieved_chunk_ids': retrieved_chunk_ids}
+    return {'quotation': quotation, 'complexity_tier': tier, 'retrieved_chunk_ids': retrieved_chunk_ids,
+            'quote_candidates': quote_candidates}
