@@ -266,6 +266,26 @@ class WADraft(Base):
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+
+# ── In-app roadmap / progress tracker ────────────────────────────────────────
+
+class RoadmapItem(Base):
+    __tablename__ = "roadmap_item"
+
+    id = Column(Integer, primary_key=True, index=True)
+    phase = Column(Integer, nullable=False, default=0)     # 0 = already shipped, 1..5 = roadmap phases
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    need = Column(String(100), nullable=True)              # which business need it serves
+    effort = Column(String(20), nullable=True)             # days | weeks | months
+    impact = Column(String(20), nullable=True)             # high | medium | low
+    status = Column(String(20), default="planned", index=True)  # planned | in_progress | done | deferred
+    notes = Column(Text, nullable=True)                    # free-text progress notes
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class Conversation(Base):
     __tablename__ = "conversation"
 
