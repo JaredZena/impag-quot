@@ -76,20 +76,41 @@ def draft_whatsapp_reply(
     from rag_system_moved.rag_system import get_relevant_products
 
     product_context = ""
+    doc_context = ""
     try:
         emb = generate_embeddings([latest_message])[0]
-        # Reuse the just-upgraded hybrid retrieval + rerank for grounding.
+        # (1) Live catalog + pricing from the product DB (pgvector + rerank).
         product_context = get_relevant_products(
             emb, query_text=latest_message, max_products=8
         )
+        # (2) Hybrid lexical+dense document search over catalogs / past quotes /
+        # invoices. The lexical arm matches product names (e.g. "cintilla") by
+        # exact term, which pure pgvector on a short conversational query misses.
+        try:
+            from services.hybrid_search import hybrid_search
+            hits = hybrid_search(latest_message, emb, top_k=6,
+                                 namespaces=["catalogos", "cotizaciones", "facturas"])
+            lines = []
+            for h in hits:
+                txt = (h.get("metadata") or {}).get("text", "")
+                if txt:
+                    lines.append(txt[:400])
+            doc_context = "\n---\n".join(lines)
+        except Exception as e:
+            print(f"WhatsApp drafter: document retrieval failed: {e}")
     except Exception as e:
         print(f"WhatsApp drafter: product retrieval failed: {e}")
 
     history_text = _format_history(conversation_history)
     who = f"El cliente se llama {customer_name}.\n\n" if customer_name else ""
+    docs_block = (
+        f"Referencias de catálogos y cotizaciones previas:\n{doc_context}\n\n"
+        if doc_context else ""
+    )
     user_turn = (
         f"{who}Contexto de productos disponibles (de la base de datos):\n"
         f"{product_context or '(sin coincidencias de producto)'}\n\n"
+        f"{docs_block}"
         f"Historial de conversación:\n{history_text}\n\n"
         f"Último mensaje del cliente:\n{latest_message}\n\n"
         f"Redacta la respuesta:"
@@ -105,7 +126,8 @@ def draft_whatsapp_reply(
             messages=[{"role": "user", "content": user_turn}],
         )
         draft = resp.content[0].text.strip()
-        return {"draft_text": draft, "product_context": product_context, "model": DRAFTER_MODEL}
+        full_context = product_context + (("\n\n" + docs_block) if docs_block else "")
+        return {"draft_text": draft, "product_context": full_context, "model": DRAFTER_MODEL}
     except Exception as e:
         print(f"WhatsApp drafter: LLM call failed: {e}")
         return {

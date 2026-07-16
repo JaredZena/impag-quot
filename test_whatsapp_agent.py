@@ -49,9 +49,11 @@ def mock_drafter(monkeypatch):
 def gate_closed(monkeypatch):
     # Sending must be OFF for these tests — assert the default and enforce it.
     monkeypatch.setattr(config, "wa_sending_enabled", False)
-    # No app secret in the test env → the webhook fails closed unless the
-    # explicit local-sandbox opt-in is set. Simulate that opt-in here so the
-    # unsigned test posts are accepted.
+    # These tests exercise the unsigned-webhook opt-in path: null any real
+    # app secret (a developer's .env may now carry one) and enable the opt-in
+    # so unsigned test posts are accepted. The signed path is covered by
+    # test_signature_fails_closed_without_opt_in and verified live in prod.
+    monkeypatch.setattr(config, "wa_app_secret", None)
     monkeypatch.setattr(config, "wa_allow_unsigned_webhook", True)
 
 
