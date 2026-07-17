@@ -7,6 +7,7 @@ from urllib.parse import urlparse, parse_qs, urlencode
 from sqlalchemy.sql import func
 from pgvector.sqlalchemy import Vector
 import enum
+import os
 
 Base = declarative_base()
 
@@ -649,8 +650,14 @@ engine = create_engine(
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Create tables
-Base.metadata.create_all(bind=engine)
+# Create tables. Skipped when Alembic is importing this module (env.py sets
+# ALEMBIC_RUNNING) so autogenerate can detect new tables instead of create_all
+# silently making them first. App startup behavior is unchanged.
+# NOTE: Alembic is now the source of truth for schema changes — add tables/
+# columns via `alembic revision --autogenerate` + review + `alembic upgrade head`,
+# not by hand. This create_all remains only as a transitional backstop.
+if os.getenv("ALEMBIC_RUNNING") != "1":
+    Base.metadata.create_all(bind=engine)
 
 # Dependency to get DB session
 def get_db():
