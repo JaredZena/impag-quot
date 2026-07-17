@@ -27,6 +27,7 @@ from routes.notifications import router as notifications_router
 from routes.public_quotes import router as public_quotes_router
 from routes.whatsapp import router as whatsapp_router
 from routes.roadmap import router as roadmap_router
+from routes.customers import router as customers_router
 from auth import verify_google_token
 
 # Lazy import for RAG system to ensure route registration even if import fails
@@ -78,6 +79,7 @@ app.include_router(social_router, prefix="/social", tags=["Social"])
 app.include_router(files_router)
 app.include_router(whatsapp_router)
 app.include_router(roadmap_router)
+app.include_router(customers_router)
 app.include_router(logistics_router)
 app.include_router(tasks_mgmt_router)
 app.include_router(task_categories_router)

@@ -224,6 +224,7 @@ class WAConversation(Base):
     id = Column(Integer, primary_key=True, index=True)
     customer_phone = Column(String(20), nullable=False, unique=True, index=True)  # E.164
     customer_name = Column(String(200), nullable=True)   # from WhatsApp profile
+    customer_id = Column(Integer, ForeignKey("customer.id", ondelete="SET NULL"), nullable=True, index=True)
     status = Column(String(20), default="active")        # active, archived
     last_message_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -265,6 +266,25 @@ class WADraft(Base):
     status = Column(String(20), default="pending", index=True)  # pending, approved, edited, rejected, sent, failed
     reviewed_by = Column(String(255), nullable=True)     # operator email
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── Customer / lead master (phone-keyed spine) ───────────────────────────────
+
+class Customer(Base):
+    __tablename__ = "customer"
+
+    id = Column(Integer, primary_key=True, index=True)
+    display_name = Column(String(200), nullable=True)
+    name_normalized = Column(String(200), nullable=True, index=True)  # fuzzy-merge key (future)
+    phone_e164 = Column(String(20), unique=True, index=True)          # the clean machine key
+    email = Column(String(255), nullable=True)
+    rfc = Column(String(20), nullable=True)
+    location = Column(String(300), nullable=True)
+    source = Column(String(20), nullable=True)                       # whatsapp | quote | manual
+    first_seen_at = Column(DateTime(timezone=True), nullable=True)
+    last_activity_at = Column(DateTime(timezone=True), nullable=True)
+    has_purchased = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -540,6 +560,7 @@ class Quote(Base):
     customer_phone = Column(String(30), nullable=False)
     customer_email = Column(String(255), nullable=True)
     customer_location = Column(String(300), nullable=True)
+    customer_id = Column(Integer, ForeignKey("customer.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # Quote content
     notes = Column(Text, nullable=True)
