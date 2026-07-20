@@ -575,6 +575,12 @@ class Quote(Base):
     accepted_at = Column(DateTime(timezone=True), nullable=True)
     expired_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Follow-up automation (stalled-quote nudge sweep). last_followup_at is the
+    # idempotency guard (don't re-nudge within the reminder interval); followup_count
+    # caps total nudges so we never spam a customer.
+    last_followup_at = Column(DateTime(timezone=True), nullable=True)
+    followup_count = Column(Integer, nullable=False, server_default="0", default=0)
+
     # Ownership
     created_by = Column(String(255), nullable=False)  # engineer email
     assigned_to = Column(String(255), nullable=True)   # engineer email
