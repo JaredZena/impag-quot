@@ -347,7 +347,7 @@ class Quotation(Base):
     archived_at = Column(DateTime(timezone=True), nullable=True)  # Soft delete timestamp
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    
+
 class SocialPost(Base):
     __tablename__ = "social_post"
 
@@ -542,6 +542,103 @@ def get_next_task_number(db):
     while n in used:
         n += 1
     return n
+
+
+# ── Campaign planner ("Campañas") ────────────────────────────────────────────
+
+
+class Campaign(Base):
+    __tablename__ = "campaign"
+
+    id = Column(Integer, primary_key=True, index=True)
+    topic = Column(Text, nullable=False)  # raw user input
+    title = Column(String, nullable=False)
+    objective = Column(Text, nullable=True)
+    audience = Column(Text, nullable=True)
+    size = Column(String, nullable=False, default="mediana")  # chica | mediana | grande
+    status = Column(
+        String, nullable=False, default="draft"
+    )  # draft | active | completed | archived
+    start_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)
+    goals = Column(JSON, nullable=True)  # [{goal, metric, target}]
+    key_messages = Column(JSON, nullable=True)  # [str]
+    channel_plan = Column(
+        JSON, nullable=True
+    )  # {channels: [...], whatsapp_notify, whatsapp_rationale}
+    research = Column(
+        JSON, nullable=True
+    )  # {seasonality_notes, market_context, important_dates, product_focus}
+    notes = Column(Text, nullable=True)
+    generation_model = Column(String, nullable=True)
+    created_by = Column(String, nullable=True)  # email
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CampaignPhase(Base):
+    __tablename__ = "campaign_phase"
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(
+        Integer,
+        ForeignKey("campaign.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    goal = Column(Text, nullable=True)
+    start_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)
+    sort_order = Column(Integer, nullable=False, default=0)
+    status = Column(
+        String, nullable=False, default="pending"
+    )  # pending | in_progress | done
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CampaignItem(Base):
+    __tablename__ = "campaign_item"
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(
+        Integer,
+        ForeignKey("campaign.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    phase_id = Column(
+        Integer,
+        ForeignKey("campaign_phase.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    kind = Column(String, nullable=False)  # post | whatsapp | task | research
+    channel = Column(String, nullable=True)  # social channel id for post/whatsapp kinds
+    scheduled_date = Column(Date, nullable=True)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)  # content brief / instructions
+    content = Column(
+        Text, nullable=True
+    )  # generated copy (e.g. WA broadcast message text)
+    status = Column(
+        String, nullable=False, default="planned"
+    )  # planned | ready | done | skipped
+    task_id = Column(
+        Integer, nullable=True
+    )  # loose ref to task.id (no FK, like Task itself)
+    social_post_id = Column(Integer, nullable=True)  # loose ref to social_post.id
+    sort_order = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 # ==================== Quote Commerce Models ====================
