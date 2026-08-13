@@ -35,11 +35,15 @@ class MultiSupplierDetectionInfo(BaseModel):
 class QuotationResponse(BaseModel):
     suppliers: dict  # Dict[str, SupplierInfo] but Pydantic prefers dict
     products_processed: int
+    products_created: int = 0   # rows actually inserted
+    products_matched: int = 0   # folded into an existing row (same product name), cost refreshed
+    products_failed: int = 0    # errored and skipped (details in "errors")
     supplier_products_created: int
     supplier_product_ids: list  # List of created supplier product IDs for reassignment
     skus_generated: list
+    errors: list = []           # [{product_name, error}] for products that failed
     supplier_detection: MultiSupplierDetectionInfo
-    currency_info: dict  # Currency detection and conversion info
+    currency_info: dict = {}  # Currency detection and conversion info
 
 class BatchQuotationResponse(BaseModel):
     total_files_processed: int
@@ -190,7 +194,7 @@ async def process_quotation_batch(
             batch_results["successful_files"] += 1
             
             print(f"✅ Successfully processed: {filename}")
-            print(f"   Supplier: {result['supplier']}")
+            print(f"   Suppliers: {', '.join(result['suppliers'].keys()) or 'none'}")
             print(f"   Products: {result['products_processed']}")
             
             # Display product names
@@ -265,12 +269,17 @@ async def reassign_supplier_for_products(
         
         updated_count = 0
         for sp in supplier_products:
-            # Check if a relationship between this product and new supplier already exists
-            existing = db.query(SupplierProduct).filter(
-                SupplierProduct.supplier_id == request.new_supplier_id,
-                SupplierProduct.product_id == sp.product_id
-            ).first()
-            
+            # Check if a relationship between this product and new supplier already exists.
+            # Only meaningful for legacy rows linked to the Product table: for standalone
+            # rows product_id is NULL and `== None` renders as IS NULL, which would match
+            # ANY standalone row of the target supplier and DELETE this one.
+            existing = None
+            if sp.product_id is not None:
+                existing = db.query(SupplierProduct).filter(
+                    SupplierProduct.supplier_id == request.new_supplier_id,
+                    SupplierProduct.product_id == sp.product_id
+                ).first()
+
             if existing:
                 # If relationship exists, delete the old one and keep the existing
                 db.delete(sp)

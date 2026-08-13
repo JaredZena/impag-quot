@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, SmallInteger, String, DateTime, Float, ForeignKey, create_engine, Boolean, Text, Numeric, JSON, Enum, Date, Index
+from sqlalchemy import Column, Integer, SmallInteger, String, DateTime, Float, ForeignKey, create_engine, Boolean, Text, Numeric, JSON, Enum, Date, Index, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -83,6 +83,17 @@ class Product(Base):
 
 class SupplierProduct(Base):
     __tablename__ = "supplier_product"
+
+    # Mirrors the unique partial index that already exists in the production DB;
+    # the SKU-uniquify logic in quotation_processor relies on it as a backstop.
+    __table_args__ = (
+        Index(
+            "idx_supplier_product_supplier_sku",
+            "supplier_id", "sku",
+            unique=True,
+            postgresql_where=text("sku IS NOT NULL AND archived_at IS NULL"),
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     supplier_id = Column(Integer, ForeignKey("supplier.id"))

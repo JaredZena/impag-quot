@@ -233,10 +233,15 @@ def get_all_supplier_products(
                 vector_similarity
             )
             query = query.order_by(similarity_score.desc())
-        
+        else:
+            # Deterministic order for browse mode: without this, offset/limit pagination is
+            # nondeterministic and newly created products can never surface reliably.
+            # Newest first so recently uploaded products appear at the top.
+            query = query.order_by(SupplierProduct.created_at.desc(), SupplierProduct.id.desc())
+
         # Calculate total count BEFORE pagination
         total_count = query.count()
-        
+
         # Apply pagination
         supplier_products = query.offset(skip).limit(limit).all()
         

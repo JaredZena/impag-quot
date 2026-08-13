@@ -1,11 +1,41 @@
 import re
 import json
 import os
+import unicodedata
 import fitz  # PyMuPDF
 import anthropic
 import copy
 from sqlalchemy.orm import Session
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+
+
+def normalize_product_name(name: str) -> str:
+    """Normalize a product name for duplicate detection: strip accents, casefold, collapse whitespace."""
+    if not name:
+        return ""
+    stripped = "".join(
+        c for c in unicodedata.normalize("NFKD", name) if not unicodedata.combining(c)
+    )
+    return " ".join(stripped.casefold().split())
+
+
+def _normalize_spec_value(v) -> str:
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))  # 3.0 and 3 must compare equal across JSON round-trips
+    if isinstance(v, (list, dict)):
+        return json.dumps(v, sort_keys=True, ensure_ascii=False).casefold()
+    return str(v).strip().casefold()
+
+
+def normalize_specs(specs) -> dict:
+    """Normalize a specifications dict for duplicate detection (casefolded string keys/values)."""
+    if not isinstance(specs, dict):
+        return {}
+    return {
+        str(k).strip().casefold(): _normalize_spec_value(v)
+        for k, v in specs.items()
+        if v is not None and str(v).strip() != ""
+    }
 from models import (
     Supplier, Product, SupplierProduct, 
     ProductCategory, ProductUnit, SessionLocal
@@ -850,7 +880,9 @@ Respond only with the JSON object, no extra explanation.""".replace(
         )
         
         session.add(new_supplier)
-        session.commit()
+        # Flush (not commit) so the whole quotation persists atomically at the end;
+        # per-product savepoints in process_quotation can roll this back cleanly.
+        session.flush()
         print(f"Created new supplier: {new_supplier.name} (ID: {new_supplier.id})")
         
         if detection_info["confidence"] in ["none", "low"]:
@@ -858,38 +890,121 @@ Respond only with the JSON object, no extra explanation.""".replace(
         
         return new_supplier, detection_info
 
-    def get_or_create_supplier_product(self, session: Session, supplier: Supplier, product_info: Dict, supplier_sku: str = None) -> SupplierProduct:
+    def get_or_create_supplier_product(self, session: Session, supplier: Supplier, product_info: Dict, supplier_sku: str = None, exclude_ids=None) -> Tuple[SupplierProduct, str]:
         """
         Create or get SupplierProduct directly (no Product table involved).
         This is the NEW architecture - SupplierProduct is the source of truth.
+
+        Duplicate detection requires the normalized product NAME to match AND a second
+        discriminator to agree (generated SKU, supplier part number, or specifications).
+        Name alone is not enough: variant families share a name (5 distinct "TORNILLO"
+        rows exist in prod), and SKU alone is not enough either: SKU generation is lossy
+        and two different products can collide (which used to silently swallow new
+        products). Ambiguity always falls through to CREATE — a duplicate row is
+        recoverable, overwriting the wrong product's price is not.
+
+        exclude_ids: supplier_product ids already touched in this processing run; two
+        lines of one document are never folded into each other (they are almost always
+        distinct variants or price tiers).
+
+        Returns (supplier_product, status) where status is:
+        - "matched": same product already existed for this supplier; cost refreshed when
+          the document carries a real (positive) price
+        - "created": a new row was inserted
         """
-        
+
         print(f'Getting or creating supplier product: {product_info}')
         print(f'Category ID at start: {product_info.get("category_id")}')
         print(f'Supplier: {supplier.name} (ID: {supplier.id})')
-        
-        # Get base SKU first
+
+        # Generate the SKU first so it can serve as a duplicate discriminator
         base_sku = self.sku_generator.get_base_sku(product_info)
         print(f"Base SKU: {base_sku}")
-        
-        # Get SKU using hybrid approach (AI suggestion + code fallback)
+
         sku = self.sku_generator.get_variant_sku(
-            base_sku, 
+            base_sku,
             product_info.get("specifications", {})
         )
         print(f"Generated SKU: {sku}")
 
-        # Check if this supplier already has this SKU (non-archived only)
-        existing = session.query(SupplierProduct).filter(
-            SupplierProduct.supplier_id == supplier.id,
-            SupplierProduct.sku == sku,
-            SupplierProduct.archived_at.is_(None)
-        ).first()
-        
-        if existing:
-            print(f"Found existing supplier product: {existing.name} (ID: {existing.id}) [SKU: {existing.sku}]")
-            return existing
-        
+        normalized_name = normalize_product_name(product_info.get("name") or "")
+        new_specs = normalize_specs(product_info.get("specifications"))
+        excluded = set(exclude_ids or ())
+        # "Unknown Supplier" is a catch-all bucket mixing unrelated real vendors, so the
+        # same-supplier-same-name premise is false by construction — fold there only on a
+        # full name+SKU agreement (pure dedup for re-uploads), and never mutate the row.
+        is_catchall_supplier = (supplier.name or "").strip() == "Unknown Supplier"
+
+        if normalized_name:
+            candidate_rows = session.query(
+                SupplierProduct.id, SupplierProduct.name, SupplierProduct.sku,
+                SupplierProduct.supplier_sku, SupplierProduct.specifications
+            ).filter(
+                SupplierProduct.supplier_id == supplier.id,
+                SupplierProduct.archived_at.is_(None),
+                SupplierProduct.name.isnot(None)
+            ).all()
+
+            def is_same_product(row) -> bool:
+                if row.id in excluded:
+                    return False
+                if normalize_product_name(row.name) != normalized_name:
+                    return False
+                if is_catchall_supplier:
+                    return row.sku == sku
+                if row.sku == sku:
+                    return True
+                if supplier_sku and row.supplier_sku and str(row.supplier_sku).strip() == str(supplier_sku).strip():
+                    return True
+                # Empty specs on both sides carry no information and must not count as
+                # a discriminator (same-name rows with empty specs and 9x cost spreads
+                # exist in prod) — a missed fold is a recoverable duplicate, a wrong
+                # fold corrupts a price.
+                return bool(new_specs) and normalize_specs(row.specifications) == new_specs
+
+            fold_matches = [row for row in candidate_rows if is_same_product(row)]
+            if len(fold_matches) > 1:
+                # Several plausible targets means the discriminators are lossy for this
+                # name (e.g. an X / X-2 uniquified sibling pair) — never guess, create.
+                print(f"⚠️  Ambiguous name match for '{product_info.get('name')}' "
+                      f"({supplier.name}) — creating a new row instead of guessing")
+                fold_matches = []
+
+            if len(fold_matches) == 1:
+                existing = session.get(SupplierProduct, fold_matches[0].id)
+                if not is_catchall_supplier:
+                    try:
+                        new_cost = float(product_info.get("cost")) if product_info.get("cost") is not None else None
+                    except (TypeError, ValueError):
+                        new_cost = None
+                    if new_cost is not None and new_cost > 0:
+                        existing.cost = new_cost
+                        # `or` (not .get default) so an explicit "currency": null can't null the NOT NULL column
+                        existing.currency = product_info.get("currency") or existing.currency or "MXN"
+                    if supplier_sku and not existing.supplier_sku:
+                        existing.supplier_sku = supplier_sku
+                print(f"Found existing supplier product: {existing.name} (ID: {existing.id}) "
+                      f"[SKU: {existing.sku}] — cost now {existing.cost} {existing.currency}")
+                return existing, "matched"
+
+        # A colliding SKU here belongs to a DIFFERENT product (the name check above found
+        # no match), so uniquify with a numeric suffix instead of folding into the old row.
+        # Prod enforces this via unique index idx_supplier_product_supplier_sku.
+        def sku_taken(candidate_sku: str) -> bool:
+            return session.query(SupplierProduct.id).filter(
+                SupplierProduct.supplier_id == supplier.id,
+                SupplierProduct.sku == candidate_sku,
+                SupplierProduct.archived_at.is_(None)
+            ).first() is not None
+
+        if sku_taken(sku):
+            suffix = 2
+            while sku_taken(f"{sku}-{suffix}"):
+                suffix += 1
+            print(f"⚠️  SKU collision: {sku} already used by a different product of "
+                  f"{supplier.name} — using {sku}-{suffix} instead")
+            sku = f"{sku}-{suffix}"
+
         # Debug: Print the unit value we received
         print(f"\nReceived unit value: {product_info.get('unit')}")
         
@@ -969,8 +1084,8 @@ Respond only with the JSON object, no extra explanation.""".replace(
         session.add(new_supplier_product)
         session.flush()  # Assign ID without committing transaction
         print(f"✅ Created new supplier product: {new_supplier_product.name} (ID: {new_supplier_product.id}) [SKU: {new_supplier_product.sku}, Cost: ${new_supplier_product.cost} {new_supplier_product.currency}]")
-        
-        return new_supplier_product
+
+        return new_supplier_product, "created"
 
     # OLD METHODS REMOVED - No longer needed as SupplierProduct is now the source of truth
     # - create_supplier_product() - merged into get_or_create_supplier_product()
@@ -1032,9 +1147,13 @@ Respond only with the JSON object, no extra explanation.""".replace(
             results = {
                 "suppliers": {},  # Track multiple suppliers by name
                 "products_processed": 0,
+                "products_created": 0,   # rows actually inserted
+                "products_matched": 0,   # folded into an existing row (same name), cost refreshed
+                "products_failed": 0,    # errored and skipped (see "errors")
                 "supplier_products_created": 0,
                 "supplier_product_ids": [],  # Track created supplier product IDs for reassignment
                 "skus_generated": [],
+                "errors": [],
                 "supplier_detection": {
                     "suppliers_detected": [],
                     "overall_confidence": "high",
@@ -1057,8 +1176,13 @@ Respond only with the JSON object, no extra explanation.""".replace(
                     return {
                         "suppliers": {},
                         "products_processed": 0,
+                        "products_created": 0,
+                        "products_matched": 0,
+                        "products_failed": 0,
                         "supplier_products_created": 0,
+                        "supplier_product_ids": [],
                         "skus_generated": [],
+                        "errors": [],
                         "supplier_detection": {
                             "suppliers_detected": [],
                             "overall_confidence": "none",
@@ -1068,6 +1192,12 @@ Respond only with the JSON object, no extra explanation.""".replace(
             
             print(f"\nProcessing {len(structured_data['products'])} products...")
             print("-" * 40)
+
+            # Every row touched this run (created OR matched): lines of one document must
+            # never fold into each other. Kept separate from supplier_product_ids, which
+            # holds ONLY created rows — the /reassign-supplier flow consumes that list and
+            # must never receive pre-existing catalog rows (it can delete them).
+            touched_supplier_product_ids = []
             
             # Process products, each with potentially different suppliers
             for i, product_info in enumerate(structured_data["products"], 1):
@@ -1095,12 +1225,23 @@ Respond only with the JSON object, no extra explanation.""".replace(
                     supplier_info = product_info_copy.get("supplier", {})
                     if not supplier_info.get("name"):
                         supplier_info["name"] = "Unknown Supplier"
-                    
-                    supplier, supplier_detection_info = self.get_or_create_supplier(session, supplier_info)
+
+                    # Savepoint: a failure in this product rolls back only this product's
+                    # writes (including a supplier created just for it), keeping the session
+                    # usable for the remaining products instead of poisoning the transaction.
+                    with session.begin_nested():
+                        supplier, supplier_detection_info = self.get_or_create_supplier(session, supplier_info)
+
+                        # Create/get SupplierProduct directly (NEW ARCHITECTURE - no Product table)
+                        supplier_product, sp_status = self.get_or_create_supplier_product(
+                            session, supplier, product_info_copy,
+                            supplier_sku=product_info_copy.get("supplier_sku"),
+                            exclude_ids=touched_supplier_product_ids
+                        )
+
                     supplier_name = supplier.name or "Unknown Supplier"
-                    
                     print(f"   → Supplier: {supplier_name}")
-                    
+
                     # Track this supplier in results
                     if supplier_name not in results["suppliers"]:
                         results["suppliers"][supplier_name] = {
@@ -1110,16 +1251,16 @@ Respond only with the JSON object, no extra explanation.""".replace(
                             "products_count": 0
                         }
                         results["supplier_detection"]["suppliers_detected"].append(supplier_detection_info)
-                    
+
                     results["suppliers"][supplier_name]["products_count"] += 1
-                    
-                    # Create/get SupplierProduct directly (NEW ARCHITECTURE - no Product table)
-                    supplier_product = self.get_or_create_supplier_product(
-                        session, supplier, product_info_copy, 
-                        supplier_sku=product_info_copy.get("supplier_sku")
-                    )
-                    results["supplier_products_created"] += 1
-                    results["supplier_product_ids"].append(supplier_product.id)  # Track ID for reassignment
+
+                    if sp_status == "created":
+                        results["products_created"] += 1
+                        results["supplier_products_created"] += 1
+                        results["supplier_product_ids"].append(supplier_product.id)  # created-only: safe for reassignment
+                    else:
+                        results["products_matched"] += 1
+                    touched_supplier_product_ids.append(supplier_product.id)
                     
                     # Track currency information (no conversion, store original)
                     if currency == "USD":
@@ -1142,14 +1283,22 @@ Respond only with the JSON object, no extra explanation.""".replace(
                         "category_id": product_info_copy["category_id"],
                         "currency": product_info_copy.get("currency", "MXN"),
                         "cost": product_info_copy.get("cost"),
-                        "cost_currency": product_info_copy.get("currency", "MXN")
+                        "cost_currency": product_info_copy.get("currency", "MXN"),
+                        "status": sp_status,
+                        "supplier_product_id": supplier_product.id
                     })
-                    
+
                     results["products_processed"] += 1
-                    
+
                 except Exception as e:
                     print(f"❌ Error processing product {i} '{product_info.get('name', 'Unknown')}': {str(e)}")
-                    # Continue processing other products instead of failing the entire batch
+                    # Continue processing other products instead of failing the entire batch,
+                    # but surface the failure to the caller instead of losing it silently
+                    results["products_failed"] += 1
+                    results["errors"].append({
+                        "product_name": product_info.get("name", "Unknown"),
+                        "error": str(e)
+                    })
                     continue
             
             # Calculate overall confidence and warnings
@@ -1167,7 +1316,7 @@ Respond only with the JSON object, no extra explanation.""".replace(
             session.commit()
             print(f"\n" + "=" * 50)
             print(f"✓ Successfully processed {results['products_processed']} products")
-            print(f"✓ Created {results['supplier_products_created']} supplier relationships")
+            print(f"✓ Created {results['products_created']} new, matched {results['products_matched']} existing, {results['products_failed']} failed")
             print(f"✓ Detected {len(results['suppliers'])} suppliers:")
             
             for supplier_name, supplier_data in results["suppliers"].items():
