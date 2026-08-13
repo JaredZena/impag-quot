@@ -24,6 +24,7 @@ from routes.quotations import router as quotations_router
 from routes.quotes import router as quotes_router
 from routes.roadmap import router as roadmap_router
 from routes.social import router as social_router
+from routes.storefront import router as storefront_router
 from routes.suppliers import router as suppliers_router
 from routes.task_categories import router as task_categories_router
 from routes.task_comments import router as task_comments_router
@@ -95,6 +96,7 @@ app.include_router(task_users_router)
 app.include_router(quotes_router)
 app.include_router(notifications_router)
 app.include_router(public_quotes_router)
+app.include_router(storefront_router)
 
 
 class Message(BaseModel):
