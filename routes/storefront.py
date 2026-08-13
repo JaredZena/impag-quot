@@ -66,6 +66,12 @@ def get_storefront_products(
     ):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
+    # Public base URL for product images (e.g. an R2 custom domain / public
+    # bucket domain). Read at REQUEST time so App Runner env changes apply
+    # without a code deploy. NEVER emit presigned URLs here — they expire, and
+    # the storefront bakes these URLs statically.
+    r2_public_base = os.getenv("R2_PUBLIC_BASE_URL")
+
     products = (
         db.query(Product)
         .filter(Product.archived_at.is_(None))
@@ -116,6 +122,13 @@ def get_storefront_products(
                 "is_calculated_price": p.price is None
                 and p.calculated_price is not None,
                 "currency": calculated_currency,
+                # Public image URLs in display order (first = primary). Empty
+                # list when R2_PUBLIC_BASE_URL is unset (the sync skips empty).
+                "images": (
+                    [f"{r2_public_base.rstrip('/')}/{key}" for key in (p.images or [])]
+                    if r2_public_base
+                    else []
+                ),
                 "is_active": p.is_active,
                 "archived_at": p.archived_at,
             }

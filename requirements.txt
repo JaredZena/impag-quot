@@ -26,6 +26,9 @@ llama-index-llms-anthropic>=0.3.0
 # PDF Processing
 PyMuPDF>=1.19.0
 
+# Image Processing (product images -> WEBP)
+Pillow==11.1.0
+
 # DOCX Processing
 python-docx>=1.0.0
 

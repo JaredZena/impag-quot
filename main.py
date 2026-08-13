@@ -17,6 +17,7 @@ from routes.jobs import router as jobs_router
 from routes.kits import router as kits_router
 from routes.logistics import router as logistics_router
 from routes.notifications import router as notifications_router
+from routes.product_images import router as product_images_router
 from routes.products import router as products_router
 from routes.public_quotes import router as public_quotes_router
 from routes.quotation_history import router as quotation_history_router
@@ -75,6 +76,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(products_router)
+app.include_router(product_images_router)
 app.include_router(suppliers_router)
 app.include_router(quotations_router)
 app.include_router(categories_router)
