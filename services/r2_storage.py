@@ -46,11 +46,13 @@ def build_file_key(category: str, file_id: int, original_filename: str) -> str:
     return f"{category}/{file_id}/{original_filename}"
 
 
-def upload_file(file_key: str, file_content: bytes, content_type: str) -> None:
-    """Upload a file to R2."""
+def upload_file(
+    file_key: str, file_content: bytes, content_type: str, bucket: str | None = None
+) -> None:
+    """Upload a file to R2 (default: the private documents bucket)."""
     client = get_r2_client()
     client.put_object(
-        Bucket=r2_bucket_name,
+        Bucket=bucket or r2_bucket_name,
         Key=file_key,
         Body=file_content,
         ContentType=content_type,
@@ -68,14 +70,14 @@ def generate_presigned_download_url(file_key: str, expires_in: int = 900) -> str
 
 
 def generate_presigned_view_url(
-    file_key: str, content_type: str, expires_in: int = 900
+    file_key: str, content_type: str, expires_in: int = 900, bucket: str | None = None
 ) -> str:
     """Generate a presigned URL for inline viewing (Content-Disposition: inline)."""
     client = get_r2_client()
     return client.generate_presigned_url(
         "get_object",
         Params={
-            "Bucket": r2_bucket_name,
+            "Bucket": bucket or r2_bucket_name,
             "Key": file_key,
             "ResponseContentDisposition": "inline",
             "ResponseContentType": content_type,
@@ -84,7 +86,7 @@ def generate_presigned_view_url(
     )
 
 
-def delete_file(file_key: str) -> None:
-    """Delete a file from R2."""
+def delete_file(file_key: str, bucket: str | None = None) -> None:
+    """Delete a file from R2 (default: the private documents bucket)."""
     client = get_r2_client()
-    client.delete_object(Bucket=r2_bucket_name, Key=file_key)
+    client.delete_object(Bucket=bucket or r2_bucket_name, Key=file_key)

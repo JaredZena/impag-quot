@@ -15,6 +15,7 @@ the storefront feed builds public URLs from R2_PUBLIC_BASE_URL instead
 """
 
 import io
+import os
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
@@ -24,6 +25,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from auth import verify_google_token
+from config import r2_public_bucket_name
 from models import Product, get_db
 from services.r2_storage import (
     delete_file as r2_delete,
@@ -59,26 +61,35 @@ class ImageOrderRequest(BaseModel):
     keys: list[str]
 
 
+def _image_url(key: str) -> str:
+    """Serving URL for one product-image key.
+
+    Product images live in the PUBLIC bucket, so prefer the permanent public
+    URL (no expiry). Fall back to a presigned URL against the public bucket
+    when R2_PUBLIC_BASE_URL isn't configured.
+    """
+    public_base = os.getenv("R2_PUBLIC_BASE_URL")
+    if public_base:
+        return f"{public_base.rstrip('/')}/{key}"
+    return generate_presigned_view_url(
+        key, "image/webp", PRESIGNED_URL_TTL, bucket=r2_public_bucket_name
+    )
+
+
 def presigned_image_urls(keys: list[str] | None) -> list[dict]:
-    """Map R2 object keys to short-lived presigned view URLs.
+    """Map R2 object keys to serving URLs.
 
     Returns [{"key": k, "url": ...}, ...] preserving list order (first =
     primary). Accepts None (column not yet populated) and returns [].
     """
-    return [
-        {
-            "key": k,
-            "url": generate_presigned_view_url(k, "image/webp", PRESIGNED_URL_TTL),
-        }
-        for k in (keys or [])
-    ]
+    return [{"key": k, "url": _image_url(k)} for k in (keys or [])]
 
 
 def primary_image_url(keys: list[str] | None) -> str | None:
-    """Presigned view URL for the primary (first) image, or None if there is none."""
+    """Serving URL for the primary (first) image, or None if there is none."""
     if not keys:
         return None
-    return generate_presigned_view_url(keys[0], "image/webp", PRESIGNED_URL_TTL)
+    return _image_url(keys[0])
 
 
 def process_product_image(content: bytes) -> bytes:
@@ -175,7 +186,7 @@ def upload_product_image(
 
     key = f"product-images/{product_id}/{uuid4().hex[:12]}.webp"
     try:
-        r2_upload(key, webp_bytes, "image/webp")
+        r2_upload(key, webp_bytes, "image/webp", bucket=r2_public_bucket_name)
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to upload image to storage: {e}"
@@ -192,10 +203,7 @@ def upload_product_image(
 
     return {
         "success": True,
-        "data": {
-            "key": key,
-            "url": generate_presigned_view_url(key, "image/webp", PRESIGNED_URL_TTL),
-        },
+        "data": {"key": key, "url": _image_url(key)},
         "error": None,
         "message": None,
     }
@@ -220,7 +228,7 @@ def delete_product_image(
 
     # Best-effort R2 cleanup: a missing object must not fail the DB removal.
     try:
-        r2_delete(request.key)
+        r2_delete(request.key, bucket=r2_public_bucket_name)
     except Exception as e:
         print(f"Warning: failed to delete R2 object {request.key}: {e}")
 
