@@ -2,7 +2,7 @@
 Customer directory + Customer 360 (roadmap P2).
 - GET   /customers?q=&source=&has_purchased=&tag=&offset=   search + filters
 - GET   /customers/stats       directory-level aggregates
-- GET   /customers/{id}        360 view: profile + WA threads + quotes + docs
+- GET   /customers/{id}        360 view: profile + WA threads + quotes + AI quotations + docs
 - PATCH /customers/{id}        partial profile edit (incl. tags)
 """
 
@@ -17,13 +17,26 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from auth import verify_google_token
-from models import get_db, Customer, WAConversation, WAMessage, Quote, FileMetadata
+from models import (
+    get_db,
+    Customer,
+    WAConversation,
+    WAMessage,
+    Quote,
+    Quotation,
+    FileMetadata,
+)
 
 router = APIRouter(
     prefix="/customers", tags=["customers"], dependencies=[Depends(verify_google_token)]
 )
 
 TAG_RE = re.compile(r"^[a-z0-9-]{1,40}$")
+
+
+def _escape_like(text: str) -> str:
+    """Escape LIKE/ILIKE metacharacters (backslash default escape char)."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _brief(c: Customer):
@@ -187,7 +200,10 @@ def customer_360(customer_id: int, db: Session = Depends(get_db)):
             "id": q.id,
             "quote_number": q.quote_number,
             "status": q.status,
+            "total": float(q.total) if q.total is not None else None,
             "created_at": q.created_at.isoformat() if q.created_at else None,
+            "sent_at": q.sent_at.isoformat() if q.sent_at else None,
+            "accepted_at": q.accepted_at.isoformat() if q.accepted_at else None,
         }
         for q in db.query(Quote)
         .filter(Quote.customer_id == customer_id)
@@ -195,10 +211,33 @@ def customer_360(customer_id: int, db: Session = Depends(get_db)):
         .all()
     ]
 
+    # AI-generated quotations (Quotation table) that name this customer.
+    # Same >=4-char guard as documents — short names match too much noise.
+    # LIKE metacharacters in names (%, _) must be escaped or e.g. "Agro_MX"
+    # over-matches unrelated rows.
+    ai_quotations = []
+    if c.display_name and len(c.display_name.strip()) >= 4:
+        like = f"%{_escape_like(c.display_name.strip())}%"
+        ai_quotations = [
+            {
+                "id": aq.id,
+                "title": aq.title,
+                "created_at": aq.created_at.isoformat() if aq.created_at else None,
+            }
+            for aq in db.query(Quotation)
+            .filter(
+                Quotation.customer_name.ilike(like),
+                Quotation.archived_at.is_(None),
+            )
+            .order_by(Quotation.created_at.desc())
+            .limit(10)
+            .all()
+        ]
+
     # RAG documents that name this customer (their COT/quote PDFs, chats, etc.)
     documents = []
     if c.display_name and len(c.display_name.strip()) >= 4:
-        like = f"%{c.display_name.strip()}%"
+        like = f"%{_escape_like(c.display_name.strip())}%"
         docs = (
             db.query(FileMetadata)
             .filter(
@@ -217,6 +256,7 @@ def customer_360(customer_id: int, db: Session = Depends(get_db)):
                 "id": d.id,
                 "filename": d.original_filename,
                 "category": d.category,
+                "content_type": d.content_type,
                 "document_date": (
                     d.document_date.isoformat() if d.document_date else None
                 ),
@@ -233,6 +273,7 @@ def customer_360(customer_id: int, db: Session = Depends(get_db)):
         },
         "conversations": conversations,
         "quotes": quotes,
+        "ai_quotations": ai_quotations,
         "documents": documents,
     }
 
