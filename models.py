@@ -418,6 +418,9 @@ class Customer(Base):
     first_seen_at = Column(DateTime(timezone=True), nullable=True)
     last_activity_at = Column(DateTime(timezone=True), nullable=True)
     has_purchased = Column(Boolean, default=False)
+    tags = Column(
+        JSON, nullable=True
+    )  # list of lowercase slug strings, e.g. ["sembrando-vida"]
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

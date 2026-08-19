@@ -1,41 +1,153 @@
 """
 Customer directory + Customer 360 (roadmap P2).
-- GET /customers?q=            search by name / phone / location
-- GET /customers/{id}         360 view: profile + WA threads + quotes + docs
+- GET   /customers?q=&source=&has_purchased=&tag=&offset=   search + filters
+- GET   /customers/stats       directory-level aggregates
+- GET   /customers/{id}        360 view: profile + WA threads + quotes + docs
+- PATCH /customers/{id}        partial profile edit (incl. tags)
 """
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import or_
+
+import re
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import cast, func, or_
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from auth import verify_google_token
 from models import get_db, Customer, WAConversation, WAMessage, Quote, FileMetadata
 
-router = APIRouter(prefix="/customers", tags=["customers"],
-                   dependencies=[Depends(verify_google_token)])
+router = APIRouter(
+    prefix="/customers", tags=["customers"], dependencies=[Depends(verify_google_token)]
+)
+
+TAG_RE = re.compile(r"^[a-z0-9-]{1,40}$")
 
 
 def _brief(c: Customer):
     return {
-        "id": c.id, "display_name": c.display_name, "phone_e164": c.phone_e164,
-        "location": c.location, "source": c.source, "has_purchased": c.has_purchased,
-        "last_activity_at": c.last_activity_at.isoformat() if c.last_activity_at else None,
+        "id": c.id,
+        "display_name": c.display_name,
+        "phone_e164": c.phone_e164,
+        "location": c.location,
+        "source": c.source,
+        "has_purchased": c.has_purchased,
+        "tags": c.tags or [],
+        "last_activity_at": (
+            c.last_activity_at.isoformat() if c.last_activity_at else None
+        ),
     }
 
 
+def _clean_tags(raw: list[str]) -> list[str]:
+    """Normalize a tag list: strip, lowercase, drop empties, dedupe preserving
+    order. 400 on anything that isn't a valid slug (^[a-z0-9-]{1,40}$)."""
+    cleaned: list[str] = []
+    for t in raw:
+        if not isinstance(t, str):
+            raise HTTPException(status_code=400, detail="tags must be strings")
+        slug = t.strip().lower()
+        if not slug:
+            continue
+        if not TAG_RE.match(slug):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid tag {slug!r}: must match ^[a-z0-9-]{{1,40}}$",
+            )
+        if slug not in cleaned:
+            cleaned.append(slug)
+    return cleaned
+
+
+class CustomerPatch(BaseModel):
+    # max_lengths mirror the DB columns — otherwise an oversized value passes
+    # pydantic and explodes as a 500 at commit time.
+    display_name: str | None = Field(None, max_length=200)
+    email: str | None = Field(None, max_length=255)
+    rfc: str | None = Field(None, max_length=20)
+    location: str | None = Field(None, max_length=300)
+    tags: list[str] | None = None
+
+
 @router.get("")
-def list_customers(q: str = "", limit: int = 60, db: Session = Depends(get_db)):
+def list_customers(
+    q: str = "",
+    limit: int = Query(60, ge=1, le=200),
+    source: str | None = None,
+    has_purchased: bool | None = None,
+    tag: str | None = None,
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
     query = db.query(Customer)
     if q.strip():
         like = f"%{q.strip()}%"
-        query = query.filter(or_(
-            Customer.display_name.ilike(like),
-            Customer.phone_e164.ilike(like),
-            Customer.location.ilike(like),
-        ))
-    rows = (query.order_by(Customer.last_activity_at.desc().nullslast(),
-                           Customer.display_name.asc().nullslast())
-            .limit(min(limit, 200)).all())
+        query = query.filter(
+            or_(
+                Customer.display_name.ilike(like),
+                Customer.phone_e164.ilike(like),
+                Customer.location.ilike(like),
+            )
+        )
+    if source is not None:
+        query = query.filter(Customer.source == source)
+    if has_purchased is not None:
+        query = query.filter(Customer.has_purchased.is_(has_purchased))
+    if tag is not None and tag.strip():
+        # tags is JSON (not JSONB): cast for @> containment. NULL tags rows
+        # don't match (@> on NULL is NULL, filtered out).
+        query = query.filter(cast(Customer.tags, JSONB).contains([tag.strip().lower()]))
+    rows = (
+        query.order_by(
+            Customer.last_activity_at.desc().nullslast(),
+            Customer.display_name.asc().nullslast(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
     return [_brief(c) for c in rows]
+
+
+# NOTE: must be declared BEFORE /{customer_id} or FastAPI matches "stats"
+# against the int path param.
+@router.get("/stats")
+def customer_stats(db: Session = Depends(get_db)):
+    total = db.query(func.count(Customer.id)).scalar() or 0
+    purchased = (
+        db.query(func.count(Customer.id))
+        .filter(Customer.has_purchased.is_(True))
+        .scalar()
+        or 0
+    )
+    sembrando_vida = (
+        db.query(func.count(Customer.id))
+        .filter(cast(Customer.tags, JSONB).contains(["sembrando-vida"]))
+        .scalar()
+        or 0
+    )
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    active_30d = (
+        db.query(func.count(Customer.id))
+        .filter(Customer.last_activity_at >= cutoff)
+        .scalar()
+        or 0
+    )
+    by_source = {
+        (src if src is not None else "unknown"): n
+        for src, n in db.query(Customer.source, func.count(Customer.id))
+        .group_by(Customer.source)
+        .all()
+    }
+    return {
+        "total": total,
+        "purchased": purchased,
+        "sembrando_vida": sembrando_vida,
+        "active_30d": active_30d,
+        "by_source": by_source,
+    }
 
 
 @router.get("/{customer_id}")
@@ -44,36 +156,121 @@ def customer_360(customer_id: int, db: Session = Depends(get_db)):
     if not c:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    # Linked WhatsApp conversations (+ message counts)
-    convs = db.query(WAConversation).filter(WAConversation.customer_id == customer_id).all()
-    conversations = []
-    for cv in convs:
-        n = db.query(WAMessage).filter(WAMessage.conversation_id == cv.id).count()
-        conversations.append({"id": cv.id, "customer_phone": cv.customer_phone,
-                              "message_count": n,
-                              "last_message_at": cv.last_message_at.isoformat() if cv.last_message_at else None})
+    # Linked WhatsApp conversations (+ message counts in ONE grouped query)
+    convs = (
+        db.query(WAConversation).filter(WAConversation.customer_id == customer_id).all()
+    )
+    counts = {}
+    if convs:
+        conv_ids = [cv.id for cv in convs]
+        counts = dict(
+            db.query(WAMessage.conversation_id, func.count(WAMessage.id))
+            .filter(WAMessage.conversation_id.in_(conv_ids))
+            .group_by(WAMessage.conversation_id)
+            .all()
+        )
+    conversations = [
+        {
+            "id": cv.id,
+            "customer_phone": cv.customer_phone,
+            "message_count": counts.get(cv.id, 0),
+            "last_message_at": (
+                cv.last_message_at.isoformat() if cv.last_message_at else None
+            ),
+        }
+        for cv in convs
+    ]
 
     # Linked trackable quotes
-    quotes = [{
-        "id": q.id, "quote_number": q.quote_number, "status": q.status,
-        "created_at": q.created_at.isoformat() if q.created_at else None,
-    } for q in db.query(Quote).filter(Quote.customer_id == customer_id)
-        .order_by(Quote.created_at.desc()).all()]
+    quotes = [
+        {
+            "id": q.id,
+            "quote_number": q.quote_number,
+            "status": q.status,
+            "created_at": q.created_at.isoformat() if q.created_at else None,
+        }
+        for q in db.query(Quote)
+        .filter(Quote.customer_id == customer_id)
+        .order_by(Quote.created_at.desc())
+        .all()
+    ]
 
     # RAG documents that name this customer (their COT/quote PDFs, chats, etc.)
     documents = []
     if c.display_name and len(c.display_name.strip()) >= 4:
         like = f"%{c.display_name.strip()}%"
-        docs = (db.query(FileMetadata)
-                .filter(or_(FileMetadata.original_filename.ilike(like),
-                            FileMetadata.description.ilike(like)),
-                        FileMetadata.archived_at.is_(None))
-                .order_by(FileMetadata.document_date.desc().nullslast())
-                .limit(25).all())
-        documents = [{"id": d.id, "filename": d.original_filename, "category": d.category,
-                      "document_date": d.document_date.isoformat() if d.document_date else None}
-                     for d in docs]
+        docs = (
+            db.query(FileMetadata)
+            .filter(
+                or_(
+                    FileMetadata.original_filename.ilike(like),
+                    FileMetadata.description.ilike(like),
+                ),
+                FileMetadata.archived_at.is_(None),
+            )
+            .order_by(FileMetadata.document_date.desc().nullslast())
+            .limit(25)
+            .all()
+        )
+        documents = [
+            {
+                "id": d.id,
+                "filename": d.original_filename,
+                "category": d.category,
+                "document_date": (
+                    d.document_date.isoformat() if d.document_date else None
+                ),
+            }
+            for d in docs
+        ]
 
-    return {"customer": _brief(c) | {"email": c.email, "rfc": c.rfc,
-                                     "first_seen_at": c.first_seen_at.isoformat() if c.first_seen_at else None},
-            "conversations": conversations, "quotes": quotes, "documents": documents}
+    return {
+        "customer": _brief(c)
+        | {
+            "email": c.email,
+            "rfc": c.rfc,
+            "first_seen_at": c.first_seen_at.isoformat() if c.first_seen_at else None,
+        },
+        "conversations": conversations,
+        "quotes": quotes,
+        "documents": documents,
+    }
+
+
+@router.patch("/{customer_id}")
+def update_customer(
+    customer_id: int, body: CustomerPatch, db: Session = Depends(get_db)
+):
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    updates = body.model_dump(exclude_unset=True)
+    for field, value in updates.items():
+        if field == "tags":
+            # JSON columns don't detect in-place mutation: new list AND flag.
+            customer.tags = _clean_tags(value or [])
+            flag_modified(customer, "tags")
+        else:
+            setattr(customer, field, value)
+            if field == "display_name" and value:
+                # Keep the fuzzy-merge key in sync (same normalization as
+                # scripts/backfill_customers.py) or name-keyed backfills
+                # would duplicate a renamed customer.
+                customer.name_normalized = (
+                    re.sub(r"\s+", " ", value).strip().lower()[:200]
+                )
+    db.commit()
+    db.refresh(customer)
+
+    return {
+        "success": True,
+        "data": _brief(customer)
+        | {
+            "email": customer.email,
+            "rfc": customer.rfc,
+            "first_seen_at": (
+                customer.first_seen_at.isoformat() if customer.first_seen_at else None
+            ),
+        },
+    }
