@@ -43,7 +43,7 @@ from sqlalchemy.orm import Session
 from models import Customer, Sale
 
 SHEETS_TIMEOUT_SECONDS = 60
-TABS = ["VENTAS 2026", "VENTAS 2025", "VENTAS 2024"]
+TABS = ["VENTAS_2026", "VENTAS_2025", "VENTAS_2024"]
 
 SNAPSHOT_DIR = Path(__file__).resolve().parent.parent / "scripts" / "snapshots"
 
