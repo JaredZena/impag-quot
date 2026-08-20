@@ -14,6 +14,7 @@ from sqlalchemy import (
     Enum,
     Date,
     Index,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.ext.declarative import declarative_base
@@ -422,6 +423,55 @@ class Customer(Base):
         JSON, nullable=True
     )  # list of lowercase slug strings, e.g. ["sembrando-vida"]
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── Sales ledger (mirror of the VENTAS Google Sheet) ─────────────────────────
+
+
+class Sale(Base):
+    """One row of the VENTAS spreadsheet (operational snapshot, NOT accounting).
+
+    Synced by services/sales_sync.py; keyed by (sheet_tab, source_row) so
+    re-syncs upsert in place. Rows that fail parsing are kept but flagged
+    quarantined=True with a quarantine_reason instead of being dropped.
+    """
+
+    __tablename__ = "sale"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sheet_tab = Column(String(20), nullable=False)  # e.g. "VENTAS 2026"
+    source_row = Column(Integer, nullable=False)  # 0-based row index in the tab
+    sale_date = Column(Date, nullable=True, index=True)
+    month_label = Column(String(20), nullable=True)  # raw "Mes" cell
+    customer_name = Column(String(200), nullable=True)
+    customer_id = Column(
+        Integer,
+        ForeignKey("customer.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    description = Column(Text, nullable=True)
+    unit = Column(String(30), nullable=True)
+    quantity = Column(Numeric(12, 2), nullable=True)
+    unit_price = Column(Numeric(12, 2), nullable=True)
+    amount = Column(Numeric(12, 2), nullable=True)  # IMPORTE
+    concept = Column(String(100), nullable=True)  # 2025/2026 only
+    # normalized lowercase: efectivo|transferencia|deposito|terminal|shopify
+    payment_method = Column(String(30), nullable=True)
+    delivery_place = Column(String(200), nullable=True)
+    reference = Column(String(200), nullable=True)
+    # NOTA DE COMPRA folio, normalized ("NOT-IMPAG-121225DGO-..." -> "121225DGO")
+    folio = Column(String(40), nullable=True, index=True)
+    delivery_status = Column(String(30), nullable=True)  # entregado|pendiente
+    requires_invoice = Column(Boolean, nullable=True)  # SI=True NO=False N/A=None
+    registered = Column(Boolean, nullable=True)  # same mapping
+    quarantined = Column(Boolean, default=False, nullable=False)
+    quarantine_reason = Column(String(200), nullable=True)
+    imported_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("sheet_tab", "source_row", name="uq_sale_tab_row"),
+    )
 
 
 # ── In-app roadmap / progress tracker ────────────────────────────────────────
