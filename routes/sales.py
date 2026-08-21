@@ -22,7 +22,8 @@ from sqlalchemy import extract, func, or_
 from sqlalchemy.orm import Session
 
 from auth import DISABLE_AUTH, verify_google_token
-from models import Sale, get_db
+from models import Sale, SaleBalance, get_db
+from services.balance_sync import sync_balances
 from services.sales_sync import sync_all
 
 # NOTE: like routes/storefront.py, this router must NOT apply
@@ -69,13 +70,27 @@ def sync_sales(
     user: dict = Depends(verify_sync_auth),
     db: Session = Depends(get_db),
 ):
-    """Fetch all VENTAS tabs from Google Sheets and upsert into the ledger."""
+    """Fetch all VENTAS tabs from Google Sheets and upsert into the ledger,
+    then refresh the per-sale margin table from the BALANCES DE VENTA sheet
+    (matching folios against the just-synced ledger)."""
     try:
         summary = sync_all(db)
     except (RuntimeError, requests.RequestException) as e:
         # Config/network problems (missing env, OAuth failure, Sheets error)
         raise HTTPException(status_code=502, detail=str(e))
-    return {"success": True, **summary}
+
+    # Margins are best-effort: a balances failure must not fail the ledger
+    # sync the GitHub Action depends on (sync_all already committed).
+    balances: dict
+    if os.getenv("BALANCES_SPREADSHEET_ID"):
+        try:
+            balances = {"success": True, **sync_balances(db)}
+        except (RuntimeError, requests.RequestException) as e:
+            db.rollback()
+            balances = {"success": False, "error": str(e)[:300]}
+    else:
+        balances = {"success": False, "error": "BALANCES_SPREADSHEET_ID not set"}
+    return {"success": True, **summary, "balances": balances}
 
 
 def _row_to_dict(s: Sale) -> dict:
@@ -238,11 +253,98 @@ def sales_stats(
         .scalar()
     )
 
+    # ── Margins (from BALANCES DE VENTA, reconciled tabs only) ──
+    reconciled = db.query(SaleBalance).filter(SaleBalance.match_status == "reconciled")
+    recon_count, recon_revenue, recon_cost = (
+        db.query(
+            func.count(SaleBalance.id),
+            func.coalesce(func.sum(SaleBalance.ledger_revenue), 0),
+            func.coalesce(func.sum(SaleBalance.cost_total), 0),
+        )
+        .filter(SaleBalance.match_status == "reconciled")
+        .one()
+    )
+    recon_revenue = float(recon_revenue or 0)
+    recon_cost = float(recon_cost or 0)
+    margin_total = recon_revenue - recon_cost
+
+    margin_year_rows = (
+        db.query(
+            extract("year", SaleBalance.folio_month).label("year"),
+            func.sum(SaleBalance.ledger_revenue).label("revenue"),
+            func.sum(SaleBalance.cost_total).label("cost"),
+            func.count(SaleBalance.id).label("count"),
+        )
+        .filter(
+            SaleBalance.match_status == "reconciled",
+            SaleBalance.folio_month.isnot(None),
+        )
+        .group_by(extract("year", SaleBalance.folio_month))
+        .order_by(extract("year", SaleBalance.folio_month))
+        .all()
+    )
+    margin_by_year = []
+    for r in margin_year_rows:
+        revenue = float(r.revenue or 0)
+        cost = float(r.cost or 0)
+        margin_by_year.append(
+            {
+                "year": int(r.year),
+                "revenue": revenue,
+                "cost": cost,
+                "margin": revenue - cost,
+                "margin_pct": (100 * (revenue - cost) / revenue) if revenue else None,
+                "count": r.count,
+            }
+        )
+
+    status_rows = (
+        db.query(SaleBalance.match_status, func.count(SaleBalance.id))
+        .group_by(SaleBalance.match_status)
+        .all()
+    )
+    margin_status_counts = {status: count for status, count in status_rows}
+
+    best_rows = (
+        reconciled.order_by(SaleBalance.margin_pct.desc().nullslast()).limit(5).all()
+    )
+    worst_rows = (
+        reconciled.order_by(SaleBalance.margin_pct.asc().nullslast()).limit(5).all()
+    )
+
+    def _margin_brief(b: SaleBalance) -> dict:
+        return {
+            "tab_title": b.tab_title,
+            "folios": b.folios or [],
+            "customer_name": b.customer_name,
+            "revenue": (
+                float(b.ledger_revenue) if b.ledger_revenue is not None else None
+            ),
+            "cost_total": float(b.cost_total) if b.cost_total is not None else None,
+            "margin_amount": (
+                float(b.margin_amount) if b.margin_amount is not None else None
+            ),
+            "margin_pct": float(b.margin_pct) if b.margin_pct is not None else None,
+        }
+
+    margins = {
+        "reconciled_count": recon_count,
+        "reconciled_revenue": recon_revenue,
+        "reconciled_cost": recon_cost,
+        "margin_total": margin_total,
+        "margin_pct": (100 * margin_total / recon_revenue) if recon_revenue else None,
+        "by_year": margin_by_year,
+        "status_counts": margin_status_counts,
+        "best": [_margin_brief(b) for b in best_rows],
+        "worst": [_margin_brief(b) for b in worst_rows],
+    }
+
     return {
         "monthly": monthly,
         "by_payment_method": by_payment_method,
         "by_concept": by_concept,
         "top_customers": top_customers,
+        "margins": margins,
         "delivery_pending": {
             "count": pending_count,
             "total": float(pending_total or 0),
@@ -255,6 +357,64 @@ def sales_stats(
         "grand_total": float(grand_total or 0),
         "ytd_total": float(ytd_total or 0),
         "label": STATS_LABEL,
+    }
+
+
+@router.get("/margins")
+def list_margins(
+    year: int | None = Query(default=None, ge=2000, le=2100),
+    status: str | None = Query(default=None, max_length=20),
+    limit: int = Query(default=60, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    user: dict = Depends(verify_google_token),
+    db: Session = Depends(get_db),
+):
+    """Per-sale margin rows (one per BALANCES tab), newest folio month first."""
+    query = db.query(SaleBalance)
+    if year is not None:
+        query = query.filter(extract("year", SaleBalance.folio_month) == year)
+    if status:
+        query = query.filter(SaleBalance.match_status == status.strip().lower())
+
+    total = query.count()
+    rows = (
+        query.order_by(
+            SaleBalance.folio_month.desc().nullslast(), SaleBalance.id.desc()
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    def _num(value):
+        return float(value) if value is not None else None
+
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "items": [
+            {
+                "id": b.id,
+                "tab_title": b.tab_title,
+                "folios": b.folios or [],
+                "folio_month": b.folio_month.isoformat() if b.folio_month else None,
+                "customer_name": b.customer_name,
+                "item_count": b.item_count,
+                "cost_subtotal": _num(b.cost_subtotal),
+                "shipping_total": _num(b.shipping_total),
+                "cost_total": _num(b.cost_total),
+                "sheet_sale_total": _num(b.sheet_sale_total),
+                "sheet_profit": _num(b.sheet_profit),
+                "ledger_revenue": _num(b.ledger_revenue),
+                "margin_amount": _num(b.margin_amount),
+                "margin_pct": _num(b.margin_pct),
+                "match_status": b.match_status,
+                "recon_delta": _num(b.recon_delta),
+                "synced_at": b.synced_at.isoformat() if b.synced_at else None,
+            }
+            for b in rows
+        ],
     }
 
 

@@ -474,6 +474,38 @@ class Sale(Base):
     )
 
 
+class SaleBalance(Base):
+    """One tab of the BALANCES DE VENTA spreadsheet (per-sale cost breakdown).
+
+    Synced by services/balance_sync.py; keyed by tab_title so re-syncs upsert
+    in place. Revenue truth comes from joining the tab's folios against the
+    sale ledger at sync time (the sheet's own "P. Venta" cells are sometimes
+    stale); the sheet-side totals are kept for reconciliation display.
+    """
+
+    __tablename__ = "sale_balance"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tab_title = Column(String(120), nullable=False, unique=True)
+    folios = Column(JSON, nullable=True)  # normalized folio tokens from the title
+    folio_month = Column(Date, nullable=True, index=True)  # 1st of the folio's MMYY
+    customer_name = Column(String(200), nullable=True)
+    item_count = Column(Integer, nullable=False, default=0)
+    cost_subtotal = Column(Numeric(14, 2), nullable=True)  # supplier importe
+    shipping_total = Column(Numeric(14, 2), nullable=True)
+    cost_total = Column(Numeric(14, 2), nullable=True)  # authoritative cost
+    sheet_sale_total = Column(Numeric(14, 2), nullable=True)
+    sheet_profit = Column(Numeric(14, 2), nullable=True)
+    ledger_revenue = Column(Numeric(14, 2), nullable=True)  # matched sale rows sum
+    margin_amount = Column(Numeric(14, 2), nullable=True)  # ledger_revenue - cost
+    margin_pct = Column(Numeric(7, 2), nullable=True)
+    # reconciled | unverified | mismatch | no_ledger_match | orphan | duplicate
+    match_status = Column(String(20), nullable=False, default="orphan", index=True)
+    recon_delta = Column(Numeric(14, 2), nullable=True)  # sheet total - ledger
+    items = Column(JSON, nullable=True)  # per-item cost/sale detail
+    synced_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 # ── In-app roadmap / progress tracker ────────────────────────────────────────
 
 
