@@ -506,6 +506,173 @@ class SaleBalance(Base):
     synced_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+# ── Punto de Venta (POS) ──────────────────────────────────────────────────────
+
+
+class PosSale(Base):
+    """A point-of-sale ticket captured in the app (Punto de Venta).
+
+    Source of truth for POS sales. Each item is ALSO projected as one row in
+    the `sale` ledger (sheet_tab='POS', source_row=pos_sale_item.id) so the
+    existing Ventas dashboard picks it up with zero frontend changes.
+    """
+
+    __tablename__ = "pos_sale"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # NN + MMYY + BRANCH (e.g. "100826DGO"). Non-unique to match the ledger,
+    # but the server-side counter guarantees uniqueness in practice.
+    folio = Column(String(40), nullable=False, index=True)
+    branch = Column(String(4), nullable=False, default="DGO")
+    sale_date = Column(Date, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(String(120), nullable=True)  # user email
+    customer_id = Column(
+        Integer,
+        ForeignKey("customer.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    customer_name = Column(String(200), nullable=True)  # snapshot at sale time
+    customer_phone = Column(String(20), nullable=True)
+    # canonical lowercase: efectivo|transferencia|deposito|terminal
+    payment_method = Column(String(30), nullable=False)
+    amount_tendered = Column(Numeric(12, 2), nullable=True)  # efectivo only
+    change_given = Column(Numeric(12, 2), nullable=True)
+    subtotal = Column(Numeric(12, 2), nullable=False)  # sum of pre-IVA bases
+    iva_amount = Column(Numeric(12, 2), nullable=False)
+    total = Column(Numeric(12, 2), nullable=False)  # IVA-included grand total
+    requires_invoice = Column(Boolean, nullable=False, default=False)
+    delivery_place = Column(String(200), nullable=True)
+    notes = Column(Text, nullable=True)
+    # completada | cancelada
+    status = Column(String(20), nullable=False, default="completada")
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)
+    cancelled_by = Column(String(120), nullable=True)
+    cancel_reason = Column(String(300), nullable=True)
+    cash_session_id = Column(
+        Integer,
+        ForeignKey("cash_session.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    items = relationship(
+        "PosSaleItem",
+        back_populates="pos_sale",
+        cascade="all, delete-orphan",
+        order_by="PosSaleItem.id",
+    )
+
+
+class PosSaleItem(Base):
+    __tablename__ = "pos_sale_item"
+
+    id = Column(Integer, primary_key=True, index=True)
+    pos_sale_id = Column(
+        Integer,
+        ForeignKey("pos_sale.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    product_id = Column(
+        Integer, ForeignKey("product.id", ondelete="SET NULL"), nullable=True
+    )  # null for freeform items
+    description = Column(Text, nullable=False)
+    unit = Column(String(30), nullable=True)
+    quantity = Column(Numeric(12, 2), nullable=False)
+    # FINAL price per unit (IVA-included when iva=True)
+    unit_price = Column(Numeric(12, 2), nullable=False)
+    iva = Column(Boolean, nullable=False, default=True)
+    line_total = Column(Numeric(12, 2), nullable=False)  # quantity * unit_price
+
+    pos_sale = relationship("PosSale", back_populates="items")
+
+
+class CashSession(Base):
+    """One cash-drawer shift (caja). At most one open session per branch."""
+
+    __tablename__ = "cash_session"
+
+    id = Column(Integer, primary_key=True, index=True)
+    branch = Column(String(4), nullable=False, default="DGO")
+    status = Column(String(10), nullable=False, default="abierta")  # abierta|cerrada
+    opened_at = Column(DateTime(timezone=True), server_default=func.now())
+    opened_by = Column(String(120), nullable=True)  # user email
+    opening_float = Column(Numeric(12, 2), nullable=False, default=0)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+    closed_by = Column(String(120), nullable=True)
+    # expected = opening_float + ventas efectivo + entradas - salidas - cancelaciones
+    expected_cash = Column(Numeric(12, 2), nullable=True)
+    counted_cash = Column(Numeric(12, 2), nullable=True)
+    difference = Column(Numeric(12, 2), nullable=True)  # counted - expected
+    notes = Column(Text, nullable=True)
+
+    movements = relationship(
+        "CashMovement",
+        back_populates="cash_session",
+        cascade="all, delete-orphan",
+        order_by="CashMovement.id",
+    )
+
+
+class CashMovement(Base):
+    __tablename__ = "cash_movement"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cash_session_id = Column(
+        Integer,
+        ForeignKey("cash_session.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # venta|entrada|salida|cancelacion — amount is always positive; the sign is
+    # implied by kind (venta/entrada add, salida/cancelacion subtract)
+    kind = Column(String(15), nullable=False)
+    amount = Column(Numeric(12, 2), nullable=False)
+    description = Column(String(300), nullable=True)
+    pos_sale_id = Column(
+        Integer, ForeignKey("pos_sale.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(String(120), nullable=True)  # user email
+
+    cash_session = relationship("CashSession", back_populates="movements")
+
+
+class StockMovement(Base):
+    __tablename__ = "stock_movement"
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(
+        Integer,
+        ForeignKey("product.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    delta = Column(Integer, nullable=False)  # negative = stock out
+    reason = Column(String(20), nullable=False)  # venta|cancelacion|ajuste
+    pos_sale_id = Column(
+        Integer, ForeignKey("pos_sale.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(String(120), nullable=True)  # user email
+
+
+class PosFolioCounter(Base):
+    """Per-month-per-branch folio sequence, locked with SELECT ... FOR UPDATE."""
+
+    __tablename__ = "pos_folio_counter"
+
+    id = Column(Integer, primary_key=True, index=True)
+    month_year = Column(String(4), nullable=False)  # MMYY, e.g. "0826"
+    branch = Column(String(4), nullable=False)
+    last_seq = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("month_year", "branch", name="uq_pos_folio_counter"),
+    )
+
+
 # ── In-app roadmap / progress tracker ────────────────────────────────────────
 
 
@@ -1090,28 +1257,36 @@ def get_next_quote_number(db):
     return f"{prefix}0001"
 
 
-# Parse the database URL to get the endpoint ID
-parsed_url = urlparse(database_url)
-endpoint_id = parsed_url.hostname.split(".")[0]  # Get the endpoint ID from the hostname
+if database_url.startswith("sqlite"):
+    # Tests point DATABASE_URL at sqlite — the Neon endpoint-option rewrite
+    # below is postgres-only (a sqlite URL has no hostname) and the pg pool
+    # options / application_name aren't valid for the sqlite driver.
+    engine = create_engine(database_url, connect_args={"check_same_thread": False})
+else:
+    # Parse the database URL to get the endpoint ID
+    parsed_url = urlparse(database_url)
+    endpoint_id = parsed_url.hostname.split(".")[
+        0
+    ]  # Get the endpoint ID from the hostname
 
-# Add the endpoint ID to the connection options
-query_params = parse_qs(parsed_url.query)
-query_params["options"] = [f"endpoint={endpoint_id}"]
-new_query = urlencode(query_params, doseq=True)
+    # Add the endpoint ID to the connection options
+    query_params = parse_qs(parsed_url.query)
+    query_params["options"] = [f"endpoint={endpoint_id}"]
+    new_query = urlencode(query_params, doseq=True)
 
-# Reconstruct the URL with the new query parameters and explicit psycopg2 driver
-modified_url = parsed_url._replace(query=new_query).geturl()
-if not modified_url.startswith("postgresql+psycopg2://"):
-    modified_url = modified_url.replace("postgresql://", "postgresql+psycopg2://")
+    # Reconstruct the URL with the new query parameters and explicit psycopg2 driver
+    modified_url = parsed_url._replace(query=new_query).geturl()
+    if not modified_url.startswith("postgresql+psycopg2://"):
+        modified_url = modified_url.replace("postgresql://", "postgresql+psycopg2://")
 
-# Database setup with explicit driver configuration
-engine = create_engine(
-    modified_url,
-    pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
-    connect_args={"application_name": "impag-quot"},
-)
+    # Database setup with explicit driver configuration
+    engine = create_engine(
+        modified_url,
+        pool_pre_ping=True,
+        pool_size=5,
+        max_overflow=10,
+        connect_args={"application_name": "impag-quot"},
+    )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Create tables. Skipped when Alembic is importing this module (env.py sets

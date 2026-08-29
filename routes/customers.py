@@ -1,6 +1,7 @@
 """
 Customer directory + Customer 360 (roadmap P2).
 - GET   /customers?q=&source=&has_purchased=&tag=&offset=   search + filters
+- POST  /customers             quick-create (POS customer attach)
 - GET   /customers/stats       directory-level aggregates
 - GET   /customers/{id}        360 view: profile + WA threads + quotes + AI quotations + docs
 - PATCH /customers/{id}        partial profile edit (incl. tags)
@@ -13,8 +14,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import cast, func, or_
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
+
+from scripts.backfill_customers import normalize_phone
 
 from auth import verify_google_token
 from models import (
@@ -122,6 +126,68 @@ def list_customers(
         .all()
     )
     return [_brief(c) for c in rows]
+
+
+class CustomerCreate(BaseModel):
+    display_name: str = Field(min_length=2, max_length=200)
+    phone: str | None = Field(None, max_length=30)
+    email: str | None = Field(None, max_length=255)
+    location: str | None = Field(None, max_length=300)
+
+
+@router.post("")
+def create_customer(body: CustomerCreate, db: Session = Depends(get_db)):
+    """Quick-create (POS customer attach). Phone is normalized to E.164 with
+    the same helper the backfill/WhatsApp scripts use, so the unique
+    phone_e164 key stays canonical."""
+    display_name = body.display_name.strip()
+    if len(display_name) < 2:
+        raise HTTPException(status_code=422, detail="display_name muy corto")
+
+    phone_e164 = (
+        normalize_phone(body.phone) if body.phone and body.phone.strip() else None
+    )
+    if phone_e164:
+        existing = db.query(Customer).filter(Customer.phone_e164 == phone_e164).first()
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "detail": "Ya existe un cliente con ese teléfono",
+                    "customer_id": existing.id,
+                },
+            )
+
+    customer = Customer(
+        display_name=display_name[:200],
+        # Same fuzzy-merge normalization as scripts/backfill_customers.py
+        name_normalized=re.sub(r"\s+", " ", display_name).strip().lower()[:200],
+        phone_e164=phone_e164,
+        email=body.email.strip()[:255] if body.email and body.email.strip() else None,
+        location=(
+            body.location.strip()[:300]
+            if body.location and body.location.strip()
+            else None
+        ),
+        source="manual",
+        first_seen_at=datetime.now(timezone.utc),
+    )
+    db.add(customer)
+    try:
+        db.commit()
+    except IntegrityError:
+        # Concurrent create with the same phone slipped past the pre-check
+        db.rollback()
+        existing = db.query(Customer).filter(Customer.phone_e164 == phone_e164).first()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "detail": "Ya existe un cliente con ese teléfono",
+                "customer_id": existing.id if existing else None,
+            },
+        )
+    db.refresh(customer)
+    return _brief(customer)
 
 
 # NOTE: must be declared BEFORE /{customer_id} or FastAPI matches "stats"

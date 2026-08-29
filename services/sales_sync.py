@@ -40,7 +40,7 @@ from urllib.parse import quote
 import requests
 from sqlalchemy.orm import Session
 
-from models import Customer, Sale
+from models import Customer, PosSale, Sale
 
 SHEETS_TIMEOUT_SECONDS = 60
 TABS = ["VENTAS_2026", "VENTAS_2025", "VENTAS_2024"]
@@ -482,6 +482,22 @@ def upsert_sales(db: Session, parsed: list[dict], customer_map: dict[str, int]) 
         s.source_row: s for s in db.query(Sale).filter(Sale.sheet_tab == tab).all()
     }
 
+    # POS double-count guard: a sheet row whose folio matches an active
+    # (non-cancelled) POS sale is the same sale hand-logged twice — quarantine
+    # it so stats/balance reconciliation (which exclude quarantined rows)
+    # don't count it on top of the POS projection. Loaded once per tab.
+    # Compare in NORMALIZED form on both sides: sheet folios were already
+    # reduced by normalize_folio at parse time, and a POS folio past 99 sales
+    # in a month ('1000826DGO') would otherwise normalize differently on the
+    # sheet side and escape the guard.
+    active_pos_folios = set()
+    for (folio,) in db.query(PosSale.folio).filter(PosSale.status != "cancelada").all():
+        if folio:
+            active_pos_folios.add(folio)
+            normalized = normalize_folio(folio)
+            if normalized:
+                active_pos_folios.add(normalized)
+
     now = datetime.now(timezone.utc)
     inserted = updated = quarantined = 0
     for record in parsed:
@@ -491,6 +507,13 @@ def upsert_sales(db: Session, parsed: list[dict], customer_map: dict[str, int]) 
             customer_map.get(normalize_customer_name(name)) if name else None
         )
         record["imported_at"] = now
+        if (
+            not record.get("quarantined")
+            and record.get("folio")
+            and record["folio"] in active_pos_folios
+        ):
+            record["quarantined"] = True
+            record["quarantine_reason"] = "duplicado: capturado en POS"
         if record.get("quarantined"):
             quarantined += 1
 

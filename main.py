@@ -1,8 +1,12 @@
+import math
 import time
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -17,6 +21,7 @@ from routes.jobs import router as jobs_router
 from routes.kits import router as kits_router
 from routes.logistics import router as logistics_router
 from routes.notifications import router as notifications_router
+from routes.pos import router as pos_router
 from routes.product_images import router as product_images_router
 from routes.products import router as products_router
 from routes.public_quotes import router as public_quotes_router
@@ -54,6 +59,27 @@ import os
 from fastapi.staticfiles import StaticFiles
 
 app = FastAPI()
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(request, exc):
+    """422s must serialize even when the offending input was Infinity/NaN —
+    the default handler echoes the raw input and json.dumps then 500s."""
+
+    def _sanitize(obj):
+        if isinstance(obj, float) and not math.isfinite(obj):
+            return str(obj)
+        if isinstance(obj, dict):
+            return {k: _sanitize(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [_sanitize(v) for v in obj]
+        return obj
+
+    return JSONResponse(
+        status_code=422,
+        content={"detail": _sanitize(jsonable_encoder(exc.errors()))},
+    )
+
 
 # Serve static files for public quote pages
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -101,6 +127,7 @@ app.include_router(notifications_router)
 app.include_router(public_quotes_router)
 app.include_router(storefront_router)
 app.include_router(sales_router)
+app.include_router(pos_router)
 
 
 class Message(BaseModel):
