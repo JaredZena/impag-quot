@@ -527,6 +527,8 @@ class PosSale(Base):
     sale_date = Column(Date, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     created_by = Column(String(120), nullable=True)  # user email
+    # who made the sale (email); defaults to created_by at insert when not given
+    vendedor = Column(String(120), nullable=True)
     customer_id = Column(
         Integer,
         ForeignKey("customer.id", ondelete="SET NULL"),
@@ -542,7 +544,19 @@ class PosSale(Base):
     subtotal = Column(Numeric(12, 2), nullable=False)  # sum of pre-IVA bases
     iva_amount = Column(Numeric(12, 2), nullable=False)
     total = Column(Numeric(12, 2), nullable=False)  # IVA-included grand total
+    # ── Cost snapshot / margin (admin-only; NEVER printed on the ticket) ──
+    # Σ line_cost_mxn over lines with known cost (NULL when none known)
+    cost_total = Column(Numeric(12, 2), nullable=True)
+    # total - cost_total, ONLY set when cost_complete
+    margin_amount = Column(Numeric(12, 2), nullable=True)
+    # True iff EVERY line has a known MXN cost
+    cost_complete = Column(Boolean, nullable=False, default=False)
     requires_invoice = Column(Boolean, nullable=False, default=False)
+    # ── Factura (CFDI) details — free-form capture, no CFDI generation ──
+    rfc = Column(String(20), nullable=True)
+    razon_social = Column(String(200), nullable=True)
+    uso_cfdi = Column(String(10), nullable=True)  # e.g. G01, G03, S01, P01
+    cfdi_email = Column(String(255), nullable=True)
     delivery_place = Column(String(200), nullable=True)
     notes = Column(Text, nullable=True)
     # completada | cancelada
@@ -584,6 +598,20 @@ class PosSaleItem(Base):
     unit_price = Column(Numeric(12, 2), nullable=False)
     iva = Column(Boolean, nullable=False, default=True)
     line_total = Column(Numeric(12, 2), nullable=False)  # quantity * unit_price
+    # ── Cost snapshot at sale time (cheapest active supplier; admin-only) ──
+    supplier_product_id = Column(
+        Integer,
+        ForeignKey("supplier_product.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    supplier_name = Column(String(200), nullable=True)  # denormalized Supplier.name
+    # raw per-unit cost+shipping in cost_currency
+    unit_cost = Column(Numeric(12, 2), nullable=True)
+    cost_currency = Column(String(3), nullable=True)  # 'MXN' | 'USD'
+    # USD→MXN rate used (1.0000 for MXN); NULL when rate unavailable
+    exchange_rate = Column(Numeric(10, 4), nullable=True)
+    # quantity * unit_cost * rate, quantized; NULL when cost unknown
+    line_cost_mxn = Column(Numeric(12, 2), nullable=True)
 
     pos_sale = relationship("PosSale", back_populates="items")
 

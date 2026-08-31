@@ -4,6 +4,7 @@ Punto de Venta (POS) routes.
 - GET  /pos/products                    per-keystroke product search for the register
 - POST /pos/sales                       capture a ticket (folio minted server-side)
 - GET  /pos/sales                       ticket listing (newest first)
+- GET  /pos/stats/vendedores            per-vendedor totals (comisiones base)
 - GET  /pos/sales/{sale_id}             full ticket detail (reprint)
 - POST /pos/sales/{sale_id}/cancel      cancel + reverse stock/cash/projection
 - GET  /pos/cash-sessions/current       open session + running totals + movements
@@ -41,9 +42,11 @@ from models import (
     Product,
     Sale,
     StockMovement,
+    Supplier,
     SupplierProduct,
     get_db,
 )
+from services.exchange_rate_service import exchange_rate_service
 
 # NO router-level auth: every endpoint takes its own Depends(verify_google_token)
 # because created_by needs the user's email.
@@ -79,6 +82,14 @@ def _clean_branch(raw: str | None) -> str:
     if not _BRANCH_RE.match(branch):
         raise HTTPException(status_code=422, detail="branch inválido (2-4 letras)")
     return branch
+
+
+def _strip_or_none(value: str | None) -> str | None:
+    """Trim free-form optional text; empty/whitespace-only becomes None."""
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
 
 
 def _qty_int(quantity: Decimal) -> int:
@@ -145,6 +156,104 @@ def mint_folio(db: Session, branch: str, today: date) -> str:
     return f"{seq:02d}{mmyy}{branch}"
 
 
+# ── Cost snapshot (cheapest active supplier; admin-only, never on ticket) ────
+
+
+def _supplier_shipping_case():
+    """Per-unit shipping cost expression: DIRECT → shipping_cost_direct,
+    anything else → the 4 OCURRE stages summed."""
+    return case(
+        (
+            SupplierProduct.shipping_method == "DIRECT",
+            func.coalesce(SupplierProduct.shipping_cost_direct, 0),
+        ),
+        else_=(
+            func.coalesce(SupplierProduct.shipping_stage1_cost, 0)
+            + func.coalesce(SupplierProduct.shipping_stage2_cost, 0)
+            + func.coalesce(SupplierProduct.shipping_stage3_cost, 0)
+            + func.coalesce(SupplierProduct.shipping_stage4_cost, 0)
+        ),
+    )
+
+
+def _cost_snapshot_map(db: Session, product_ids: list[int]) -> dict[int, dict]:
+    """Cheapest ACTIVE supplier cost per product in ONE batched query
+    (cost NOT NULL and > 0; unit_cost = per-unit cost + shipping in the
+    supplier's own currency). First row per product wins — query is ordered."""
+    if not product_ids:
+        return {}
+    shipping = _supplier_shipping_case()
+    rows = (
+        db.query(
+            SupplierProduct.product_id,
+            SupplierProduct.id,
+            Supplier.name,
+            SupplierProduct.currency,
+            (SupplierProduct.cost + shipping).label("total_cost"),
+        )
+        .join(Supplier, Supplier.id == SupplierProduct.supplier_id)
+        .filter(
+            SupplierProduct.product_id.in_(product_ids),
+            SupplierProduct.is_active.is_(True),
+            SupplierProduct.cost.isnot(None),
+            SupplierProduct.cost > 0,
+        )
+        .order_by(SupplierProduct.product_id, (SupplierProduct.cost + shipping).asc())
+        .all()
+    )
+    # Reduce in Python, normalizing currencies so a USD cost can't win on its
+    # raw number (10 USD is NOT cheaper than 150 MXN). The USD→MXN rate is
+    # fetched lazily only when a product actually mixes currencies; if the
+    # rate is unavailable, MXN candidates are preferred (their cost is the
+    # one we can actually book), falling back to raw order otherwise.
+    by_product: dict[int, list] = {}
+    for row in rows:
+        by_product.setdefault(row[0], []).append(row)
+
+    usd_rate: Decimal | None = None
+    usd_rate_fetched = False
+
+    def _mxn_key(currency: str, cost: Decimal):
+        nonlocal usd_rate, usd_rate_fetched
+        if currency != "USD":
+            return (0, cost)
+        if not usd_rate_fetched:
+            usd_rate = _usd_mxn_rate()
+            usd_rate_fetched = True
+        if usd_rate is not None:
+            return (0, cost * usd_rate)
+        return (1, cost)  # rate unknown: rank all USD after every MXN row
+
+    snapshot: dict[int, dict] = {}
+    for product_id, candidates in by_product.items():
+        currencies = {(c[3] or "MXN").upper() for c in candidates}
+        if len(currencies) > 1:
+            candidates = sorted(
+                candidates,
+                key=lambda c: _mxn_key((c[3] or "MXN").upper(), Decimal(str(c[4]))),
+            )
+        _pid, sp_id, supplier_name, currency_code, total_cost = candidates[0]
+        snapshot[product_id] = {
+            "supplier_product_id": sp_id,
+            "supplier_name": supplier_name[:200] if supplier_name else None,
+            "unit_cost": _q2(Decimal(str(total_cost))),
+            "cost_currency": (currency_code or "MXN").upper(),
+        }
+    return snapshot
+
+
+def _usd_mxn_rate() -> Decimal | None:
+    """USD→MXN via the cached exchange-rate service. A failure here must
+    NEVER fail the sale — None just means cost unknown for USD lines."""
+    try:
+        rate = exchange_rate_service.get_exchange_rate("USD", "MXN")
+    except Exception:
+        return None
+    if rate is None:
+        return None
+    return Decimal(str(rate)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+
 # ── Serializers (Decimal→float, date/datetime→isoformat) ─────────────────────
 
 
@@ -162,6 +271,13 @@ def _item_to_dict(it: PosSaleItem) -> dict:
         "unit_price": _num(it.unit_price),
         "iva": it.iva,
         "line_total": _num(it.line_total),
+        # cost snapshot (admin-only; NEVER printed on the customer ticket)
+        "supplier_product_id": it.supplier_product_id,
+        "supplier_name": it.supplier_name,
+        "unit_cost": _num(it.unit_cost),
+        "cost_currency": it.cost_currency,
+        "exchange_rate": _num(it.exchange_rate),
+        "line_cost_mxn": _num(it.line_cost_mxn),
     }
 
 
@@ -173,6 +289,7 @@ def _sale_header_dict(s: PosSale) -> dict:
         "sale_date": s.sale_date.isoformat() if s.sale_date else None,
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "created_by": s.created_by,
+        "vendedor": s.vendedor,
         "customer_id": s.customer_id,
         "customer_name": s.customer_name,
         "customer_phone": s.customer_phone,
@@ -182,7 +299,16 @@ def _sale_header_dict(s: PosSale) -> dict:
         "subtotal": _num(s.subtotal),
         "iva_amount": _num(s.iva_amount),
         "total": _num(s.total),
+        # cost snapshot rollup (admin-only; NEVER printed on the ticket)
+        "cost_total": _num(s.cost_total),
+        "margin_amount": _num(s.margin_amount),
+        "cost_complete": s.cost_complete,
         "requires_invoice": s.requires_invoice,
+        # factura (CFDI) details — free-form capture
+        "rfc": s.rfc,
+        "razon_social": s.razon_social,
+        "uso_cfdi": s.uso_cfdi,
+        "cfdi_email": s.cfdi_email,
         "delivery_place": s.delivery_place,
         "notes": s.notes,
         "status": s.status,
@@ -305,6 +431,8 @@ class PosSaleItemCreate(BaseModel):
 
 class PosSaleCreate(BaseModel):
     branch: str = Field(DEFAULT_BRANCH, max_length=4)
+    # who made the sale (email); defaults to the authenticated user
+    vendedor: str | None = Field(None, max_length=120)
     customer_id: int | None = None
     customer_name: str | None = Field(None, max_length=200)
     customer_phone: str | None = Field(None, max_length=20)
@@ -313,6 +441,11 @@ class PosSaleCreate(BaseModel):
         None, ge=0, le=9_999_999_999, allow_inf_nan=False
     )  # efectivo only
     requires_invoice: bool = False
+    # factura (CFDI) details — free-form capture, no validation beyond lengths
+    rfc: str | None = Field(None, max_length=20)
+    razon_social: str | None = Field(None, max_length=200)
+    uso_cfdi: str | None = Field(None, max_length=10)
+    cfdi_email: str | None = Field(None, max_length=255)
     delivery_place: str | None = Field(None, max_length=200)
     notes: str | None = None
     items: list[PosSaleItemCreate] = Field(min_length=1)
@@ -375,18 +508,7 @@ def search_pos_products(
     ]
     currency_by_product: dict[int, str] = {}
     if calc_ids:
-        shipping = case(
-            (
-                SupplierProduct.shipping_method == "DIRECT",
-                func.coalesce(SupplierProduct.shipping_cost_direct, 0),
-            ),
-            else_=(
-                func.coalesce(SupplierProduct.shipping_stage1_cost, 0)
-                + func.coalesce(SupplierProduct.shipping_stage2_cost, 0)
-                + func.coalesce(SupplierProduct.shipping_stage3_cost, 0)
-                + func.coalesce(SupplierProduct.shipping_stage4_cost, 0)
-            ),
-        )
+        shipping = _supplier_shipping_case()
         supplier_rows = (
             db.query(
                 SupplierProduct.product_id,
@@ -446,6 +568,8 @@ def create_pos_sale(
     efectivo), and project each item into the `sale` ledger."""
     email = user.get("email", "")
     branch = _clean_branch(body.branch)
+    # who made the sale — defaults to the authenticated user
+    vendedor = _strip_or_none(body.vendedor) or (email or None)
 
     payment_method = body.payment_method.strip().lower()
     if payment_method not in PAYMENT_METHODS:
@@ -500,6 +624,46 @@ def create_pos_sale(
                 status_code=404, detail=f"Producto {missing[0]} no encontrado"
             )
 
+    # ── Cost snapshot (admin-only): cheapest active supplier per product in
+    # ONE batched query; USD converted via the cached exchange-rate service.
+    # A missing cost or rate NEVER fails the sale — the line stays cost-unknown.
+    cost_map = _cost_snapshot_map(db, product_ids)
+    usd_rate: Decimal | None = None
+    if any(c["cost_currency"] == "USD" for c in cost_map.values()):
+        usd_rate = _usd_mxn_rate()
+    line_costs: list[dict] = []
+    for item, _description, quantity, _unit_price, _line_total in line_items:
+        fields: dict = {
+            "supplier_product_id": None,
+            "supplier_name": None,
+            "unit_cost": None,
+            "cost_currency": None,
+            "exchange_rate": None,
+            "line_cost_mxn": None,
+        }
+        cost = cost_map.get(item.product_id) if item.product_id is not None else None
+        if cost is not None:
+            rate = Decimal("1.0000") if cost["cost_currency"] == "MXN" else usd_rate
+            fields.update(
+                supplier_product_id=cost["supplier_product_id"],
+                supplier_name=cost["supplier_name"],
+                unit_cost=cost["unit_cost"],
+                cost_currency=cost["cost_currency"],
+                exchange_rate=rate,  # None → rate unavailable, cost unknown
+            )
+            if rate is not None:
+                fields["line_cost_mxn"] = _q2(quantity * cost["unit_cost"] * rate)
+        line_costs.append(fields)
+
+    # Header rollup: cost_total sums the KNOWN line costs (NULL when none);
+    # margin only exists when EVERY line has a known MXN cost.
+    known_costs = [
+        c["line_cost_mxn"] for c in line_costs if c["line_cost_mxn"] is not None
+    ]
+    cost_total = _q2(sum(known_costs, Decimal("0"))) if known_costs else None
+    cost_complete = len(known_costs) == len(line_costs)
+    margin_amount = total - cost_total if cost_complete else None
+
     customer = None
     if body.customer_id is not None:
         customer = db.query(Customer).filter(Customer.id == body.customer_id).first()
@@ -518,6 +682,7 @@ def create_pos_sale(
         branch=branch,
         sale_date=today,
         created_by=email,
+        vendedor=vendedor,
         customer_id=customer.id if customer else None,
         customer_name=customer_name[:200] if customer_name else None,
         customer_phone=customer_phone[:20] if customer_phone else None,
@@ -527,7 +692,14 @@ def create_pos_sale(
         subtotal=subtotal,
         iva_amount=iva_amount,
         total=total,
+        cost_total=cost_total,
+        margin_amount=margin_amount,
+        cost_complete=cost_complete,
         requires_invoice=body.requires_invoice,
+        rfc=_strip_or_none(body.rfc),
+        razon_social=_strip_or_none(body.razon_social),
+        uso_cfdi=_strip_or_none(body.uso_cfdi),
+        cfdi_email=_strip_or_none(body.cfdi_email),
         delivery_place=body.delivery_place,
         notes=body.notes,
         status="completada",
@@ -536,7 +708,9 @@ def create_pos_sale(
     db.add(sale)
     db.flush()  # sale.id
 
-    for item, description, quantity, unit_price, line_total in line_items:
+    for (item, description, quantity, unit_price, line_total), cost_fields in zip(
+        line_items, line_costs
+    ):
         row = PosSaleItem(
             pos_sale_id=sale.id,
             product_id=item.product_id,
@@ -546,6 +720,12 @@ def create_pos_sale(
             unit_price=unit_price,
             iva=item.iva,
             line_total=line_total,
+            supplier_product_id=cost_fields["supplier_product_id"],
+            supplier_name=cost_fields["supplier_name"],
+            unit_cost=cost_fields["unit_cost"],
+            cost_currency=cost_fields["cost_currency"],
+            exchange_rate=cost_fields["exchange_rate"],
+            line_cost_mxn=cost_fields["line_cost_mxn"],
         )
         db.add(row)
         db.flush()  # row.id is the projection's source_row
@@ -618,6 +798,7 @@ def list_pos_sales(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     status: str | None = Query(default=None, max_length=20),
+    vendedor: str | None = Query(default=None, max_length=120),
     q: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -632,6 +813,8 @@ def list_pos_sales(
         query = query.filter(PosSale.sale_date <= date_to)
     if status:
         query = query.filter(PosSale.status == status.strip().lower())
+    if vendedor:
+        query = query.filter(PosSale.vendedor == vendedor)
     if q:
         pattern = f"%{_escape_like(q.strip())}%"
         query = query.filter(
@@ -662,6 +845,50 @@ def list_pos_sales(
         "items": [
             _sale_header_dict(s) | {"item_count": counts.get(s.id, 0)} for s in rows
         ],
+    }
+
+
+# Static path declared BEFORE the /sales/{sale_id}-style int routes.
+@router.get("/stats/vendedores")
+def vendedor_stats(
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    user: dict = Depends(verify_google_token),
+    db: Session = Depends(get_db),
+):
+    """Per-vendedor comisiones base numbers over COMPLETED sales, in ONE
+    grouped query. margin_total sums margin_amount over cost_complete rows
+    only (margin_known_count says how many contributed); vendedor NULL is its
+    own row (frontend shows 'Sin vendedor')."""
+    total_sum = func.coalesce(func.sum(PosSale.total), 0)
+    query = db.query(
+        PosSale.vendedor,
+        func.count(PosSale.id).label("sales_count"),
+        total_sum.label("total"),
+        # no else_: non-cost_complete rows yield NULL, which SUM ignores
+        func.sum(case((PosSale.cost_complete.is_(True), PosSale.margin_amount))).label(
+            "margin_total"
+        ),
+        func.sum(case((PosSale.cost_complete.is_(True), 1), else_=0)).label(
+            "margin_known_count"
+        ),
+    ).filter(PosSale.status == "completada")
+    if date_from is not None:
+        query = query.filter(PosSale.sale_date >= date_from)
+    if date_to is not None:
+        query = query.filter(PosSale.sale_date <= date_to)
+    rows = query.group_by(PosSale.vendedor).order_by(total_sum.desc()).all()
+    return {
+        "items": [
+            {
+                "vendedor": vendedor,
+                "sales_count": int(sales_count or 0),
+                "total": float(total or 0),
+                "margin_total": float(margin_total or 0),
+                "margin_known_count": int(margin_known_count or 0),
+            }
+            for vendedor, sales_count, total, margin_total, margin_known_count in rows
+        ]
     }
 
 
