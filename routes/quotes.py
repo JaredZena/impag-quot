@@ -1,21 +1,36 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import desc, or_
+from sqlalchemy import desc, func, or_
 from typing import List, Optional
 from pydantic import BaseModel
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import uuid
 
-from models import get_db, Quote, QuoteItem, Notification, Product, SupplierProduct, get_next_quote_number
+from models import (
+    get_db,
+    Quote,
+    QuoteItem,
+    Notification,
+    Product,
+    SupplierProduct,
+    get_next_quote_number,
+)
 from services.price_calculator import get_product_display_price
+from services.quote_followup import STALE_DAYS as FOLLOWUP_STALE_DAYS
 from auth import verify_google_token
 
 router = APIRouter(prefix="/quotes", tags=["quotes"])
 
 IVA_RATE = Decimal("0.16")
 
+# "Open" = delivered to the customer and still unresolved. Mirrors the lifecycle
+# in this module (draft → sent → viewed → accepted | rejected | expired) and the
+# candidate filter in services/quote_followup.find_stale_quotes.
+OPEN_STATUSES = ("sent", "viewed")
+
 # ==================== Pydantic Schemas ====================
+
 
 class QuoteItemCreate(BaseModel):
     product_id: Optional[int] = None
@@ -28,6 +43,7 @@ class QuoteItemCreate(BaseModel):
     iva_applicable: bool = True
     notes: Optional[str] = None
     sort_order: int = 0
+
 
 class QuoteItemUpdate(BaseModel):
     description: Optional[str] = None
@@ -296,6 +312,94 @@ def quote_stats(db: Session = Depends(get_db), user=Depends(verify_google_token)
             "accepted_value": float(accepted_value),
             "pending_sent": sent_count,
             "pending_viewed": viewed_count,
+        },
+    }
+
+
+@router.get("/pipeline-summary")
+def pipeline_summary(db: Session = Depends(get_db), user=Depends(verify_google_token)):
+    """Aggregate pipeline view for the sales dashboard: open (sent/viewed) count
+    and value, stale-followup pressure, per-status breakdown, and the biggest
+    open quotes. Pure SQL aggregates — never loads full rows."""
+    now = datetime.now(timezone.utc)
+    stale_before = now - timedelta(days=FOLLOWUP_STALE_DAYS)
+
+    # One grouped query gives the per-status breakdown; open_* derives from it.
+    by_status_rows = (
+        db.query(
+            Quote.status,
+            func.count(Quote.id),
+            func.coalesce(func.sum(Quote.total), 0),
+        )
+        .group_by(Quote.status)
+        .all()
+    )
+    by_status = {
+        status: {"count": count, "total": float(total)}
+        for status, count, total in by_status_rows
+    }
+    open_count = sum(v["count"] for s, v in by_status.items() if s in OPEN_STATUSES)
+    open_total = sum(v["total"] for s, v in by_status.items() if s in OPEN_STATUSES)
+
+    # Stale = open, delivered >= FOLLOWUP_STALE_DAYS ago, and not nudged within
+    # that same window (the core predicate of services/quote_followup).
+    stale_count = (
+        db.query(func.count(Quote.id))
+        .filter(
+            Quote.status.in_(OPEN_STATUSES),
+            Quote.sent_at.isnot(None),
+            Quote.sent_at <= stale_before,
+            or_(
+                Quote.last_followup_at.is_(None),
+                Quote.last_followup_at <= stale_before,
+            ),
+        )
+        .scalar()
+        or 0
+    )
+
+    oldest_sent_at = (
+        db.query(func.min(Quote.sent_at))
+        .filter(Quote.status.in_(OPEN_STATUSES), Quote.sent_at.isnot(None))
+        .scalar()
+    )
+
+    top_rows = (
+        db.query(
+            Quote.id,
+            Quote.quote_number,
+            Quote.customer_name,
+            Quote.total,
+            Quote.sent_at,
+            Quote.followup_count,
+        )
+        .filter(Quote.status.in_(OPEN_STATUSES))
+        .order_by(desc(Quote.total))
+        .limit(8)
+        .all()
+    )
+    top_open = [
+        {
+            "id": row.id,
+            "quote_number": row.quote_number,
+            "customer_name": row.customer_name,
+            "total": float(row.total),
+            "sent_at": row.sent_at.isoformat() if row.sent_at else None,
+            "followup_count": row.followup_count,
+            "days_open": max(0, (now - row.sent_at).days) if row.sent_at else None,
+        }
+        for row in top_rows
+    ]
+
+    return {
+        "success": True,
+        "data": {
+            "open_count": open_count,
+            "open_total": open_total,
+            "stale_count": stale_count,
+            "oldest_sent_at": oldest_sent_at.isoformat() if oldest_sent_at else None,
+            "by_status": by_status,
+            "top_open": top_open,
         },
     }
 

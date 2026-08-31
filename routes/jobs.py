@@ -2,14 +2,20 @@
 Machine-triggered background jobs (roadmap P2, Week 2).
 
 These endpoints are for an EXTERNAL scheduler (AWS EventBridge Scheduler, GitHub
-Actions cron, a cron pinger, …), NOT for humans — so they are guarded by a shared
-secret header instead of the Google-OAuth dependency used everywhere else. The
-guard is FAIL-CLOSED: if JOB_TRIGGER_SECRET is unset or the header doesn't match
-exactly, the request is rejected. Nothing here sends WhatsApp messages; drafts
-land in the human approval queue and stay behind WA_SENDING_ENABLED.
+Actions cron, a cron pinger, …), NOT for humans — so they are guarded by shared
+secret headers instead of the Google-OAuth dependency used everywhere else.
+EITHER header is accepted: X-Job-Token == JOB_TRIGGER_SECRET (dedicated job
+secret) OR X-API-Key == STOREFRONT_API_KEY — the daily storefront GitHub Action
+already holds that key for /sales/sync, and these jobs sit in the same
+machine-to-machine trust tier. The guard is FAIL-CLOSED: if neither secret is
+configured or neither header matches exactly, the request is rejected. Nothing
+here sends WhatsApp messages; drafts land in the human approval queue and stay
+behind WA_SENDING_ENABLED.
 """
+
 import hmac
 import os
+import secrets
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
@@ -20,12 +26,30 @@ from services.quote_followup import sweep_stale_quotes
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
-def verify_job_token(x_job_token: str = Header(default="")):
-    """Constant-time shared-secret check. Fail-closed when unconfigured."""
+def _api_key_matches(x_api_key: str | None) -> bool:
+    """Same constant-time check as routes/sales.py — one key, one trust tier."""
+    expected_key = os.getenv("STOREFRONT_API_KEY")
+    if not expected_key or not x_api_key:
+        return False
+    # Compare as bytes: str compare_digest raises TypeError on non-ASCII input,
+    # which would turn a garbage header into a 500 instead of a 401.
+    return secrets.compare_digest(
+        x_api_key.encode("utf-8", "replace"), expected_key.encode("utf-8")
+    )
+
+
+def verify_job_token(
+    x_job_token: str = Header(default=""),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+):
+    """Constant-time shared-secret check (either header). Fail-closed when
+    unconfigured."""
     secret = os.getenv("JOB_TRIGGER_SECRET", "")
-    if not secret or not hmac.compare_digest(x_job_token or "", secret):
-        raise HTTPException(status_code=403, detail="Invalid or missing job token")
-    return True
+    if secret and hmac.compare_digest(x_job_token or "", secret):
+        return True
+    if _api_key_matches(x_api_key):
+        return True
+    raise HTTPException(status_code=403, detail="Invalid or missing job token")
 
 
 @router.post("/quote-followup", dependencies=[Depends(verify_job_token)])
