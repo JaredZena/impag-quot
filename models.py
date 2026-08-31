@@ -569,6 +569,14 @@ class PosSale(Base):
         ForeignKey("cash_session.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Quote this ticket closes (venta cierra cotización) — optional link;
+    # completing the sale marks an open (sent/viewed) quote accepted.
+    quote_id = Column(
+        Integer,
+        ForeignKey("quote.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     items = relationship(
         "PosSaleItem",
@@ -576,6 +584,7 @@ class PosSale(Base):
         cascade="all, delete-orphan",
         order_by="PosSaleItem.id",
     )
+    quote = relationship("Quote", foreign_keys=[quote_id])
 
 
 class PosSaleItem(Base):

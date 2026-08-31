@@ -2,6 +2,7 @@
 Punto de Venta (POS) routes.
 
 - GET  /pos/products                    per-keystroke product search for the register
+- GET  /pos/quotes                      per-keystroke quote search (picker de cotización)
 - POST /pos/sales                       capture a ticket (folio minted server-side)
 - GET  /pos/sales                       ticket listing (newest first)
 - GET  /pos/stats/vendedores            per-vendedor totals (comisiones base)
@@ -29,7 +30,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func, or_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from auth import verify_google_token
 from models import (
@@ -40,6 +41,7 @@ from models import (
     PosSale,
     PosSaleItem,
     Product,
+    Quote,
     Sale,
     StockMovement,
     Supplier,
@@ -54,6 +56,12 @@ router = APIRouter(prefix="/pos", tags=["pos"])
 
 DEFAULT_BRANCH = "DGO"
 PAYMENT_METHODS = {"efectivo", "transferencia", "deposito", "terminal"}
+# Quote lifecycle (routes/quotes.py): draft, sent, viewed, accepted, rejected,
+# expired. A ticket may attach an open quote (sent/viewed → the sale closes
+# it) or an already-accepted one (idempotent re-close); the rest can't be
+# attached.
+OPEN_QUOTE_STATUSES = ("sent", "viewed")
+ATTACHABLE_QUOTE_STATUSES = ("sent", "viewed", "accepted")
 IVA_DIVISOR = Decimal("1.16")  # unit prices are FINAL (IVA-included) on IVA lines
 TWO_PLACES = Decimal("0.01")
 _BRANCH_RE = re.compile(r"^[A-Z]{2,4}$")
@@ -316,6 +324,9 @@ def _sale_header_dict(s: PosSale) -> dict:
         "cancelled_by": s.cancelled_by,
         "cancel_reason": s.cancel_reason,
         "cash_session_id": s.cash_session_id,
+        # quote linkage (venta cierra cotización)
+        "quote_id": s.quote_id,
+        "quote_number": s.quote.quote_number if s.quote else None,
     }
 
 
@@ -448,6 +459,8 @@ class PosSaleCreate(BaseModel):
     cfdi_email: str | None = Field(None, max_length=255)
     delivery_place: str | None = Field(None, max_length=200)
     notes: str | None = None
+    # quote this ticket closes (optional; completing the sale accepts it)
+    quote_id: int | None = None
     items: list[PosSaleItemCreate] = Field(min_length=1)
 
 
@@ -554,6 +567,49 @@ def search_pos_products(
     return {"items": items}
 
 
+# ── Quote picker (link the ticket to the quote it closes) ────────────────────
+
+
+@router.get("/quotes")
+def search_pos_quotes(
+    q: str = Query(default="", max_length=200),
+    limit: int = Query(default=10, ge=1, le=50),
+    user: dict = Depends(verify_google_token),
+    db: Session = Depends(get_db),
+):
+    """Per-keystroke quote search for the register: attachable quotes only
+    (sent/viewed/accepted), plain ILIKE, light rows. GET /quotes can't filter
+    several statuses in one call and serializes full item lists — too heavy
+    for a picker that fires on every keystroke."""
+    query = db.query(Quote).filter(Quote.status.in_(ATTACHABLE_QUOTE_STATUSES))
+    if q.strip():
+        pattern = f"%{_escape_like(q.strip())}%"
+        query = query.filter(
+            or_(
+                Quote.quote_number.ilike(pattern),
+                Quote.customer_name.ilike(pattern),
+                Quote.customer_phone.ilike(pattern),
+            )
+        )
+    rows = query.order_by(Quote.created_at.desc()).limit(limit).all()
+    return {
+        "items": [
+            {
+                "id": quote.id,
+                "quote_number": quote.quote_number,
+                "status": quote.status,
+                "customer_name": quote.customer_name,
+                "customer_phone": quote.customer_phone,
+                "total": _num(quote.total),
+                "created_at": (
+                    quote.created_at.isoformat() if quote.created_at else None
+                ),
+            }
+            for quote in rows
+        ]
+    }
+
+
 # ── Sales ────────────────────────────────────────────────────────────────────
 
 
@@ -565,7 +621,8 @@ def create_pos_sale(
 ):
     """Capture a ticket. ONE transaction: recompute money server-side, mint
     the folio, decrement stock, register the cash movement (open session +
-    efectivo), and project each item into the `sale` ledger."""
+    efectivo), project each item into the `sale` ledger, and mark the linked
+    quote (optional quote_id) accepted."""
     email = user.get("email", "")
     branch = _clean_branch(body.branch)
     # who made the sale — defaults to the authenticated user
@@ -664,6 +721,24 @@ def create_pos_sale(
     cost_complete = len(known_costs) == len(line_costs)
     margin_amount = total - cost_total if cost_complete else None
 
+    # Quote link (optional): only quotes a sale can plausibly close are
+    # attachable — open ones (sent/viewed) and already-accepted ones
+    # (idempotent re-close). draft/rejected/expired → 400.
+    quote = None
+    if body.quote_id is not None:
+        quote = db.query(Quote).filter(Quote.id == body.quote_id).first()
+        if not quote:
+            raise HTTPException(status_code=404, detail="Cotización no encontrada")
+        if quote.status not in ATTACHABLE_QUOTE_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"La cotización {quote.quote_number} está en estado "
+                    f"'{quote.status}' y no puede vincularse a una venta "
+                    "(solo cotizaciones enviadas, vistas o aceptadas)"
+                ),
+            )
+
     customer = None
     if body.customer_id is not None:
         customer = db.query(Customer).filter(Customer.id == body.customer_id).first()
@@ -704,9 +779,19 @@ def create_pos_sale(
         notes=body.notes,
         status="completada",
         cash_session_id=session.id if session else None,
+        quote_id=quote.id if quote else None,
     )
     db.add(sale)
     db.flush()  # sale.id
+
+    # Completing the ticket closes the linked open quote (this drains the
+    # 'Cotizaciones abiertas' pipeline with zero manual steps) — same
+    # transaction as the sale insert, never half-applied. An already-accepted
+    # quote is left untouched so a re-attach can't clobber its accepted_at.
+    if quote is not None and quote.status in OPEN_QUOTE_STATUSES:
+        quote.status = "accepted"
+        if quote.accepted_at is None:
+            quote.accepted_at = datetime.now(timezone.utc)
 
     for (item, description, quantity, unit_price, line_total), cost_fields in zip(
         line_items, line_costs
@@ -806,7 +891,8 @@ def list_pos_sales(
     db: Session = Depends(get_db),
 ):
     """Ticket listing, newest first."""
-    query = db.query(PosSale)
+    # joinedload: quote_number is serialized on every row — no N+1 lazy loads
+    query = db.query(PosSale).options(joinedload(PosSale.quote))
     if date_from is not None:
         query = query.filter(PosSale.sale_date >= date_from)
     if date_to is not None:
@@ -913,8 +999,9 @@ def cancel_pos_sale(
     db: Session = Depends(get_db),
 ):
     """Cancel a ticket in ONE transaction: restore stock (reversing the
-    ACTUAL recorded deltas), delete the ledger projection rows, and record a
-    'cancelacion' cash movement when the efectivo sale's session is open."""
+    ACTUAL recorded deltas), delete the ledger projection rows, record a
+    'cancelacion' cash movement when the efectivo sale's session is open, and
+    reopen the linked quote when this was the only live sale closing it."""
     email = user.get("email", "")
     sale = db.query(PosSale).filter(PosSale.id == sale_id).first()
     if not sale:
@@ -971,6 +1058,30 @@ def cancel_pos_sale(
     sale.cancelled_at = datetime.now(timezone.utc)
     sale.cancelled_by = email
     sale.cancel_reason = body.reason.strip()
+
+    # Cancelling the ticket that closed a quote reopens it — but ONLY when no
+    # other live (non-cancelled) sale still references the same quote, and
+    # only if the quote is still 'accepted' (a manual status change wins).
+    if sale.quote_id is not None:
+        quote = db.query(Quote).filter(Quote.id == sale.quote_id).first()
+        other_live_sale = (
+            db.query(PosSale.id)
+            .filter(
+                PosSale.quote_id == sale.quote_id,
+                PosSale.id != sale.id,
+                PosSale.status != "cancelada",
+            )
+            .first()
+        )
+        if quote is not None and quote.status == "accepted" and other_live_sale is None:
+            quote.status = "sent"
+            quote.accepted_at = None
+            audit = (
+                f"[POS] venta {sale.folio} cancelada "
+                f"{_business_today().isoformat()} — cotización reabierta"
+            )
+            quote.notes = f"{quote.notes}\n{audit}" if quote.notes else audit
+
     db.commit()
     db.refresh(sale)
     return _sale_detail_dict(sale)
