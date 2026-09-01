@@ -15,7 +15,7 @@ google-auth-oauthlib==1.1.0
 google-auth-httplib2==0.1.1
 
 # AI/ML - ESSENTIAL (but optimized versions)
-anthropic>=0.3.0
+anthropic>=0.3.0,<1  # SDK 1.x removed the temperature kwarg from messages.create() (TypeError)
 openai==1.61.1
 
 # PDF Processing - ESSENTIAL
