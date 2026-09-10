@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from auth import verify_google_token
 from models import Conversation, ConversationMessage, Query, get_db
+from routes.auth_session import router as auth_session_router
 from routes.balance import router as balance_router
 from routes.campaigns import router as campaigns_router
 from routes.categories import router as categories_router
@@ -103,6 +104,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(auth_session_router)
 app.include_router(products_router)
 app.include_router(product_images_router)
 app.include_router(suppliers_router)
