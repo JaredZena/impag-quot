@@ -37,6 +37,7 @@ from routes.task_categories import router as task_categories_router
 from routes.task_comments import router as task_comments_router
 from routes.task_users import router as task_users_router
 from routes.tasks_mgmt import router as tasks_mgmt_router
+from routes.tools import router as tools_router
 from routes.whatsapp import router as whatsapp_router
 
 
@@ -128,6 +129,7 @@ app.include_router(public_quotes_router)
 app.include_router(storefront_router)
 app.include_router(sales_router)
 app.include_router(pos_router)
+app.include_router(tools_router)
 
 
 class Message(BaseModel):

@@ -1294,6 +1294,87 @@ def get_next_quote_number(db):
     return f"{prefix}0001"
 
 
+class Tool(Base):
+    """Herramienta o consumible de uso interno — NOT part of the sale catalog.
+
+    Kept apart from product/supplier_product on purpose so tools never show up
+    in POS, quotes or the storefront feed. Replaces the HERRAMIENTAS tab of the
+    Operaciones_Comerciales_IMPAG sheet; rows imported from it carry sheet_no
+    (the tab's NO column) so scripts/import_tools_from_sheet.py is idempotent.
+
+    Status changes go through POST /tools/{id}/movements, so tool_movement is
+    the complete lifecycle trail (compra, salida a obra, regreso, baja...).
+    """
+
+    __tablename__ = "tool"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    kind = Column(
+        String(20), nullable=False, default="herramienta", server_default="herramienta"
+    )  # herramienta | consumible
+    quantity = Column(Numeric(12, 2), nullable=False, default=1, server_default="1")
+    unit = Column(String(20), nullable=False, default="PIEZA", server_default="PIEZA")
+    unit_cost = Column(Numeric(12, 2), nullable=True)  # MXN per unit
+    purchase_date = Column(Date, nullable=True)
+    supplier_name = Column(String(200), nullable=True)
+    invoice_ref = Column(String(120), nullable=True)
+    # pendiente_entrega | en_local | en_obra | con_cliente | baja
+    status = Column(
+        String(30),
+        nullable=False,
+        default="en_local",
+        server_default="en_local",
+        index=True,
+    )
+    location = Column(String(60), nullable=True)  # Nuevo Ideal | Texcoco | ...
+    holder = Column(String(200), nullable=True)  # obra / cliente / persona
+    notes = Column(Text, nullable=True)
+    images = Column(JSON, nullable=True)  # R2 keys (private bucket), first = portada
+    retired_at = Column(DateTime(timezone=True), nullable=True)
+    retired_reason = Column(String(300), nullable=True)
+    sheet_no = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    created_by = Column(String(120), nullable=True)  # user email
+
+    movements = relationship(
+        "ToolMovement",
+        back_populates="tool",
+        cascade="all, delete-orphan",
+        order_by="ToolMovement.id",
+    )
+
+    __table_args__ = (UniqueConstraint("sheet_no", name="uq_tool_sheet_no"),)
+
+
+class ToolMovement(Base):
+    """One lifecycle event of a tool (compra, salida, regreso, baja, ...)."""
+
+    __tablename__ = "tool_movement"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tool_id = Column(
+        Integer,
+        ForeignKey("tool.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # compra | alta | recibida | salida | regreso | baja | reactivar | ajuste
+    kind = Column(String(20), nullable=False)
+    from_status = Column(String(30), nullable=True)
+    to_status = Column(String(30), nullable=True)
+    holder = Column(String(200), nullable=True)
+    note = Column(Text, nullable=True)
+    occurred_on = Column(Date, nullable=True)  # business date of the event
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(String(120), nullable=True)  # user email
+
+    tool = relationship("Tool", back_populates="movements")
+
+
 if database_url.startswith("sqlite"):
     # Tests point DATABASE_URL at sqlite — the Neon endpoint-option rewrite
     # below is postgres-only (a sqlite URL has no hostname) and the pg pool
