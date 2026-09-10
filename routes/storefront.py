@@ -134,6 +134,14 @@ def get_storefront_products(
                 ),
                 "is_active": p.is_active,
                 "archived_at": p.archived_at,
+                # Checkout-gate inputs for the storefront sync: a product only
+                # becomes buyable when iva agrees with its accountant-approved
+                # rate and unit matches the expected unit. NULL stays null so
+                # the sync fails closed.
+                "iva": p.iva,
+                "unit": p.unit.value if p.unit is not None else None,
+                "package_size": p.package_size,
+                "stock": p.stock,
             }
         )
 

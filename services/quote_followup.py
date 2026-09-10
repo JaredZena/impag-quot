@@ -39,6 +39,10 @@ FOLLOWUP_CATEGORY_NAME = "Seguimiento a cotizaciones"
 # Fallback Task.created_by (NOT NULL FK task_user.id) when the quote's engineer
 # email doesn't map to a task_user. 2 = Jared in this DB.
 SYSTEM_TASK_USER_ID = int(os.getenv("FOLLOWUP_SYSTEM_USER_ID", "2"))
+# Web orders (services/web_orders.py) whose Mercado Pago payment is in flight,
+# paid, or in trouble are not leads to chase. A web draft left at checkout /
+# rejected / cancelled that someone deliberately sends as a quote stays eligible.
+PAYMENT_STATUSES_NOT_CHASED = ("pending", "approved", "refunded", "charged_back", "mismatch")
 
 
 def _now(now: Optional[datetime]) -> datetime:
@@ -76,6 +80,8 @@ def find_stale_quotes(db: Session, now: Optional[datetime] = None) -> List[Quote
             Quote.followup_count < MAX_FOLLOWUPS,     # under the anti-spam cap
             or_(Quote.last_followup_at.is_(None),
                 Quote.last_followup_at <= reminder_before),  # not nudged too recently
+            or_(Quote.payment_status.is_(None),
+                Quote.payment_status.notin_(PAYMENT_STATUSES_NOT_CHASED)),  # web orders
         )
         .order_by(Quote.sent_at.asc())
         .all()

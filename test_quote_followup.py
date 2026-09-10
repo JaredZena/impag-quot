@@ -126,3 +126,24 @@ def test_task_only_when_no_conversation(db):
     _quote(db, "Q-NOWA", customer_phone="+525511112222")   # no matching conversation
     s = qf.sweep_stale_quotes(db, dry_run=False, now=NOW)
     assert s["tasks_created"] == 1 and s["wa_drafts_created"] == 0
+
+
+# ── web orders (services/web_orders.py) ───────────────────────────────────────
+
+def test_web_orders_with_live_payment_state_are_not_chased(db):
+    # in flight, paid or in trouble: never a lead to chase
+    for ps in ("pending", "approved", "refunded", "charged_back", "mismatch"):
+        _quote(db, f"W-{ps}", payment_status=ps)
+    # an abandoned / failed web draft someone deliberately sent stays chaseable
+    for ps in ("checkout", "rejected", "cancelled"):
+        _quote(db, f"W-{ps}", payment_status=ps)
+    _quote(db, "Q-PLAIN")   # ordinary quote: payment_status NULL
+    nums = {q.quote_number for q in qf.find_stale_quotes(db, now=NOW)}
+    assert nums == {"W-checkout", "W-rejected", "W-cancelled", "Q-PLAIN"}
+
+
+def test_sweep_creates_nothing_for_a_paid_web_order(db):
+    _quote(db, "W-PAID", payment_status="approved")
+    s = qf.sweep_stale_quotes(db, dry_run=False, now=NOW)
+    assert s["candidates"] == 0 and s["tasks_created"] == 0
+    assert db.query(Task).count() == 0 and db.query(Quote).one().followup_count == 0
