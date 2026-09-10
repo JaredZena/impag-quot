@@ -1,3 +1,6 @@
+from html import escape
+from urllib.parse import quote as url_quote
+
 from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session, joinedload
@@ -8,6 +11,13 @@ router = APIRouter(prefix="/public/quote", tags=["public"])
 
 WHATSAPP_NUMBER = "526771197737"
 IVA_RATE = 0.16
+
+
+def _h(value):
+    """HTML-escape one value for these pages. Quote fields can hold text a web
+    buyer typed (routes/storefront_orders.py), and this page is served on the
+    storefront's own domain."""
+    return escape("" if value is None else str(value))
 
 
 def render_quote_page(quote, status_message=None, show_accept=True):
@@ -21,11 +31,11 @@ def render_quote_page(quote, status_message=None, show_accept=True):
         items_html += f"""
         <tr>
             <td style="padding:12px 8px;border-bottom:1px solid #eee;">
-                <strong>{item.description}</strong>
-                {f'<br><span style="font-size:12px;color:#888;">SKU: {item.sku}</span>' if item.sku else ''}
-                {f'<br><span style="font-size:12px;color:#666;">{item.notes}</span>' if item.notes else ''}
+                <strong>{_h(item.description)}</strong>
+                {f'<br><span style="font-size:12px;color:#888;">SKU: {_h(item.sku)}</span>' if item.sku else ''}
+                {f'<br><span style="font-size:12px;color:#666;">{_h(item.notes)}</span>' if item.notes else ''}
             </td>
-            <td style="padding:12px 8px;border-bottom:1px solid #eee;text-align:center;">{float(item.quantity):g} {item.unit or ''}</td>
+            <td style="padding:12px 8px;border-bottom:1px solid #eee;text-align:center;">{float(item.quantity):g} {_h(item.unit)}</td>
             <td style="padding:12px 8px;border-bottom:1px solid #eee;text-align:right;">${float(item.unit_price):,.2f}{iva_badge}</td>
             <td style="padding:12px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">${line_total:,.2f}</td>
         </tr>"""
@@ -52,14 +62,14 @@ def render_quote_page(quote, status_message=None, show_accept=True):
 
     status_banner = ""
     if status_message:
-        status_banner = f'<div style="background:#E8F5E9;border:1px solid #4CAF50;border-radius:8px;padding:16px;text-align:center;margin-bottom:24px;font-weight:600;color:#2E7D32;">{status_message}</div>'
+        status_banner = f'<div style="background:#E8F5E9;border:1px solid #4CAF50;border-radius:8px;padding:16px;text-align:center;margin-bottom:24px;font-weight:600;color:#2E7D32;">{_h(status_message)}</div>'
 
     return f"""<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cotización {quote.quote_number} | IMPAG</title>
+    <title>Cotización {_h(quote.quote_number)} | IMPAG</title>
     <style>
         * {{ margin:0; padding:0; box-sizing:border-box; }}
         body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; color:#1a1a1a; background:#f5f5f5; }}
@@ -95,7 +105,7 @@ def render_quote_page(quote, status_message=None, show_accept=True):
             <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:20px;">
                 <div>
                     <div style="font-size:12px;color:#888;text-transform:uppercase;letter-spacing:1px;">Cotización</div>
-                    <div style="font-size:20px;font-weight:700;">{quote.quote_number}</div>
+                    <div style="font-size:20px;font-weight:700;">{_h(quote.quote_number)}</div>
                 </div>
                 <div style="text-align:right;">
                     <div style="font-size:13px;color:#666;">Fecha: {quote.sent_at.strftime('%d/%m/%Y') if quote.sent_at else quote.created_at.strftime('%d/%m/%Y')}</div>
@@ -105,8 +115,8 @@ def render_quote_page(quote, status_message=None, show_accept=True):
 
             <div style="background:#fafafa;border-radius:8px;padding:12px;margin-bottom:20px;">
                 <div style="font-size:13px;color:#888;">Para:</div>
-                <div style="font-weight:600;">{quote.customer_name}</div>
-                {f'<div style="font-size:13px;color:#666;">{quote.customer_location}</div>' if quote.customer_location else ''}
+                <div style="font-weight:600;">{_h(quote.customer_name)}</div>
+                {f'<div style="font-size:13px;color:#666;">{_h(quote.customer_location)}</div>' if quote.customer_location else ''}
             </div>
 
             <table>
@@ -130,19 +140,19 @@ def render_quote_page(quote, status_message=None, show_accept=True):
             </div>
         </div>
 
-        {f'<div class="card"><p style="font-size:14px;color:#555;white-space:pre-wrap;">{quote.notes}</p></div>' if quote.notes else ''}
+        {f'<div class="card"><p style="font-size:14px;color:#555;white-space:pre-wrap;">{_h(quote.notes)}</p></div>' if quote.notes else ''}
 
         {accept_button}
 
         <div style="text-align:center;margin:24px 0;">
-            <a href="https://wa.me/{WHATSAPP_NUMBER}?text=Hola%2C%20tengo%20una%20pregunta%20sobre%20la%20cotización%20{quote.quote_number}" class="whatsapp">
+            <a href="https://wa.me/{WHATSAPP_NUMBER}?text=Hola%2C%20tengo%20una%20pregunta%20sobre%20la%20cotización%20{url_quote(str(quote.quote_number), safe='')}" class="whatsapp">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.625.846 5.059 2.284 7.034L.789 23.492l4.644-1.217A11.95 11.95 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.75c-2.115 0-4.13-.657-5.828-1.9l-.418-.25-2.756.723.735-2.686-.274-.436A9.724 9.724 0 012.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75z"/></svg>
                 Contactar al ingeniero
             </a>
         </div>
 
         <div class="footer">
-            <p>Atendido por: {engineer_display}</p>
+            <p>Atendido por: {_h(engineer_display)}</p>
             <p style="margin-top:8px;">IMPAG TECH S.A.P.I. de C.V. | RFC: ITE210716D9A</p>
             <p>Nuevo Ideal, Durango | Texcoco, Edo. de México | Durango, Dgo.</p>
             <p style="margin-top:8px;">WhatsApp: +52 677 119 7737 | impagtodoparaelcampo@gmail.com</p>
@@ -290,9 +300,9 @@ def render_expired(quote):
     <div class="card">
         <img src="/static/impag-logo.png" alt="IMPAG" style="max-width:150px;margin-bottom:24px;">
         <h1 style="font-size:24px;margin-bottom:12px;">Cotización Expirada</h1>
-        <p style="color:#666;margin-bottom:8px;">La cotización <strong>{quote.quote_number}</strong> ha expirado.</p>
+        <p style="color:#666;margin-bottom:8px;">La cotización <strong>{_h(quote.quote_number)}</strong> ha expirado.</p>
         <p style="color:#666;">Contacte a su ingeniero para una cotización actualizada.</p>
-        <a href="https://wa.me/{WHATSAPP_NUMBER}?text=Hola%2C%20mi%20cotización%20{quote.quote_number}%20expiró.%20¿Podrían%20actualizarla?" class="whatsapp">
+        <a href="https://wa.me/{WHATSAPP_NUMBER}?text=Hola%2C%20mi%20cotización%20{url_quote(str(quote.quote_number), safe='')}%20expiró.%20¿Podrían%20actualizarla?" class="whatsapp">
             Solicitar nueva cotización
         </a>
     </div>
