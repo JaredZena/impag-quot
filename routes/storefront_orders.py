@@ -1,16 +1,36 @@
 """
 POST /storefront/orders: web orders from the todoparaelcampo.com.mx checkout.
 
-Called server-to-server by the storefront's Vercel functions, never by a
-browser (so no CORS change):
-- event "checkout_created": best effort, when a checkout starts;
-- event "payment_update": on every Mercado Pago payment webhook, after the
-  function has verified MP's signature and re-read the payment from MP.
+The storefront's Vercel functions call it server-to-server, never a browser
+(so no CORS change). Two events:
+- "checkout_created" is best effort, sent when a checkout starts. It always
+  carries the whole order and records an unpaid draft.
+- "payment_update" is sent on every Mercado Pago payment webhook, after the
+  function has verified MP's signature and re-read the payment from MP. It
+  carries the order rebuilt from the payment's metadata when the storefront
+  could rebuild it. Otherwise customer, delivery and totals are null and items
+  is [] (DESIGN §7: external_reference is the join key), and the backend works
+  from the draft it stored at checkout.
 
-Authenticated with X-API-Key against a DEDICATED key, STOREFRONT_ORDERS_API_KEY
-(not the sync key GitHub Actions holds), because this endpoint can mark orders
-paid. Fail-closed: 503 while the key is unset, 401 on a missing or wrong key
-(checked before the body is validated), 422 on an invalid body.
+A payment_update is never refused over its order data, because the buyer may
+already have paid. An unusable order part is dropped with a warning and the
+stored draft is used instead. Only a broken envelope (reference, event, or the
+Mercado Pago block) gets a 422.
+
+Authenticated with X-API-Key against a DEDICATED key,
+STOREFRONT_ORDERS_API_KEY, not the sync key GitHub Actions holds, because this
+endpoint can mark orders paid. It fails closed:
+- 503 while the key is unset;
+- 401 on a missing or wrong key, checked before the body is validated;
+- 422 on an invalid body;
+- 429 when checkout_created would exceed WEB_ORDERS_MAX_DRAFTS_PER_HOUR
+  unpaid drafts.
+
+Other env vars, read per request (see CLAUDE.md): WEB_ORDER_NOTIFY_EMAILS,
+WEB_ORDER_ASSIGNEE, WEB_ORDERS_ALLOW_TEST and WEB_ORDERS_MAX_DRAFTS_PER_HOUR.
+The buyer confirmation email also needs RESEND_API_KEY and
+WEB_ORDER_STORE_ADDRESS, and optionally takes WEB_ORDER_RETURN_ADDRESS and
+WEB_ORDER_FROM_EMAIL.
 
 The recording logic lives in services/web_orders.py.
 """
@@ -18,14 +38,29 @@ The recording logic lives in services/web_orders.py.
 import os
 import secrets
 from decimal import Decimal
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPException
+from fastapi.exceptions import RequestValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy.orm import Session
 
 from models import get_db
-from services.web_orders import IVA_RATES, OrderRejected, record_order
+from services.web_order_email import send_buyer_confirmation
+from services.web_orders import (
+    IVA_RATES,
+    DraftLimitReached,
+    OrderRejected,
+    record_order,
+)
 
 router = APIRouter(prefix="/storefront", tags=["storefront"])
 
@@ -48,6 +83,10 @@ MpStatus = Literal[
 
 Money = Annotated[Decimal, Field(ge=0, le=99_999_999, allow_inf_nan=False)]
 Quantity = Annotated[Decimal, Field(gt=0, le=999_999, allow_inf_nan=False)]
+
+# The order part of a payload: optional on a payment_update, and dropped (with a
+# warning) when it doesn't validate there.
+ORDER_PARTS = ("customer", "delivery", "invoice", "items", "totals")
 
 
 class _Body(BaseModel):
@@ -133,24 +172,97 @@ class OrderMercadoPago(_Body):
 
 
 class StorefrontOrder(_Body):
+    """One storefront event (DESIGN §7).
+
+    checkout_created always carries the whole order. A payment_update may leave
+    customer, delivery and totals null and items [], when the storefront could
+    not rebuild the order from the payment's metadata. The backend then uses
+    the draft it stored at checkout.
+    """
+
     event: Literal["checkout_created", "payment_update"]
     external_reference: str = Field(pattern=REFERENCE_PATTERN)
-    customer: OrderCustomer
-    delivery: OrderDelivery
+    customer: OrderCustomer | None = None
+    delivery: OrderDelivery | None = None
     invoice: OrderInvoice | None = None
-    items: list[OrderItem] = Field(min_length=1, max_length=50)
-    totals: OrderTotals
+    items: list[OrderItem] = Field(default_factory=list, max_length=50)
+    totals: OrderTotals | None = None
     mercadopago: OrderMercadoPago | None = None
 
+    # Set by parse_order when it had to drop part of a payment_update.
+    _parse_warnings: list[str] = PrivateAttr(default_factory=list)
+
+    @field_validator("items", mode="before")
+    @classmethod
+    def _no_items_is_empty(cls, value):
+        return [] if value is None else value
+
+    @property
+    def has_order_data(self) -> bool:
+        """True when the event carries a whole order (customer, delivery,
+        totals and at least one item)."""
+        return (
+            self.customer is not None
+            and self.delivery is not None
+            and self.totals is not None
+            and bool(self.items)
+        )
+
+    @property
+    def parse_warnings(self) -> list[str]:
+        return list(self._parse_warnings)
+
     @model_validator(mode="after")
-    def _payment_update_has_payment(self):
-        if self.event == "payment_update":
+    def _event_requirements(self):
+        if self.event == "checkout_created":
+            if not self.has_order_data:
+                raise ValueError(
+                    "checkout_created needs customer, delivery, items and totals"
+                )
+        else:
             mp = self.mercadopago
             if mp is None or not mp.payment_id or not mp.status:
                 raise ValueError(
                     "payment_update needs mercadopago.payment_id and mercadopago.status"
                 )
         return self
+
+
+def parse_order(body: Any) -> StorefrontOrder:
+    """Validate a request body.
+
+    A payment_update whose order part is partly unusable is still recorded,
+    because the buyer may already have paid. The failing parts are dropped and
+    named in a warning, and the backend falls back to the stored draft for
+    them. Anything else invalid gets the usual 422.
+    """
+    try:
+        return StorefrontOrder.model_validate(body)
+    except ValidationError as exc:
+        salvaged = _salvage_payment(body, exc)
+        if salvaged is not None:
+            return salvaged
+        raise RequestValidationError(
+            [
+                {**err, "loc": ("body", *err["loc"])}
+                for err in exc.errors(include_url=False)
+            ]
+        ) from exc
+
+
+def _salvage_payment(body: Any, exc: ValidationError) -> StorefrontOrder | None:
+    if not isinstance(body, dict) or body.get("event") != "payment_update":
+        return None
+    failing = {err["loc"][0] if err["loc"] else None for err in exc.errors()}
+    if not failing or not failing <= set(ORDER_PARTS):
+        return None  # the envelope itself is broken: a real 422
+    kept = {key: value for key, value in body.items() if key not in failing}
+    try:
+        order = StorefrontOrder.model_validate(kept)
+    except ValidationError:
+        return None
+    order._parse_warnings = [f"order_data_invalid:{','.join(sorted(failing))}"]
+    return order
 
 
 def require_orders_key(
@@ -171,17 +283,35 @@ def require_orders_key(
 
 @router.post("/orders", dependencies=[Depends(require_orders_key)])
 def post_storefront_order(
-    order: StorefrontOrder, db: Annotated[Session, Depends(get_db)]
+    body: Annotated[Any, Body(description="A StorefrontOrder (see this module).")],
+    db: Annotated[Session, Depends(get_db)],
+    background_tasks: BackgroundTasks,
 ):
     """Record a storefront checkout or Mercado Pago payment event (idempotent)."""
+    order = parse_order(body)
+    outbox: list[dict] = []
     try:
-        return record_order(db, order)
+        result = record_order(db, order, outbox=outbox)
     except OrderRejected as exc:
         db.rollback()
         raise HTTPException(
             status_code=422,
             detail={"message": "invalid order", "problems": exc.problems},
         )
+    except DraftLimitReached as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "message": "too many unpaid web drafts in the last hour",
+                "limit": exc.limit,
+            },
+        )
     except Exception:
         db.rollback()
         raise
+    # After the commit, in the background: a slow email provider must never
+    # delay the Mercado Pago webhook.
+    for message in outbox:
+        background_tasks.add_task(send_buyer_confirmation, message)
+    return result

@@ -38,6 +38,15 @@ CLAUDE_API_KEY=your-claude-api-key
 DATABASE_URL=your-database-url
 ```
 
+### Web orders (`POST /storefront/orders`, the todoparaelcampo.com.mx checkout)
+Set these in App Runner, never in the local `.env` (the image bakes it in). They are read per request.
+- `STOREFRONT_ORDERS_API_KEY`: the dedicated key the storefront's Vercel functions send as `X-API-Key`. While it is unset the endpoint answers 503 (dark).
+- `WEB_ORDER_NOTIFY_EMAILS`: comma-separated admin logins that get the `web_order_paid` / `web_order_pending` / `web_order_problem` notifications. Falls back to `WEB_ORDER_ASSIGNEE`.
+- `WEB_ORDER_ASSIGNEE`: the task_user email for the "Por enviar" and "Solicitud de facturas" tasks, and `quote.assigned_to`.
+- `WEB_ORDERS_ALLOW_TEST`: `true` records Mercado Pago TEST payments and checkouts (`live_mode=false`). Otherwise they get 200 `{"ignored":"test_mode"}`, are only logged, and never appear in the admin. Turn it off again after a sandbox test.
+- `WEB_ORDERS_MAX_DRAFTS_PER_HOUR`: caps unpaid `checkout_created` drafts per hour. Default 100; `0` turns the cap off. Above the cap `checkout_created` gets 429. Payments are never capped.
+- Buyer confirmation email (the order record and the póliza de garantía, LFPC arts. 52 and 78) needs `RESEND_API_KEY` and `WEB_ORDER_STORE_ADDRESS`, the store's physical address for pickups, claims and warranties. Without both, no email is sent and the fulfillment task tells staff to send it by hand. Optional: `WEB_ORDER_RETURN_ADDRESS` (defaults to the store address) and `WEB_ORDER_FROM_EMAIL` (default `Todo Para El Campo <ventas@todoparaelcampo.com.mx>`; the domain must be verified in Resend).
+
 ## Architecture Overview
 
 ### Core System Components

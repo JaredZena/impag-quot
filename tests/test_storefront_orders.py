@@ -9,6 +9,7 @@ Run: venv/bin/python -m pytest tests/test_storefront_orders.py -q
 """
 
 import json
+import logging
 import os
 import socket
 import tempfile
@@ -36,8 +37,9 @@ from models import (
     TaskUser,
     get_db,
 )
+from routes import storefront_orders as orders_route
 from routes.storefront_orders import MpStatus
-from services import web_orders
+from services import web_order_email, web_orders
 
 _tmpdir = tempfile.mkdtemp(prefix="storefront_orders_tests_")
 engine = create_engine(
@@ -57,6 +59,9 @@ HERNAN = "hernan@example.com"
 JARED = "jared@example.com"
 POR_ENVIAR_ID = 10
 FACTURAS_ID = 11
+
+STORE_ADDRESS = "Calle Ejemplo 10, Centro, Nuevo Ideal, Dgo., C.P. 34410"
+SENT: list[dict] = []  # buyer confirmations the route handed to the sender
 
 UNIT_PRICE = Decimal("150.55")
 UNIT_TOTAL = Decimal("174.64")  # round2(150.55 × 1.16)
@@ -168,6 +173,20 @@ def _env(monkeypatch):
     )
     monkeypatch.setenv("WEB_ORDER_ASSIGNEE", HERNAN)
     monkeypatch.delenv("WEB_ORDERS_ALLOW_TEST", raising=False)
+    monkeypatch.delenv("WEB_ORDERS_MAX_DRAFTS_PER_HOUR", raising=False)
+    # the buyer confirmation is configured, as it must be at launch
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+    monkeypatch.setenv("WEB_ORDER_STORE_ADDRESS", STORE_ADDRESS)
+    monkeypatch.delenv("WEB_ORDER_RETURN_ADDRESS", raising=False)
+    monkeypatch.delenv("WEB_ORDER_FROM_EMAIL", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _outbox(monkeypatch):
+    """Capture the confirmations the route schedules instead of emailing."""
+    SENT.clear()
+    monkeypatch.setattr(orders_route, "send_buyer_confirmation", SENT.append)
+    return SENT
 
 
 @pytest.fixture(autouse=True)
@@ -513,9 +532,8 @@ def test_checkout_created_records_a_draft_web_order():
     assert item.quantity == 2 and item.unit_price == Decimal("150.55")
     assert item.iva_applicable is True and item.unit == "paquete de 20 piezas"
 
-    [customer] = _customers("+526185550101")
-    assert customer.source == "web" and customer.display_name == "Juan Pérez"
-    assert customer.has_purchased is False and quote.customer_id == customer.id
+    # anyone can start a checkout: an unpaid draft never touches the CRM
+    assert _customers("+526185550101") == [] and quote.customer_id is None
 
     # the JSON block the admin "Pedido web" panel parses
     assert quote.notes.startswith(f"[Pedido web {ref}]\n{{")
@@ -538,7 +556,7 @@ def test_checkout_replay_is_idempotent():
     assert again["quote_id"] == first["quote_id"] and again["duplicate"] is True
     assert _count_quotes(ref) == 1
     assert len(_quote(ref).items) == 1
-    assert len(_customers("+526185550102")) == 1
+    assert _customers("+526185550102") == []
 
 
 # ── approved ─────────────────────────────────────────────────────────────────
@@ -579,11 +597,13 @@ def test_approved_payment_accepts_the_quote_and_fires_side_effects_once():
     assert block["payment"]["status"] == "approved"
     assert block["payment"]["payment_id"] == "1234567890"
     assert block["payment"]["transaction_amount"] == 349.28
+    assert [m["to"] for m in SENT] == ["juan@example.com"]  # the buyer's copy
 
     # MP retries the same webhook: nothing new
     again = _pay(ref, "approved", order_kw={"phone": phone})
     assert again["duplicate"] is True and again["status"] == "accepted"
     assert len(_notifications(quote.id)) == 2 and len(_tasks(ref)) == 1
+    assert len(SENT) == 1
     assert _count_quotes(ref) == 1 and len(_quote(ref).items) == 1
 
 
@@ -678,6 +698,7 @@ def test_amount_mismatch_is_a_problem_not_a_sale():
     assert problems[0].message.startswith(f"Revisar pago {ref} — monto distinto:")
     assert "$300.00" in problems[0].message and "$349.28" in problems[0].message
     assert _notifications(quote.id, "web_order_paid") == [] and _tasks(ref) == []
+    assert SENT == []  # no confirmation for an unsettled payment
 
     _pay(ref, "approved", amount=Decimal("300.00"))  # replay
     assert len(_notifications(quote.id, "web_order_problem")) == 2
@@ -719,7 +740,8 @@ def test_refund_chargeback_or_dispute_after_approval_is_a_problem(
     _pay(ref, status)  # replay
     assert len(_notifications(quote.id, "web_order_problem")) == 2
 
-    res = _pay(ref, "approved")  # a stale approval never reopens the sale
+    # another payment's approval never reopens it (the rank ladder)
+    res = _pay(ref, "approved", payment_id=4242)
     assert res["payment_status"] == payment_status
     assert len(_tasks(ref)) == 1  # the fulfillment task from the approval only
 
@@ -767,9 +789,10 @@ def test_customer_is_matched_by_normalized_phone_and_only_empty_fields_filled():
 
     refs = [_ref() for _ in range(3)]
     for ref, phone in zip(refs, ("618 777 0000", "+52 1 618 777 0000", "526187770000")):
-        _checkout(ref, phone=phone)
+        _pay(ref, "approved", order_kw={"phone": phone})
 
     [customer] = _customers("+526187770000")
+    assert customer.has_purchased is True
     assert customer.display_name == "Juan de Nuevo Ideal"  # not overwritten
     assert customer.source == "whatsapp"  # not overwritten
     assert customer.email == "juan@example.com"  # was empty: filled
@@ -1030,3 +1053,537 @@ def test_quote_serializer_returns_the_payment_fields():
     assert data["payment_method"] == "mercadopago:credit_card"
     assert data["payment_reference"] == "1234567890"
     assert data["customer_id"] == quote.customer_id is not None
+
+
+# ── payment_update without order data (the storefront's null-order payload) ──
+
+
+def _null_order_payment(ref, status, **payment_kw):
+    """Exactly what the storefront's buildBackendOrder(event, ref, null, mp)
+    sends when it can't rebuild the order from the payment's metadata."""
+    return {
+        "event": "payment_update",
+        "external_reference": ref,
+        "customer": None,
+        "delivery": None,
+        "invoice": None,
+        "items": [],
+        "totals": None,
+        "mercadopago": {**_payment(status, **payment_kw), "preference_id": None},
+    }
+
+
+def _post_null(ref, status, **payment_kw):
+    r = _post(_null_order_payment(ref, status, **payment_kw))
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+PAQUETERIA = {
+    "method": "paqueteria",
+    "address": {
+        "street": "Av. Juárez",
+        "number": "12",
+        "colonia": "Centro",
+        "cp": "34410",
+        "municipio": "Nuevo Ideal",
+        "estado": "Durango",
+        "references": "Frente a la plaza",
+    },
+    "cost_total": 116,
+}
+TOTALS_WITH_SHIPPING = {
+    "subtotal": 401.10,
+    "iva_amount": 64.18,
+    "total": 465.28,
+    "currency": "MXN",
+}
+
+
+def test_payment_without_order_data_settles_the_stored_draft():
+    ref, phone = _ref(), "6189990001"
+    _checkout(
+        ref,
+        phone=phone,
+        delivery=PAQUETERIA,
+        totals=TOTALS_WITH_SHIPPING,
+        invoice=VALID_INVOICE,
+    )
+    res = _post_null(ref, "approved", amount=Decimal("465.28"))
+    assert res["status"] == "accepted" and res["payment_status"] == "approved"
+    assert res["warnings"] == []
+
+    quote = _quote(ref)
+    assert quote.payment_reference == "1234567890" and len(quote.items) == 2
+    block = web_orders.read_notes_block(quote.notes)
+    assert block["delivery"]["address"]["cp"] == "34410"
+    assert block["invoice"]["rfc"] == "PEPJ800101AB1"
+    assert block["payment"]["status"] == "approved"
+
+    tasks = _tasks(ref)
+    assert sorted(t.category_id for t in tasks) == [POR_ENVIAR_ID, FACTURAS_ID]
+    fulfillment = next(t for t in tasks if t.category_id == POR_ENVIAR_ID)
+    assert "preparar envío" in fulfillment.title
+    assert "Av. Juárez 12, Col. Centro, CP 34410" in fulfillment.description
+    assert len(_notifications(quote.id, "web_order_paid")) == 2
+
+    [customer] = _customers("+526189990001")
+    assert customer.has_purchased is True and customer.rfc == "PEPJ800101AB1"
+    assert quote.customer_id == customer.id
+
+    # the buyer's confirmation comes from the stored draft
+    [message] = SENT
+    assert message["to"] == "juan@example.com"
+    assert "1 × Envío por paquetería: $116.00" in message["text"]
+    assert "Total pagado: $465.28 MXN (IVA incluido)" in message["text"]
+    assert "Envío por paquetería a: Av. Juárez 12, Col. Centro" in message["text"]
+
+
+def test_payment_without_order_data_is_checked_against_the_stored_total():
+    ref = _ref()
+    _checkout(ref)
+    res = _post_null(ref, "approved", amount=Decimal("300.00"))
+    assert res["status"] == "draft" and res["payment_status"] == "mismatch"
+    problems = _notifications(_quote(ref).id, "web_order_problem")
+    assert len(problems) == 2 and "monto distinto" in problems[0].message
+    assert "$349.28" in problems[0].message
+    assert _tasks(ref) == [] and SENT == []
+
+
+def test_payment_without_order_data_or_draft_is_kept_and_flagged():
+    ref = _ref()
+    res = _post_null(ref, "approved")
+    # never "paid": nothing says what to deliver
+    assert res["status"] == "draft" and res["payment_status"] == "mismatch"
+    quote = _quote(ref)
+    assert quote.items == [] and quote.total == 0
+    assert quote.customer_name == web_orders.PLACEHOLDER_CUSTOMER_NAME
+    assert quote.payment_reference == "1234567890"
+    assert quote.created_by == "tienda-web"
+    problems = _notifications(quote.id, "web_order_problem")
+    assert len(problems) == 2
+    assert problems[0].message.startswith(f"Revisar pago {ref} — pedido sin datos:")
+    assert "$349.28 MXN" in problems[0].message and "#1234567890" in problems[0].message
+    assert _notifications(quote.id, "web_order_paid") == []
+    assert _tasks(ref) == [] and SENT == []
+
+    again = _post_null(ref, "approved")  # MP retries
+    assert again["duplicate"] is True
+    assert len(_notifications(quote.id, "web_order_problem")) == 2
+    assert _count_quotes(ref) == 1
+
+    res = _post_null(ref, "refunded")
+    assert res["payment_status"] == "refunded"
+    refunds = [
+        n
+        for n in _notifications(quote.id, "web_order_problem")
+        if "— reembolso:" in n.message
+    ]
+    assert len(refunds) == 2
+    assert "$349.28 MXN según Mercado Pago" in refunds[0].message
+
+
+def test_a_late_checkout_fills_the_placeholder():
+    ref = _ref()
+    res = _post_null(ref, "pending", payment_type="ticket")
+    assert res["payment_status"] == "pending"
+    [pending] = _notifications(_quote(ref).id, "web_order_pending")[:1]
+    assert "$349.28 MXN según Mercado Pago" in pending.message
+
+    # the checkout_created that timed out on the storefront lands late
+    res = _checkout(ref, phone="6189990002")
+    assert res["payment_status"] == "pending" and res["duplicate"] is False
+    quote = _quote(ref)
+    assert len(quote.items) == 1 and quote.total == PAID
+    assert quote.customer_name == "Juan Pérez"
+    assert quote.customer_phone == "+526189990002"
+    block = web_orders.read_notes_block(quote.notes)
+    assert block["lines"][0]["line_total"] == 349.28
+
+    res = _post_null(ref, "approved", payment_type="ticket")
+    assert res["status"] == "accepted" and res["payment_status"] == "approved"
+    assert len(_tasks(ref)) == 1 and len(SENT) == 1
+
+
+def test_unusable_order_part_on_a_payment_falls_back_to_the_draft():
+    ref, phone = _ref(), "6189990003"
+    _checkout(ref, phone=phone, invoice=VALID_INVOICE)
+    body = _order(ref, "payment_update", phone=phone, payment=_payment("approved"))
+    body["items"][0]["iva_rate"] = 0.08  # contract drift: the item no longer validates
+    r = _post(body)
+    assert r.status_code == 200, r.text
+    res = r.json()
+    assert res["status"] == "accepted" and res["payment_status"] == "approved"
+    assert {"order_data_invalid:items", "incomplete_order_data"} <= set(res["warnings"])
+    quote = _quote(ref)
+    assert len(quote.items) == 1
+    assert web_orders.read_notes_block(quote.notes)["invoice"]["rfc"] == "PEPJ800101AB1"
+
+    # only the invoice is unusable: the rest of the order is still used
+    ref = _ref()
+    _checkout(ref, invoice=VALID_INVOICE)
+    body = _order(
+        ref,
+        "payment_update",
+        payment=_payment("approved"),
+        invoice={**VALID_INVOICE, "rfc": "X" * 30},
+    )
+    r = _post(body)
+    assert r.status_code == 200, r.text
+    assert "order_data_invalid:invoice" in r.json()["warnings"]
+    block = web_orders.read_notes_block(_quote(ref).notes)
+    assert block["invoice"]["rfc"] == "PEPJ800101AB1"
+
+
+def test_payment_with_a_broken_envelope_is_still_422():
+    body = _order(_ref(), "payment_update", payment=_payment("approved"))
+    body["items"][0]["quantity"] = 0
+    body["external_reference"] = "WEB-2609-NOPE"
+    assert _post(body).status_code == 422
+    body = _order(_ref(), "payment_update", payment=_payment("approved"))
+    body["mercadopago"]["status"] = "accredited"
+    assert _post(body).status_code == 422
+    assert _find(body["external_reference"]) is None
+
+
+# ── unauthenticated input: CRM, flood, markup ────────────────────────────────
+
+
+def test_unpaid_checkouts_never_touch_the_crm():
+    phone = "+526181112222"
+    db = TestingSession()
+    try:
+        db.add(
+            Customer(phone_e164=phone, display_name="Cliente Real", source="whatsapp")
+        )
+        db.commit()
+        before = db.query(Customer).count()
+    finally:
+        db.close()
+
+    evil = {
+        "phone": "618 111 2222",
+        "email": "evil@attacker.test",
+        "invoice": {**VALID_INVOICE, "rfc": "XAXX010101AB1"},
+    }
+    ref = _ref()
+    _checkout(ref, **evil)
+    _checkout(_ref(), phone="6183334444")  # a new phone: no new customer either
+    _pay(ref, "rejected", order_kw=evil)
+    _pay(ref, "pending", payment_type="ticket", payment_id=2, order_kw=evil)
+
+    [customer] = _customers(phone)
+    assert customer.email is None and customer.rfc is None
+    assert customer.display_name == "Cliente Real" and customer.has_purchased is False
+    assert _customers("+526183334444") == [] and _quote(ref).customer_id is None
+    db = TestingSession()
+    try:
+        assert db.query(Customer).count() == before
+    finally:
+        db.close()
+
+    # an approved payment is what links the buyer (a real payment backs it)
+    _pay(ref, "approved", payment_id=2, order_kw=evil)
+    [customer] = _customers(phone)
+    assert customer.has_purchased is True and _quote(ref).customer_id == customer.id
+
+
+def test_unpaid_drafts_are_capped_per_hour(monkeypatch):
+    db = TestingSession()
+    try:
+        recent = (
+            db.query(Quote)
+            .filter(
+                Quote.created_by == "tienda-web", Quote.payment_status == "checkout"
+            )
+            .count()
+        )
+    finally:
+        db.close()
+    monkeypatch.setenv("WEB_ORDERS_MAX_DRAFTS_PER_HOUR", str(recent + 1))
+    ref = _ref()
+    _checkout(ref)  # the last draft allowed this hour
+    over = _ref()
+    r = _post(_order(over))
+    assert r.status_code == 429, r.text
+    assert _find(over) is None
+    # a replayed draft and a payment are never capped
+    assert _post(_order(ref)).status_code == 200
+    assert _pay(over, "approved")["status"] == "accepted"
+    monkeypatch.setenv("WEB_ORDERS_MAX_DRAFTS_PER_HOUR", "0")  # 0 turns the cap off
+    assert _post(_order(_ref())).status_code == 200
+
+
+MARKUP_ADDRESS = {
+    "method": "paqueteria",
+    "address": {
+        "street": "Av. Juárez",
+        "cp": "34410",
+        "municipio": "<b>Durango</b>",
+        "references": "</p><img src=x onerror=alert(1)>",
+    },
+    "cost_total": 0,
+}
+
+
+@pytest.mark.parametrize(
+    "order_kw, problems",
+    [
+        ({"name": "Juan<script src=//x.co/a></script>"}, {"markup_in:customer.name"}),
+        (
+            {"delivery": MARKUP_ADDRESS},
+            {"markup_in:address.municipio", "markup_in:address.references"},
+        ),
+        (
+            {"invoice": {**VALID_INVOICE, "razon_social": "<i>ACME</i>"}},
+            {"markup_in:invoice.razon_social"},
+        ),
+    ],
+)
+def test_markup_in_buyer_fields_is_refused_at_checkout(order_kw, problems):
+    ref = _ref()
+    r = _post(_order(ref, **order_kw))
+    assert r.status_code == 422, r.text
+    assert problems <= set(r.json()["detail"]["problems"])
+    assert _find(ref) is None
+
+
+def test_markup_on_a_paid_order_is_recorded_with_a_warning():
+    ref = _ref()
+    res = _pay(ref, "approved", order_kw={"name": "Juan <b>Pérez</b>"})
+    assert res["status"] == "accepted"
+    assert "markup_in:customer.name" in res["warnings"]
+    [message] = SENT  # the buyer's email shows it as text
+    assert "Juan <b>Pérez</b>" not in message["html"]
+    assert "Juan &lt;b&gt;Pérez&lt;/b&gt;" in message["html"]
+
+
+def test_test_mode_checkout_is_ignored_and_logged(caplog):
+    ref = _ref()
+    body = _order(ref)
+    body["mercadopago"]["live_mode"] = False
+    with caplog.at_level(logging.WARNING, logger="services.web_orders"):
+        r = _post(body)
+    assert r.status_code == 200 and r.json()["ignored"] == "test_mode"
+    assert _find(ref) is None
+    assert "WEB_ORDERS_ALLOW_TEST" in caplog.text and ref in caplog.text
+
+
+# ── the lifecycle of one payment ─────────────────────────────────────────────
+
+
+def test_same_payment_moves_that_rank_lower_are_applied():
+    # an OXXO ticket that is never paid expires (cancelled / expired)
+    ref = _ref()
+    _checkout(ref)
+    _pay(ref, "pending", payment_type="ticket")
+    res = _pay(ref, "cancelled", payment_type="ticket")
+    assert res["payment_status"] == "cancelled" and res["status"] == "draft"
+    assert res["duplicate"] is False
+    block = web_orders.read_notes_block(_quote(ref).notes)
+    assert block["payment"]["status"] == "cancelled"
+
+    # a manual review that ends in a rejection
+    ref = _ref()
+    _pay(ref, "in_process")
+    assert _pay(ref, "rejected")["payment_status"] == "rejected"
+
+    # another payment's failure never downgrades the one in flight
+    ref = _ref()
+    _pay(ref, "pending", payment_type="ticket")
+    assert _pay(ref, "cancelled", payment_id=31337)["payment_status"] == "pending"
+
+
+def test_resolved_dispute_reopens_the_sale_but_refunds_and_chargebacks_stay():
+    ref = _ref()
+    _pay(ref, "approved")
+    _pay(ref, "in_mediation")
+    res = _pay(ref, "approved")  # MP resolved the dispute in the seller's favour
+    assert res["payment_status"] == "approved" and res["status"] == "accepted"
+    quote = _quote(ref)
+
+    def resolved():
+        return [
+            n
+            for n in _notifications(quote.id, "web_order_paid")
+            if "— disputa resuelta:" in n.message
+        ]
+
+    assert len(resolved()) == 2
+    assert len(_tasks(ref)) == 1 and len(SENT) == 1  # nothing repeated
+    _pay(ref, "approved")  # replay
+    assert len(resolved()) == 2
+
+    for final in ("refunded", "charged_back"):
+        ref = _ref()
+        _pay(ref, "approved")
+        _pay(ref, final)
+        assert _pay(ref, "approved")["payment_status"] == final
+
+
+# ── invoice task: CFDI-ready values ──────────────────────────────────────────
+
+
+def test_invoice_task_gives_cfdi_ready_unit_values():
+    ref = _ref()
+    charola = {
+        "handle": "charola-plastica-negra-rigida-de-200-cavidades",
+        "product_id": None,
+        "description": "Charola plástica negra 200 cavidades",
+        "unit_label": "pieza",
+        "quantity": 10,
+        "unit_price": 45.16,
+        "iva_rate": 0.16,
+        "unit_total": 52.39,
+    }
+    totals = {
+        "subtotal": 451.60,
+        "iva_amount": 72.30,
+        "total": 523.90,
+        "currency": "MXN",
+    }
+    _pay(
+        ref,
+        "approved",
+        amount=Decimal("523.90"),
+        order_kw={"items": [charola], "totals": totals, "invoice": VALID_INVOICE},
+    )
+    [invoice_task] = [t for t in _tasks(ref) if t.category_id == FACTURAS_ID]
+    description = invoice_task.description
+    # 16% on the stored base ($451.60) would make a $523.86 CFDI for $523.90 paid
+    assert (
+        "10 × Charola plástica negra 200 cavidades (pieza) · valor unitario sin IVA "
+        "45.163793 · IVA 16% · importe con IVA $523.90"
+    ) in description
+    assert "CFDI: subtotal $451.64 + IVA $72.26 = total $523.90 MXN." in description
+    assert "Coincide con lo cobrado por Mercado Pago: $523.90 MXN." in description
+
+
+def test_invoice_task_flags_a_cfdi_that_would_not_match_the_charge():
+    from types import SimpleNamespace
+
+    quote = SimpleNamespace(quote_number="WEB-260910-TAAAAA", total=Decimal("523.91"))
+    mp = SimpleNamespace(payment_id="1", payment_type_id="credit_card")
+    line = {
+        "description": "Charola",
+        "unit_label": None,
+        "quantity": 10,
+        "iva_rate": 0.16,
+        "unit_total": 52.39,
+        "line_total": 523.90,
+    }
+    text = web_orders._invoice_description(quote, mp, VALID_INVOICE, [line], [])
+    assert "Ojo: Mercado Pago cobró $523.91 MXN" in text and "$0.01" in text
+
+
+# ── buyer confirmation ───────────────────────────────────────────────────────
+
+
+def test_buyer_gets_one_confirmation_with_the_order_and_the_warranty():
+    ref, phone = _ref(), "6185550142"
+    _checkout(ref, phone=phone, invoice=VALID_INVOICE)
+    assert SENT == []  # nothing before the payment
+    _pay(ref, "approved", order_kw={"phone": phone, "invoice": VALID_INVOICE})
+    [message] = SENT
+    assert message["to"] == "juan@example.com"
+    assert message["reply_to"] == "ventas@todoparaelcampo.com.mx"
+    assert ref in message["subject"]
+    text = message["text"]
+    for expected in (
+        f"Pedido: {ref}",
+        "Fecha de pago: 10/09/2026 12:31",
+        "Pagado con: Mercado Pago · tarjeta de crédito · operación #1234567890",
+        (
+            "2 × Trampa azul POPUSA, paquete con 20 piezas (paquete de 20 piezas): "
+            "$174.64 c/u (IVA 16% incluido) = $349.28"
+        ),
+        "Subtotal sin IVA: $301.10",
+        "IVA: $48.18",
+        "Total pagado: $349.28 MXN (IVA incluido)",
+        f"Recoger en tienda: {STORE_ADDRESS}",
+        "RFC PEPJ800101AB1",
+        "5 días hábiles contados a partir de que recibes tu pedido",
+        "Póliza de garantía",
+        "mínimo de 90 días contra defectos de fabricación",
+        f"Domicilio para hacer válida la garantía: {STORE_ADDRESS}.",
+        "IMPAG TECH S.A.P.I. de C.V. (Todo Para El Campo) · RFC ITE210716D9A",
+    ):
+        assert expected in text, expected
+    assert "ITE210716D9A" in message["html"] and "<table" in message["html"]
+
+    quote = _quote(ref)
+    block = web_orders.read_notes_block(quote.notes)
+    assert block["buyer_confirmation"]["to"] == "juan@example.com"
+    fulfillment = next(t for t in _tasks(ref) if t.category_id == POR_ENVIAR_ID)
+    assert (
+        "Confirmación del pedido enviada al cliente a juan@example.com."
+        in fulfillment.description
+    )
+
+    _pay(ref, "approved", order_kw={"phone": phone})  # MP retries: never twice
+    assert len(SENT) == 1
+
+
+def test_confirmation_waits_until_it_is_configured(monkeypatch):
+    monkeypatch.delenv("WEB_ORDER_STORE_ADDRESS")
+    ref = _ref()
+    res = _pay(ref, "approved")
+    assert "buyer_confirmation_not_sent:not_configured" in res["warnings"]
+    assert SENT == []
+    [task] = _tasks(ref)
+    assert "NO se envió" in task.description
+    # once it is configured, Mercado Pago's next retry sends it
+    monkeypatch.setenv("WEB_ORDER_STORE_ADDRESS", STORE_ADDRESS)
+    _pay(ref, "approved")
+    assert [m["ref"] for m in SENT] == [ref]
+
+
+def test_no_confirmation_without_a_buyer_email():
+    ref = _ref()
+    res = _pay(ref, "approved", order_kw={"email": None})
+    assert "buyer_confirmation_not_sent:no_email" in res["warnings"]
+    assert SENT == []
+
+
+def test_confirmation_is_posted_to_resend_with_a_timeout_and_idempotency_key(
+    monkeypatch,
+):
+    calls = []
+
+    class _Response:
+        status_code = 200
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return _Response()
+
+    monkeypatch.setattr(web_order_email.requests, "post", fake_post)
+    message = {
+        "ref": "WEB-260910-TAAAAA",
+        "to": "juan@example.com",
+        "from": web_order_email.DEFAULT_FROM,
+        "reply_to": web_order_email.SELLER_EMAIL,
+        "subject": "s",
+        "text": "t",
+        "html": "h",
+    }
+    assert web_order_email.send_buyer_confirmation(message) is True
+    [(url, kwargs)] = calls
+    assert url == "https://api.resend.com/emails"
+    assert kwargs["timeout"] == web_order_email.SEND_TIMEOUT_SECONDS
+    assert (
+        kwargs["headers"]["Idempotency-Key"]
+        == "web-order-confirmation/WEB-260910-TAAAAA"
+    )
+    assert kwargs["json"]["to"] == ["juan@example.com"]
+
+    _Response.status_code = 422
+    assert web_order_email.send_buyer_confirmation(message) is False
+
+    def boom(url, **kwargs):
+        raise requests.Timeout()
+
+    monkeypatch.setattr(web_order_email.requests, "post", boom)
+    assert web_order_email.send_buyer_confirmation(message) is False  # never raises
+    monkeypatch.delenv("RESEND_API_KEY")
+    assert web_order_email.send_buyer_confirmation(message) is False

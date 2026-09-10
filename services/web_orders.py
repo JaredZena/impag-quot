@@ -13,7 +13,9 @@ is no migration:
   otherwise, so a web draft someone deliberately sent stays "sent".
 - QuoteItem: the cart, written once when the order is first recorded and never
   touched again (someone may have edited it in the admin since).
-- Customer: matched by normalized phone; source "web"; fills empty fields only.
+- Customer: matched by normalized phone; source "web"; fills empty fields only,
+  and only once a payment is approved. checkout_created is unauthenticated
+  buyer input (anyone can start a checkout), so it never touches the CRM.
 - quote.notes: a machine-owned JSON block (delivery, invoice, payment, warnings)
   between "[Pedido web ...]" and "[/Pedido web]" marker lines. The admin app's
   "Pedido web" panel parses it; human text outside the block is preserved.
@@ -23,15 +25,28 @@ is no migration:
   when an invoice was requested), assigned to WEB_ORDER_ASSIGNEE and created
   by the system task user.
 
+- A payment_update may arrive without its order, when the storefront could not
+  rebuild it from the payment's metadata. It then updates the draft stored at
+  checkout and checks the amount against the stored total. If there is no
+  draft either, it records a placeholder quote with no items, flagged "pedido
+  sin datos". The placeholder is never marked paid, because nothing says what
+  to deliver.
+- Buyer confirmation: on approval the buyer gets one email with the order, the
+  póliza de garantía and the revocation right (services/web_order_email.py).
+  It is sent after the commit.
+
 Mercado Pago retries webhooks and may deliver them out of order, so all of this
-is idempotent: a replay changes nothing, and a payment state never moves
-backwards (PAYMENT_RANK).
+is idempotent: a replay changes nothing. A payment state never moves backwards
+(PAYMENT_RANK), except along the lifecycle of the payment already on record
+(SAME_PAYMENT_TRANSITIONS): an OXXO ticket that expires, a review that ends in
+a rejection, or a dispute resolved in the seller's favour.
 """
 
 import json
+import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -51,7 +66,10 @@ from models import (
     TaskUser,
     get_next_task_number,
 )
+from services import web_order_email
 from services.quote_followup import _resolve_system_user_id
+
+logger = logging.getLogger(__name__)
 
 CREATED_BY = "tienda-web"
 BUSINESS_TZ = ZoneInfo("America/Mexico_City")  # same business clock as routes/pos.py
@@ -61,6 +79,15 @@ MONEY_TOLERANCE = Decimal("0.01")
 IVA_16 = Decimal("0.16")
 IVA_RATES = (Decimal(0), IVA_16)
 SHIPPING_HANDLE = "envio"
+
+# A payment whose order never reached the backend (no draft stored at checkout,
+# no order data in the event) is recorded under this name, with no items.
+PLACEHOLDER_CUSTOMER_NAME = "Pedido web sin datos del cliente"
+
+# Unpaid drafts (checkout_created) accepted per hour before the endpoint
+# answers 429. checkout_created is unauthenticated buyer input; this caps a
+# flood of it. Payments are never capped.
+DEFAULT_MAX_DRAFTS_PER_HOUR = 100
 
 FULFILLMENT_CATEGORY = "Por enviar"
 INVOICE_CATEGORY = "Solicitud de facturas"
@@ -96,6 +123,24 @@ PAYMENT_RANK = {
     "charged_back": 4,
 }
 
+# Moves in the lifecycle of ONE Mercado Pago payment, as raw MP statuses, that
+# PAYMENT_RANK alone would call stale. The storefront re-reads the payment
+# from MP, so when the payment on record moves like this it is news, not a
+# late event:
+# - an OXXO or SPEI ticket expires or is cancelled;
+# - a manual review ends in a rejection;
+# - a dispute (in_mediation, stored as charged_back) is resolved in the
+#   seller's favour, and the payment is approved again.
+# An event for a different payment id still follows the rank ladder.
+SAME_PAYMENT_TRANSITIONS = frozenset(
+    {
+        (before, after)
+        for before in ("pending", "in_process", "authorized")
+        for after in ("rejected", "cancelled")
+    }
+    | {("in_mediation", "approved")}
+)
+
 # Problem kind -> stable wording after "Revisar pago WEB-... — ". The resulting
 # prefix is also what de-duplicates web_order_problem notifications per kind.
 PROBLEM_LABELS = {
@@ -104,6 +149,7 @@ PROBLEM_LABELS = {
     "charged_back": "contracargo",
     "in_mediation": "disputa",
     "duplicate_payment": "cobro duplicado",
+    "missing_order": "pedido sin datos",
 }
 
 PAYMENT_TYPE_LABELS = {
@@ -163,6 +209,12 @@ NOTES_BLOCK_RE = re.compile(
     re.MULTILINE | re.DOTALL,
 )
 
+# Buyer-typed text never needs angle brackets. They only show up in markup
+# aimed at the HTML pages and emails that display these fields.
+MARKUP_RE = re.compile(r"[<>]")
+
+CFDI_UNIT_QUANTUM = Decimal("0.000001")  # CFDI 4.0 ValorUnitario: up to 6 decimals
+
 
 class OrderRejected(Exception):
     """A checkout the storefront must not record (HTTP 422)."""
@@ -170,6 +222,14 @@ class OrderRejected(Exception):
     def __init__(self, problems: list[str]):
         super().__init__(", ".join(problems))
         self.problems = problems
+
+
+class DraftLimitReached(Exception):
+    """Too many unpaid web drafts in the last hour (HTTP 429)."""
+
+    def __init__(self, limit: int):
+        super().__init__(f"more than {limit} unpaid web drafts in the last hour")
+        self.limit = limit
 
 
 # ── env (read per request, so App Runner changes apply without a deploy) ────
@@ -198,6 +258,15 @@ def _test_payments_allowed() -> bool:
     return os.getenv("WEB_ORDERS_ALLOW_TEST", "").strip().lower() == "true"
 
 
+def _max_drafts_per_hour() -> int:
+    """WEB_ORDERS_MAX_DRAFTS_PER_HOUR (default 100); 0 or less turns the cap off."""
+    raw = os.getenv("WEB_ORDERS_MAX_DRAFTS_PER_HOUR", "").strip()
+    try:
+        return int(raw) if raw else DEFAULT_MAX_DRAFTS_PER_HOUR
+    except ValueError:
+        return DEFAULT_MAX_DRAFTS_PER_HOUR
+
+
 # ── small helpers ────────────────────────────────────────────────────────────
 
 
@@ -215,6 +284,11 @@ def _money(value: Any) -> str:
 
 def _qty(value: Any) -> str:
     return format(_dec(value).normalize(), "f")
+
+
+def _json_number(value: Any) -> int | float:
+    number = _dec(value)
+    return int(number) if number == number.to_integral_value() else float(number)
 
 
 def _utc(dt: datetime) -> datetime:
@@ -315,7 +389,32 @@ def order_problems(order: Any) -> list[str]:
             problems.append("invalid_uso_cfdi")
         if not EMAIL_RE.match((invoice.email or "").strip()):
             problems.append("invalid_invoice_email")
+    problems += [f"markup_in:{field}" for field in _markup_fields(order)]
     return problems
+
+
+def _markup_fields(order: Any) -> list[str]:
+    """Buyer-typed fields that contain < or >. These fields end up in HTML
+    pages (the public quote page) and emails."""
+    buyer = order.customer
+    candidates = [
+        ("customer.name", buyer.name),
+        ("customer.email", buyer.email),
+        ("customer.location", buyer.location),
+    ]
+    address = order.delivery.address
+    if address is not None:
+        candidates += [
+            (f"address.{field}", getattr(address, field, None))
+            for field in ADDRESS_FIELDS
+        ]
+    invoice = order.invoice
+    if invoice is not None:
+        candidates += [
+            ("invoice.razon_social", invoice.razon_social),
+            ("invoice.email", invoice.email),
+        ]
+    return [name for name, value in candidates if value and MARKUP_RE.search(value)]
 
 
 # ── the JSON block in quote.notes ────────────────────────────────────────────
@@ -399,16 +498,19 @@ def write_notes_block(notes: str | None, ref: str, data: dict) -> str:
 def _block_data(
     existing: dict,
     ref: str,
-    delivery_data: dict,
+    delivery_data: dict | None,
     invoice_data: Any,
     payment_data: dict | None,
     warnings: list[str],
+    *,
+    lines: list[dict] | None = None,
+    buyer_confirmation: dict | None = None,
 ) -> dict:
     previous = existing.get("warnings")
     if not isinstance(previous, list):
         previous = []
     merged = {w for w in previous if isinstance(w, str)} | set(warnings)
-    return {
+    data = {
         "v": 1,
         "ref": ref,
         "delivery": delivery_data,
@@ -418,6 +520,15 @@ def _block_data(
         ),
         "warnings": sorted(merged)[:30],
     }
+    # What the buyer was charged per line (_charged_lines), written when the
+    # order is first recorded and carried forward on every later event.
+    kept_lines = lines if lines is not None else existing.get("lines")
+    if isinstance(kept_lines, list) and kept_lines:
+        data["lines"] = kept_lines
+    confirmation = buyer_confirmation or existing.get("buyer_confirmation")
+    if isinstance(confirmation, dict):
+        data["buyer_confirmation"] = confirmation
+    return data
 
 
 # ── quote upsert ─────────────────────────────────────────────────────────────
@@ -470,34 +581,164 @@ def _cart_lines(db: Session, order: Any, warnings: list[str]) -> list[QuoteItem]
     return lines
 
 
-def _new_quote(db: Session, order: Any, warnings: list[str]) -> Quote:
+LINE_KEYS = frozenset(
+    {"description", "quantity", "iva_rate", "unit_total", "line_total"}
+)
+
+
+def _charged_lines(order: Any) -> list[dict]:
+    """What the buyer was charged per line, IVA included, priced the way the
+    storefront prices it (DESIGN §2: unit_total = round2(price × (1 + IVA)) and
+    line_total = unit_total × qty).
+
+    Kept in the notes block because QuoteItem stores only the pre-IVA price, and
+    a shipping line's IVA-inclusive total can't always be rebuilt from that to
+    the centavo. The invoice task and the buyer confirmation read it back."""
+    lines: list[dict] = []
+    for item in order.items:
+        quantity = _dec(item.quantity)
+        unit_total = _round2(item.unit_total)
+        lines.append(
+            {
+                "description": item.description.strip()[:500],
+                "unit_label": _clean(item.unit_label),
+                "quantity": _json_number(quantity),
+                "iva_rate": float(_dec(item.iva_rate)),
+                "unit_total": float(unit_total),
+                "line_total": float(_round2(unit_total * quantity)),
+            }
+        )
+    shipping = _round2(order.delivery.cost_total)
+    if shipping > 0 and not _has_shipping_line(order):
+        lines.append(
+            {
+                "description": SHIPPING_LINE_LABELS.get(order.delivery.method, "Envío"),
+                "unit_label": None,
+                "quantity": 1,
+                "iva_rate": float(IVA_16),
+                "unit_total": float(shipping),
+                "line_total": float(shipping),
+            }
+        )
+    return lines
+
+
+def _lines_from_items(quote: Quote) -> list[dict]:
+    """The same per-line figures, rebuilt from the QuoteItems for a notes block
+    that has none. Uses the storefront's rule; a shipping line can come out a
+    centavo off, and the invoice task's total check flags that."""
+    lines: list[dict] = []
+    for item in sorted(quote.items, key=lambda i: i.sort_order or 0):
+        rate = IVA_16 if item.iva_applicable else Decimal(0)
+        quantity = _dec(item.quantity)
+        unit_total = _round2(_dec(item.unit_price) * (1 + rate))
+        lines.append(
+            {
+                "description": item.description,
+                "unit_label": item.unit,
+                "quantity": _json_number(quantity),
+                "iva_rate": float(rate),
+                "unit_total": float(unit_total),
+                "line_total": float(_round2(unit_total * quantity)),
+            }
+        )
+    return lines
+
+
+def _order_lines(quote: Quote, block: dict) -> list[dict]:
+    lines = block.get("lines")
+    if (
+        isinstance(lines, list)
+        and lines
+        and all(isinstance(line, dict) and LINE_KEYS <= line.keys() for line in lines)
+    ):
+        return lines
+    return _lines_from_items(quote)
+
+
+def _order_fields(order: Any) -> dict:
     buyer = order.customer
     # An invalid phone was already flagged; keep what the buyer typed.
     phone = _valid_phone(buyer.phone) or buyer.phone.strip()
-    quote = Quote(
-        quote_number=order.external_reference,
-        status="draft",
-        customer_name=buyer.name.strip()[:200],
-        customer_phone=phone[:30],
-        customer_email=(_clean(buyer.email) or "")[:255] or None,
-        customer_location=(_clean(buyer.location) or "")[:300] or None,
-        subtotal=_round2(order.totals.subtotal),
-        iva_amount=_round2(order.totals.iva_amount),
-        total=_round2(order.totals.total),
-        created_by=CREATED_BY,
-        assigned_to=_assignee_email(),
-    )
+    return {
+        "customer_name": buyer.name.strip()[:200],
+        "customer_phone": phone[:30],
+        "customer_email": (_clean(buyer.email) or "")[:255] or None,
+        "customer_location": (_clean(buyer.location) or "")[:300] or None,
+        "subtotal": _round2(order.totals.subtotal),
+        "iva_amount": _round2(order.totals.iva_amount),
+        "total": _round2(order.totals.total),
+    }
+
+
+def _new_quote(db: Session, order: Any, warnings: list[str]) -> Quote:
+    common = {
+        "quote_number": order.external_reference,
+        "status": "draft",
+        "created_by": CREATED_BY,
+        "assigned_to": _assignee_email(),
+    }
+    if not order.has_order_data:
+        # A payment for an order the backend never saw: no draft stored at
+        # checkout and no order data in the event. It is recorded so the money
+        # isn't lost. It has no items, so _classify_payment never marks it paid.
+        return Quote(
+            **common,
+            customer_name=PLACEHOLDER_CUSTOMER_NAME,
+            customer_phone="",
+            subtotal=Decimal(0),
+            iva_amount=Decimal(0),
+            total=Decimal(0),
+            items=[],
+        )
+    quote = Quote(**common, **_order_fields(order))
     quote.items = _cart_lines(db, order, warnings)
     return quote
 
 
+def _adopt_order(db: Session, quote: Quote, order: Any, warnings: list[str]) -> None:
+    """A placeholder (a quote with no items) takes the order from the first
+    later event that carries it, for example a checkout_created that timed out
+    on the storefront and was committed after the payment arrived."""
+    for field, value in _order_fields(order).items():
+        setattr(quote, field, value)
+    quote.items = _cart_lines(db, order, warnings)
+
+
+def _check_draft_limit(db: Session, now: datetime) -> None:
+    """Refuse a new unpaid draft past WEB_ORDERS_MAX_DRAFTS_PER_HOUR. Anyone can
+    start a checkout, so a script could otherwise bury the real web orders in
+    junk drafts."""
+    limit = _max_drafts_per_hour()
+    if limit <= 0:
+        return
+    recent = (
+        db.query(func.count(Quote.id))
+        .filter(
+            Quote.created_by == CREATED_BY,
+            Quote.payment_status == "checkout",
+            Quote.created_at >= now - timedelta(hours=1),
+        )
+        .scalar()
+    )
+    if recent >= limit:
+        logger.warning(
+            "web drafts: %s unpaid in the last hour (limit %s); refusing checkout_created",
+            recent,
+            limit,
+        )
+        raise DraftLimitReached(limit)
+
+
 def _get_or_create_quote(
-    db: Session, order: Any, warnings: list[str]
+    db: Session, order: Any, warnings: list[str], now: datetime
 ) -> tuple[Quote, bool]:
     ref = order.external_reference
     quote = _find_quote(db, ref)
     if quote is not None:
         return quote, False
+    if order.event == "checkout_created":
+        _check_draft_limit(db, now)  # never for a payment: money is never refused
     try:
         with db.begin_nested():
             quote = _new_quote(db, order, warnings)
@@ -528,6 +769,10 @@ def _classify_payment(quote: Quote, mp: Any) -> tuple[str, str | None]:
     """(payment_status, problem kind or None) for a Mercado Pago payment."""
     payment_status = MP_STATUS_MAP[mp.status]
     if payment_status == "approved":
+        if not quote.items:
+            # No order recorded (see _new_quote), so there is no total to check
+            # the amount against and nothing to deliver: never "paid".
+            return "mismatch", "missing_order"
         amount = mp.transaction_amount
         if amount is None or abs(_dec(amount) - _dec(quote.total)) > MONEY_TOLERANCE:
             return "mismatch", "mismatch"
@@ -537,12 +782,36 @@ def _classify_payment(quote: Quote, mp: Any) -> tuple[str, str | None]:
     return payment_status, None
 
 
-def _decide(current: str | None, new: str) -> str:
-    """'apply' (moves forward), 'same' (the current state again) or 'stale'."""
+def _recorded_mp_status(quote: Quote, block: dict) -> str | None:
+    """The raw MP status of the payment on record. payment_status can't give it:
+    in_process and authorized are stored as "pending", in_mediation as
+    "charged_back". The notes block keeps the raw value."""
+    payment = block.get("payment")
+    if (
+        isinstance(payment, dict)
+        and payment.get("payment_id") == quote.payment_reference
+        and isinstance(payment.get("status"), str)
+    ):
+        return payment["status"]
+    return "approved" if quote.payment_status == "mismatch" else quote.payment_status
+
+
+def _decide(
+    current: str | None,
+    new: str,
+    transition: tuple[str | None, str | None] | None = None,
+) -> str:
+    """'apply' (moves forward), 'same' (the current state again) or 'stale'.
+
+    `transition` is (recorded, new) raw MP status when the event is for the
+    payment already on record. A move in SAME_PAYMENT_TRANSITIONS then applies
+    even if it ranks lower."""
     if current is None:
         return "apply"
     if new == current:
         return "same"
+    if transition in SAME_PAYMENT_TRANSITIONS:
+        return "apply"
     current_rank = PAYMENT_RANK.get(current, -1)
     new_rank = PAYMENT_RANK[new]
     if new_rank > current_rank:
@@ -568,16 +837,38 @@ def _find_customer(db: Session, phone: str) -> Customer | None:
     return db.query(Customer).filter(Customer.phone_e164 == phone).first()
 
 
+def _buyer(order: Any, quote: Quote) -> dict:
+    """Who paid: from the event's order data, or else from what checkout stored
+    on the quote."""
+    if order.has_order_data:
+        buyer = order.customer
+        return {
+            "name": buyer.name,
+            "phone": buyer.phone,
+            "email": buyer.email,
+            "location": buyer.location,
+        }
+    return {
+        "name": quote.customer_name,
+        "phone": quote.customer_phone,
+        "email": quote.customer_email,
+        "location": quote.customer_location,
+    }
+
+
 def _link_customer(
     db: Session,
     quote: Quote,
-    order: Any,
+    buyer: dict,
     invoice_data: Any,
     now: datetime,
-    purchased: bool,
 ) -> None:
-    buyer = order.customer
-    phone = _valid_phone(buyer.phone)
+    """Match or create the CRM customer of a PAID order; fill empty fields only.
+
+    Only an approved payment reaches this. checkout_created is unauthenticated
+    buyer input: if it could create customers, or fill an existing customer's
+    empty email or RFC by phone number, anyone could write into the CRM."""
+    phone = _valid_phone(buyer.get("phone") or "")
     if phone is None:
         return  # already flagged invalid_phone; nothing reliable to match on
     customer = _find_customer(db, phone)
@@ -597,14 +888,16 @@ def _link_customer(
 
     # The backfill's fill-empty-only semantics. Timestamps are handled below:
     # sqlite reads them back naive, so compare in UTC explicitly.
-    email = buyer.email if buyer.email and EMAIL_RE.match(buyer.email) else None
+    email = buyer.get("email")
+    if not (email and EMAIL_RE.match(email) and not MARKUP_RE.search(email)):
+        email = None
     _touch(
         customer,
-        name=buyer.name,
+        name=buyer.get("name"),
         email=email,
-        location=buyer.location,
+        location=buyer.get("location"),
         source="web",
-        purchased=purchased,
+        purchased=True,
     )
     rfc = invoice_data.get("rfc") if isinstance(invoice_data, dict) else None
     if rfc and RFC_RE.match(rfc) and not customer.rfc:
@@ -630,6 +923,15 @@ def _delivery_label(delivery_data: Any) -> str:
     return DELIVERY_LABELS.get(method, method or "sin especificar")
 
 
+def _order_total_text(quote: Quote, mp: Any) -> str:
+    """The order's total, or Mercado Pago's amount when no order was recorded."""
+    if quote.items:
+        return f"{_money(quote.total)} MXN"
+    if mp is not None and mp.transaction_amount is not None:
+        return f"{_money(mp.transaction_amount)} MXN según Mercado Pago"
+    return "monto desconocido"
+
+
 def _paid_message(
     quote: Quote, mp: Any, delivery_data: dict, invoice_data: Any, warnings: list[str]
 ) -> str:
@@ -648,9 +950,13 @@ def _paid_message(
 def _pending_message(quote: Quote, mp: Any) -> str:
     return (
         f"Pedido web {quote.quote_number} con pago pendiente: {quote.customer_name}, "
-        f"{_money(quote.total)} MXN ({_payment_label(mp)}). "
+        f"{_order_total_text(quote, mp)} ({_payment_label(mp)}). "
         "No entregar hasta que Mercado Pago acredite el pago."
     )
+
+
+def _dispute_resolved_prefix(quote: Quote) -> str:
+    return f"Pedido web {quote.quote_number} — disputa resuelta:"
 
 
 def _problem_prefix(kind: str, quote: Quote, mp: Any) -> str:
@@ -661,27 +967,34 @@ def _problem_prefix(kind: str, quote: Quote, mp: Any) -> str:
 
 
 def _problem_detail(kind: str, quote: Quote, mp: Any) -> str:
-    name, total = quote.customer_name, _money(quote.total)
+    name, total = quote.customer_name, _order_total_text(quote, mp)
+    charged = (
+        f"{_money(mp.transaction_amount)} MXN"
+        if mp.transaction_amount is not None
+        else "un monto desconocido"
+    )
     if kind == "mismatch":
-        charged = (
-            _money(mp.transaction_amount)
-            if mp.transaction_amount is not None
-            else "un monto desconocido"
-        )
         return (
-            f"Mercado Pago aprobó {charged} y el pedido suma {total} MXN. "
+            f"Mercado Pago aprobó {charged} y el pedido suma {total}. "
             "No entregar hasta aclararlo."
         )
+    if kind == "missing_order":
+        return (
+            f"Mercado Pago aprobó el pago #{mp.payment_id} por {charged}, pero el "
+            "pedido llegó sin sus datos (cliente, productos, entrega). No entregar: "
+            f"busca la referencia {quote.quote_number} en Mercado Pago para "
+            "identificar al comprador y completa la cotización."
+        )
     if kind == "refunded":
-        return f"Mercado Pago reembolsó el pago de {name} ({total} MXN). No entregar."
+        return f"Mercado Pago reembolsó el pago de {name} ({total}). No entregar."
     if kind == "charged_back":
         return (
-            f"{name} desconoció el cargo con su banco ({total} MXN). "
+            f"{name} desconoció el cargo con su banco ({total}). "
             "No entregar y guarda la evidencia de entrega."
         )
     if kind == "in_mediation":
         return (
-            f"{name} abrió una disputa en Mercado Pago ({total} MXN). "
+            f"{name} abrió una disputa en Mercado Pago ({total}). "
             "No entregar hasta resolverla."
         )
     return (
@@ -776,8 +1089,14 @@ def _address_text(address: Any) -> str:
 
 
 def _fulfillment_description(
-    quote: Quote, mp: Any, delivery_data: dict, invoice_data: Any, warnings: list[str]
+    quote: Quote,
+    mp: Any,
+    delivery_data: dict | None,
+    invoice_data: Any,
+    warnings: list[str],
+    confirmation_note: str | None = None,
 ) -> str:
+    delivery_data = delivery_data or {}
     lines = [
         (
             f"Pedido pagado en línea con Mercado Pago ({_payment_label(mp)}), "
@@ -805,13 +1124,51 @@ def _fulfillment_description(
     ]
     if _invoice_requested(invoice_data):
         lines.append(f'Pidió factura: ver la tarea "Factura {quote.quote_number}".')
+    if confirmation_note:
+        lines.append(confirmation_note)
     if warnings:
         lines.append(f"Revisar: {', '.join(sorted(set(warnings)))}")
     return "\n".join(lines)
 
 
+def _rate_label(rate: Decimal) -> str:
+    return "16%" if rate > 0 else "tasa 0%"
+
+
+def _cfdi_concepts(
+    lines: list[dict],
+) -> tuple[list[tuple[dict, Decimal, Decimal]], Decimal, Decimal]:
+    """CFDI 4.0 concepts that add up to what was charged.
+
+    The charge rounds IVA per unit (DESIGN §2), so a 16% CFDI built on the
+    stored pre-IVA price can't reproduce it once qty > 1. For example, 10 ×
+    $52.39 was charged $523.90, but base $451.60 + 16% = $523.86. A
+    ValorUnitario of unit_total / (1 + rate) at 6 decimals, with IVA on that
+    base, lands on the charged total.
+
+    Returns [(line, valor_unitario, rate)], CFDI subtotal, CFDI IVA."""
+    rows = []
+    importe_sum = Decimal(0)
+    iva_sum = Decimal(0)
+    for line in lines:
+        rate = _dec(line["iva_rate"])
+        quantity = _dec(line["quantity"])
+        unit_value = (_dec(line["unit_total"]) / (1 + rate)).quantize(
+            CFDI_UNIT_QUANTUM, rounding=ROUND_HALF_UP
+        )
+        importe = unit_value * quantity
+        importe_sum += importe
+        iva_sum += importe * rate
+        rows.append((line, unit_value, rate))
+    return rows, _round2(importe_sum), _round2(iva_sum)
+
+
 def _invoice_description(
-    quote: Quote, mp: Any, invoice_data: dict, warnings: list[str]
+    quote: Quote,
+    mp: Any,
+    invoice_data: dict,
+    order_lines: list[dict],
+    warnings: list[str],
 ) -> str:
     lines = [
         (
@@ -826,10 +1183,34 @@ def _invoice_description(
         f"Correo para enviar la factura: {invoice_data.get('email') or '—'}",
         "",
         (
-            f"Total: {_money(quote.total)} MXN "
-            f"(subtotal {_money(quote.subtotal)} + IVA {_money(quote.iva_amount)})."
+            "Conceptos (captura el valor unitario sin IVA con sus 6 decimales y "
+            "calcula el IVA sobre ese importe; así el CFDI suma lo cobrado):"
         ),
     ]
+    concepts, cfdi_subtotal, cfdi_iva = _cfdi_concepts(order_lines)
+    for line, unit_value, rate in concepts:
+        unit = f" ({line['unit_label']})" if line.get("unit_label") else ""
+        lines.append(
+            f"- {_qty(line['quantity'])} × {line['description']}{unit} · "
+            f"valor unitario sin IVA {unit_value} · IVA {_rate_label(rate)} · "
+            f"importe con IVA {_money(line['line_total'])}"
+        )
+    cfdi_total = cfdi_subtotal + cfdi_iva
+    charged = _round2(quote.total)
+    lines.append(
+        f"CFDI: subtotal {_money(cfdi_subtotal)} + IVA {_money(cfdi_iva)} = "
+        f"total {_money(cfdi_total)} MXN."
+    )
+    if cfdi_total == charged:
+        lines.append(
+            f"Coincide con lo cobrado por Mercado Pago: {_money(charged)} MXN."
+        )
+    else:
+        lines.append(
+            f"Ojo: Mercado Pago cobró {_money(charged)} MXN; la diferencia de "
+            f"{_money(abs(cfdi_total - charged))} es de redondeo. Revísala con el "
+            "contador antes de timbrar."
+        )
     flagged = sorted(INVOICE_PROBLEMS.intersection(warnings))
     if flagged:
         lines.append(f"Revisar datos fiscales: {', '.join(flagged)}")
@@ -840,10 +1221,12 @@ def _ensure_tasks(
     db: Session,
     quote: Quote,
     mp: Any,
-    delivery_data: dict,
+    delivery_data: dict | None,
     invoice_data: Any,
     now: datetime,
     warnings: list[str],
+    order_lines: list[dict],
+    confirmation_note: str | None = None,
 ) -> int:
     """Fulfillment (+ invoice) Tasks for a paid order, each created only once."""
     try:
@@ -855,7 +1238,7 @@ def _ensure_tasks(
     ref = quote.quote_number
     action = (
         "preparar para recoger"
-        if delivery_data.get("method") == "recoger"
+        if (delivery_data or {}).get("method") == "recoger"
         else "preparar envío"
     )
     wanted = [
@@ -864,7 +1247,9 @@ def _ensure_tasks(
             f"Pedido web {ref} — {action}: {quote.customer_name}",
             FULFILLMENT_CATEGORY,
             "high",
-            _fulfillment_description(quote, mp, delivery_data, invoice_data, warnings),
+            _fulfillment_description(
+                quote, mp, delivery_data, invoice_data, warnings, confirmation_note
+            ),
         )
     ]
     if _invoice_requested(invoice_data):
@@ -874,7 +1259,7 @@ def _ensure_tasks(
                 f"Factura {ref} — {invoice_data.get('razon_social') or quote.customer_name}",
                 INVOICE_CATEGORY,
                 "medium",
-                _invoice_description(quote, mp, invoice_data, warnings),
+                _invoice_description(quote, mp, invoice_data, order_lines, warnings),
             )
         )
 
@@ -906,12 +1291,16 @@ def _side_effects(
     quote: Quote,
     mp: Any,
     problem: str | None,
-    delivery_data: dict,
+    delivery_data: dict | None,
     invoice_data: Any,
     now: datetime,
     warnings: list[str],
+    *,
+    order_lines: list[dict] | None = None,
+    confirmation_note: str | None = None,
+    dispute_resolved: bool = False,
 ) -> tuple[int, int]:
-    """Notifications + Tasks for the order's current payment state.
+    """Notifications and Tasks for the order's current payment state.
 
     Safe to repeat: every row is de-duplicated, so a replayed event only fills
     in what an earlier attempt missed."""
@@ -928,8 +1317,29 @@ def _side_effects(
             EVENT_PAID,
             _paid_message(quote, mp, delivery_data, invoice_data, warnings),
         )
+        if dispute_resolved:
+            prefix = _dispute_resolved_prefix(quote)
+            notifications += _notify(
+                db,
+                quote,
+                recipients,
+                EVENT_PAID,
+                (
+                    f"{prefix} Mercado Pago volvió a acreditar el pago de "
+                    f"{quote.customer_name} ({_order_total_text(quote, mp)})."
+                ),
+                dedupe_prefix=prefix,
+            )
         tasks += _ensure_tasks(
-            db, quote, mp, delivery_data, invoice_data, now, warnings
+            db,
+            quote,
+            mp,
+            delivery_data,
+            invoice_data,
+            now,
+            warnings,
+            order_lines if order_lines is not None else _lines_from_items(quote),
+            confirmation_note,
         )
     elif status == "pending":
         notifications += _notify(
@@ -946,6 +1356,71 @@ def _side_effects(
             dedupe_prefix=prefix,
         )
     return notifications, tasks
+
+
+# ── buyer confirmation ───────────────────────────────────────────────────────
+
+
+def _plan_buyer_confirmation(
+    quote: Quote,
+    block: dict,
+    order_lines: list[dict],
+    delivery_data: dict | None,
+    invoice_data: Any,
+    mp: Any,
+    now: datetime,
+    warnings: list[str],
+) -> tuple[dict | None, dict | None, str]:
+    """(marker for the notes block, message to send, note for the task).
+
+    The buyer gets one confirmation per order: the marker in the notes block
+    stops replays, and a later retry sends it if the config was missing the
+    first time."""
+    sent = block.get("buyer_confirmation")
+    if isinstance(sent, dict) and sent.get("to"):
+        return None, None, f"Confirmación del pedido enviada al cliente a {sent['to']}."
+    email = _clean(quote.customer_email)
+    if not email or not EMAIL_RE.match(email) or MARKUP_RE.search(email):
+        warnings.append("buyer_confirmation_not_sent:no_email")
+        return (
+            None,
+            None,
+            (
+                "Confirmación al cliente: NO se envió porque no hay un correo "
+                "válido. Mándale por WhatsApp el resumen del pedido y la póliza "
+                "de garantía."
+            ),
+        )
+    if web_order_email.missing_config():
+        warnings.append("buyer_confirmation_not_sent:not_configured")
+        return (
+            None,
+            None,
+            (
+                "Confirmación al cliente: NO se envió porque el correo de "
+                "confirmación aún no está configurado. Mándale por correo o "
+                "WhatsApp el resumen del pedido y la póliza de garantía."
+            ),
+        )
+    delivery_data = delivery_data or {}
+    accepted_at = _utc(quote.accepted_at) if quote.accepted_at else now
+    message = web_order_email.build_buyer_confirmation(
+        ref=quote.quote_number,
+        to=email,
+        customer_name=quote.customer_name,
+        lines=order_lines,
+        subtotal=quote.subtotal,
+        iva_amount=quote.iva_amount,
+        total=quote.total,
+        delivery_method=delivery_data.get("method"),
+        delivery_address=_address_text(delivery_data.get("address")) or None,
+        invoice=invoice_data,
+        payment_label=_payment_label(mp),
+        payment_id=mp.payment_id,
+        paid_at=accepted_at,
+    )
+    marker = {"to": email, "queued_at": now.isoformat()}
+    return marker, message, f"Confirmación del pedido enviada al cliente a {email}."
 
 
 # ── entry point ──────────────────────────────────────────────────────────────
@@ -973,51 +1448,101 @@ def _response(
     return body
 
 
-def record_order(db: Session, order: Any, now: datetime | None = None) -> dict:
+def _has_any_order_part(order: Any) -> bool:
+    return bool(order.items) or any(
+        getattr(order, part) is not None for part in ("customer", "delivery", "totals")
+    )
+
+
+def record_order(
+    db: Session,
+    order: Any,
+    now: datetime | None = None,
+    outbox: list[dict] | None = None,
+) -> dict:
     """Upsert the web order for one storefront event, then commit.
 
-    `order` is a validated routes.storefront_orders.StorefrontOrder. Raises
-    OrderRejected when a checkout_created payload fails order_problems().
+    `order` is a validated routes.storefront_orders.StorefrontOrder. Raises:
+    - OrderRejected when a checkout_created payload fails order_problems();
+    - DraftLimitReached when a new draft would exceed the unpaid-draft cap.
+
+    When `outbox` is a list, a buyer confirmation to send after the commit is
+    appended to it; the route sends it in a background task.
     """
     now = _utc(now or datetime.now(timezone.utc))
     ref = order.external_reference
     mp = order.mercadopago
     if mp is not None and mp.live_mode is False and not _test_payments_allowed():
         # TEST credentials (a preview deploy, say) must never create orders in
-        # the production admin.
+        # the production admin. Logged so a tester can see why nothing shows up.
+        logger.warning(
+            "web order %s: %s with live_mode=false ignored "
+            "(set WEB_ORDERS_ALLOW_TEST=true to record test payments)",
+            ref,
+            order.event,
+        )
         return _response(None, ref, duplicate=False, warnings=[], ignored="test_mode")
 
-    problems = order_problems(order)
-    if problems and order.event == "checkout_created":
-        raise OrderRejected(problems)
-    # Past checkout the buyer may already have paid: never drop the order over
-    # a bad field. Record it and flag it for review instead.
-    warnings = list(problems)
+    has_order = order.has_order_data
+    warnings = list(order.parse_warnings)
+    if has_order:
+        problems = order_problems(order)
+        if problems and order.event == "checkout_created":
+            raise OrderRejected(problems)
+        # Past checkout the buyer may already have paid: never drop the order
+        # over a bad field. Record it and flag it for review instead.
+        warnings += problems
+    elif _has_any_order_part(order):
+        warnings.append("incomplete_order_data")
 
-    quote, created = _get_or_create_quote(db, order, warnings)
-    if not created:
-        _fill_contact(quote, order)
-        if abs(_dec(order.totals.total) - _dec(quote.total)) > MONEY_TOLERANCE:
-            warnings.append("totals_differ_from_recorded_order")
+    quote, created = _get_or_create_quote(db, order, warnings, now)
+    adopted = False
+    if not created and has_order:
+        if not quote.items:
+            _adopt_order(db, quote, order, warnings)
+            adopted = True
+        else:
+            _fill_contact(quote, order)
+            if abs(_dec(order.totals.total) - _dec(quote.total)) > MONEY_TOLERANCE:
+                warnings.append("totals_differ_from_recorded_order")
 
     existing_block = read_notes_block(quote.notes) or {}
-    delivery_data = _delivery_dict(order.delivery)
+    # Without order data in this event, keep what an earlier event stored.
+    delivery_data = (
+        _delivery_dict(order.delivery) if has_order else existing_block.get("delivery")
+    )
     # A payment_update without invoice data keeps what checkout stored.
     invoice_data = (
         _invoice_dict(order.invoice)
         if order.invoice is not None
         else existing_block.get("invoice")
     )
+    new_lines = _charged_lines(order) if has_order and (created or adopted) else None
 
+    same_payment = False
     if order.event == "payment_update":
         new_status, problem = _classify_payment(quote, mp)
+        same_payment = (
+            quote.payment_reference is not None
+            and quote.payment_reference == mp.payment_id
+        )
     else:
         new_status, problem = "checkout", None
-    decision = _decide(quote.payment_status, new_status)
+    transition = (
+        (_recorded_mp_status(quote, existing_block), mp.status)
+        if same_payment
+        else None
+    )
+    decision = _decide(quote.payment_status, new_status, transition)
+    dispute_resolved = (
+        decision == "apply"
+        and new_status == "approved"
+        and transition == ("in_mediation", "approved")
+    )
 
     record_payment = decision == "apply"
     if decision == "same" and order.event == "payment_update":
-        if quote.payment_reference and quote.payment_reference != mp.payment_id:
+        if quote.payment_reference and not same_payment:
             # Another payment in the state already on record: keep the one on
             # record. A second approved payment means the buyer paid twice.
             if new_status == "approved":
@@ -1037,19 +1562,45 @@ def record_order(db: Session, order: Any, now: datetime | None = None) -> dict:
         if new_status == "approved":
             _mark_accepted(quote, mp, now, warnings)
 
-    _link_customer(
-        db,
-        quote,
-        order,
-        invoice_data,
-        now,
-        purchased=quote.payment_status == "approved",
+    paid = (
+        order.event == "payment_update"
+        and quote.payment_status == "approved"
+        and decision != "stale"
     )
+    order_lines = None
+    confirmation_marker = message = confirmation_note = None
+    if paid:
+        # Only a real payment backs the buyer's details (see _link_customer).
+        _link_customer(db, quote, _buyer(order, quote), invoice_data, now)
+        order_lines = (
+            new_lines if new_lines is not None else _order_lines(quote, existing_block)
+        )
+        if outbox is not None:
+            confirmation_marker, message, confirmation_note = _plan_buyer_confirmation(
+                quote,
+                existing_block,
+                order_lines,
+                delivery_data,
+                invoice_data,
+                mp,
+                now,
+                warnings,
+            )
 
     notifications = tasks = 0
     if order.event == "payment_update" and decision != "stale":
         notifications, tasks = _side_effects(
-            db, quote, mp, problem, delivery_data, invoice_data, now, warnings
+            db,
+            quote,
+            mp,
+            problem,
+            delivery_data,
+            invoice_data,
+            now,
+            warnings,
+            order_lines=order_lines,
+            confirmation_note=confirmation_note,
+            dispute_resolved=dispute_resolved,
         )
 
     payment_data = (
@@ -1061,14 +1612,27 @@ def record_order(db: Session, order: Any, now: datetime | None = None) -> dict:
         quote.notes,
         ref,
         _block_data(
-            existing_block, ref, delivery_data, invoice_data, payment_data, warnings
+            existing_block,
+            ref,
+            delivery_data,
+            invoice_data,
+            payment_data,
+            warnings,
+            lines=new_lines,
+            buyer_confirmation=confirmation_marker,
         ),
     )
     if notes != quote.notes:
         quote.notes = notes
 
     db.commit()
+    if message is not None and outbox is not None:
+        outbox.append(message)
     duplicate = (
-        not created and decision != "apply" and notifications == 0 and tasks == 0
+        not created
+        and not adopted
+        and decision != "apply"
+        and notifications == 0
+        and tasks == 0
     )
     return _response(quote, ref, duplicate=duplicate, warnings=warnings)
