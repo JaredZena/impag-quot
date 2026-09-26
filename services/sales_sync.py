@@ -472,6 +472,36 @@ def _customer_map(db: Session) -> dict[str, int]:
     return {name: cid for cid, name in rows if name}
 
 
+POS_MATCH_DAYS = 14
+
+
+def _name_tokens(name: str | None) -> set[str]:
+    return {
+        t
+        for t in _strip_accents(normalize_customer_name(name or "")).split()
+        if len(t) > 2
+    }
+
+
+def _matching_pos_sale(record: dict, pos_sales: list):
+    """The POS sale this sheet row duplicates (same total, close date, one
+    customer name contained in the other), or None."""
+    amount, sale_date = record.get("amount"), record.get("sale_date")
+    sheet_tokens = _name_tokens(record.get("customer_name"))
+    if amount is None or sale_date is None or not sheet_tokens:
+        return None
+    for pos in pos_sales:
+        pos_tokens = _name_tokens(pos.customer_name)
+        if (
+            pos.total == amount
+            and abs((pos.sale_date - sale_date).days) <= POS_MATCH_DAYS
+            and pos_tokens
+            and (pos_tokens <= sheet_tokens or sheet_tokens <= pos_tokens)
+        ):
+            return pos
+    return None
+
+
 def upsert_sales(db: Session, parsed: list[dict], customer_map: dict[str, int]) -> dict:
     """Upsert parsed rows by (sheet_tab, source_row). Returns counts."""
     if not parsed:
@@ -491,12 +521,22 @@ def upsert_sales(db: Session, parsed: list[dict], customer_map: dict[str, int]) 
     # in a month ('1000826DGO') would otherwise normalize differently on the
     # sheet side and escape the guard.
     active_pos_folios = set()
-    for (folio,) in db.query(PosSale.folio).filter(PosSale.status != "cancelada").all():
+    pos_sales = (
+        db.query(PosSale.folio, PosSale.sale_date, PosSale.customer_name, PosSale.total)
+        .filter(PosSale.status != "cancelada")
+        .all()
+    )
+    for folio, *_ in pos_sales:
         if folio:
             active_pos_folios.add(folio)
             normalized = normalize_folio(folio)
             if normalized:
                 active_pos_folios.add(normalized)
+    # Second guard: the same sale logged in both places under DIFFERENT folios
+    # (Silerio: sheet 120826DGO vs POS 100826DGO). Match on exact total, date
+    # within POS_MATCH_DAYS, and customer-name tokens; each POS sale absorbs
+    # at most one sheet row.
+    unmatched_pos = [p for p in pos_sales if p.total is not None and p.sale_date]
 
     now = datetime.now(timezone.utc)
     inserted = updated = quarantined = 0
@@ -514,6 +554,14 @@ def upsert_sales(db: Session, parsed: list[dict], customer_map: dict[str, int]) 
         ):
             record["quarantined"] = True
             record["quarantine_reason"] = "duplicado: capturado en POS"
+        elif not record.get("quarantined"):
+            match = _matching_pos_sale(record, unmatched_pos)
+            if match is not None:
+                unmatched_pos.remove(match)
+                record["quarantined"] = True
+                record["quarantine_reason"] = (
+                    f"duplicado: capturado en POS ({match.folio})"
+                )[:200]
         if record.get("quarantined"):
             quarantined += 1
 

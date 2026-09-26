@@ -23,7 +23,7 @@ os.environ.setdefault("ALLOWED_EMAILS", "dev@local.test")
 
 assert os.environ["DATABASE_URL"].startswith("sqlite"), "not sqlite — abort"
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -483,5 +483,51 @@ def test_sync_guard_exempts_cancelled_pos_folio():
             .one()
         )
         assert row.quarantined is False
+    finally:
+        db.close()
+
+
+def test_sync_guard_matches_pos_sale_under_different_folio():
+    """Same sale logged in POS and the sheet with different folios (Silerio
+    2026-08: POS 100826DGO vs sheet 120826DGO) — quarantined by total, date
+    and customer-name tokens; a different amount is left alone."""
+    db = SessionLocal()
+    try:
+        pos = db.query(PosSale).filter(PosSale.status == "completada").first()
+        pos.customer_name = "Enrique Silerio"
+        db.commit()
+        base = {
+            "sheet_tab": "VENTAS_2026",
+            "customer_name": "ENRIQUE VALDEZ SILERIO",
+            "description": None,
+            "folio": "990101ZZZ",
+            "quarantined": False,
+            "quarantine_reason": None,
+        }
+        parsed = [
+            {
+                **base,
+                "source_row": 60,
+                "sale_date": pos.sale_date - timedelta(days=6),
+                "amount": pos.total,
+            },
+            {
+                **base,
+                "source_row": 61,
+                "sale_date": pos.sale_date,
+                "amount": pos.total + Decimal("1.00"),
+            },
+        ]
+        upsert_sales(db, parsed, {})
+        db.commit()
+        dup, other = (
+            db.query(Sale)
+            .filter(Sale.sheet_tab == "VENTAS_2026", Sale.source_row.in_([60, 61]))
+            .order_by(Sale.source_row)
+            .all()
+        )
+        assert dup.quarantined is True
+        assert dup.quarantine_reason.startswith("duplicado: capturado en POS (")
+        assert other.quarantined is False
     finally:
         db.close()
