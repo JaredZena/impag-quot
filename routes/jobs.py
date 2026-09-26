@@ -17,11 +17,13 @@ import hmac
 import os
 import secrets
 
+import requests
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 from models import get_db
 from services.quote_followup import sweep_stale_quotes
+from services.supplier_price_sync import sync_supplier_prices
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -56,3 +58,12 @@ def verify_job_token(
 def run_quote_followup(dry_run: bool = False, db: Session = Depends(get_db)):
     """Sweep stalled quotes → follow-up Tasks (+ approval-queue WA drafts)."""
     return sweep_stale_quotes(db, dry_run=dry_run)
+
+
+@router.post("/supplier-price-sync", dependencies=[Depends(verify_job_token)])
+def run_supplier_price_sync(dry_run: bool = False, db: Session = Depends(get_db)):
+    """Mirror the Concentrado de Precios sheet into supplier_product."""
+    try:
+        return sync_supplier_prices(db, dry_run=dry_run)
+    except (RuntimeError, requests.RequestException) as e:
+        raise HTTPException(status_code=502, detail=str(e)[:300])
