@@ -1,5 +1,6 @@
 """Seed the Punto de equilibrio expense template with the monthly fixed costs
-Juan Daniel confirmed on 2026-09-26 (WhatsApp + recibos de luz/agua/internet).
+Juan Daniel confirmed on 2026-09-26 (WhatsApp + recibos de luz/agua/internet)
+plus SAT payments from the BBVA statements in the IMPAG contabilidad chat.
 
 Idempotent: concepts that already exist (by name) are left untouched, so
 amounts edited later in the admin are never overwritten.
@@ -34,6 +35,18 @@ CONCEPTS = [
     ),
     ("Luz", "operativo", "174.50", "CFE bimestral: $349 promedio por bimestre ÷ 2"),
     ("Recargas teléfono", "operativo", "150", "JD 2026-09-26"),
+    (
+        "Impuestos SAT (mensual)",
+        "operativo",
+        "5427",
+        "promedio pagos BNET Impuestos, periodos nov 2025–may 2026 (chat IMPAG contabilidad)",
+    ),
+    (
+        "Provisión declaración anual",
+        "operativo",
+        "1812",
+        "anual 2025 = $21,740 (pagada 31/03/26) ÷ 12",
+    ),
     ("Pago camioneta", "financiamiento", "14000", "JD 2026-09-26"),
 ]
 
