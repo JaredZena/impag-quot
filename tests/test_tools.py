@@ -517,3 +517,45 @@ def test_parse_sheet_rows():
         by_no[85]["status"] == "con_cliente" and by_no[85]["holder"] == "Por confirmar"
     )
     assert skipped == ["fila 13: sin NO numérico o sin descripción"]
+
+
+# ==================== Daily sheet sync (sheet wins) ====================
+
+
+def test_sheet_sync_creates_then_follows_status_changes():
+    import copy
+
+    from services.tool_sheet_sync import sync_tools
+
+    Base.metadata.drop_all(engine, tables=TABLES)
+    Base.metadata.create_all(engine, tables=TABLES)
+    db = TestingSession()
+    try:
+        first = sync_tools(db, dry_run=False, rows=SHEET)
+        n = len(first["created"])
+        assert n > 0 and db.query(Tool).count() == n
+
+        rerun = sync_tools(db, dry_run=False, rows=SHEET)
+        assert rerun["created"] == rerun["status_changes"] == rerun["updated"] == []
+
+        # NO 1 arrives at the store: "1. Pendiente Entrega" -> "2. En el Local"
+        changed = copy.deepcopy(SHEET)
+        row = next(r for r in changed if len(r) > 4 and r[4]["v"] == "1")
+        row[12]["v"] = "2. En el Local"
+        dry = sync_tools(db, dry_run=True, rows=changed)
+        assert len(dry["status_changes"]) == 1
+        tool = db.query(Tool).filter(Tool.sheet_no == 1).one()
+        assert tool.status == "pendiente_entrega"  # dry run wrote nothing
+
+        sync_tools(db, dry_run=False, rows=changed)
+        db.refresh(tool)
+        assert tool.status == "en_local"
+        last = (
+            db.query(ToolMovement)
+            .filter(ToolMovement.tool_id == tool.id)
+            .order_by(ToolMovement.id.desc())
+            .first()
+        )
+        assert last.kind == "recibida" and last.from_status == "pendiente_entrega"
+    finally:
+        db.close()
