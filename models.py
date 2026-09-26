@@ -1378,6 +1378,70 @@ class ToolMovement(Base):
     tool = relationship("Tool", back_populates="movements")
 
 
+class ExpenseConcept(Base):
+    """A recurring monthly expense (renta, sueldos, camioneta...) — the template
+    each month's expense list is opened from on the Punto de equilibrio page.
+
+    category drives the break-even scenarios:
+      operativo       — cost of keeping the doors open (renta, sueldos, luz...)
+      financiamiento  — debt payments (camioneta); scenario 2 adds these
+      otro            — one-off / variable spend, shown but kept out of the
+                        fixed-cost break-even
+    """
+
+    __tablename__ = "expense_concept"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(120), nullable=False, unique=True)
+    category = Column(
+        String(20), nullable=False, default="operativo", server_default="operativo"
+    )
+    default_amount = Column(
+        Numeric(12, 2), nullable=False, default=0, server_default="0"
+    )  # MXN per month
+    active = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    sort_order = Column(Integer, nullable=False, default=0, server_default="0")
+    notes = Column(Text, nullable=True)  # where the number came from
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class MonthlyExpense(Base):
+    """One expense line of one month. Opening a month copies every active
+    concept (last month's amount, else the concept default); one-off lines have
+    concept_id NULL. paid=False on a past month is an adeudo (e.g. a salary not
+    paid yet) and feeds the "ponerse al corriente" scenario."""
+
+    __tablename__ = "monthly_expense"
+    __table_args__ = (
+        UniqueConstraint("month", "concept_id", name="uq_monthly_expense_month_concept"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    month = Column(Date, nullable=False, index=True)  # 1st of the month
+    concept_id = Column(
+        Integer,
+        ForeignKey("expense_concept.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    name = Column(String(120), nullable=False)
+    category = Column(
+        String(20), nullable=False, default="operativo", server_default="operativo"
+    )
+    amount = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")
+    paid = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    paid_on = Column(Date, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    created_by = Column(String(120), nullable=True)  # user email
+
+
 if database_url.startswith("sqlite"):
     # Tests point DATABASE_URL at sqlite — the Neon endpoint-option rewrite
     # below is postgres-only (a sqlite URL has no hostname) and the pg pool
