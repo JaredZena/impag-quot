@@ -133,10 +133,51 @@ def get_products_from_db(fallback_margin=30.0, include_internal_details=False):
     finally:
         db.close()
 
+_KEYWORD_STOPWORDS = {
+    'para', 'con', 'sin', 'una', 'unos', 'unas', 'los', 'las', 'del', 'que', 'por',
+    'sistema', 'sistemas', 'cotizar', 'cotizacion', 'cotización', 'precio', 'metros',
+    'favor', 'quiero', 'necesito', 'principal', 'lineas', 'líneas',
+}
+KEYWORD_POOL = 20
+
+
+def _query_keywords(query_text):
+    """Distinctive tokens of a free-text request: brand/model words and
+    dimensions ("wobbler", "pvc", "2\"", "20x20") that dense retrieval
+    dilutes when one request names several products."""
+    import re
+    tokens = re.findall(r'[0-9]+(?:[./][0-9]+)?(?:"|”|pulg)|[a-záéíóúñü0-9]+', query_text.lower())
+    seen, out = set(), []
+    for t in tokens:
+        if t in _KEYWORD_STOPWORDS or t in seen:
+            continue
+        if len(t) >= 4 or t.endswith(('"', '”')) or t in ('pvc', 'pad', 'hp'):
+            seen.add(t)
+            out.append(t.replace('”', '"'))
+    return out[:12]
+
+
+def _keyword_supplier_products(db, query_text, limit=KEYWORD_POOL):
+    """Lexical arm: active supplier products whose name matches the most query
+    keywords. Also reaches rows with no embedding yet (added after the last
+    backfill), which the ANN arm can never return."""
+    from sqlalchemy import case, func, or_
+    keywords = _query_keywords(query_text)
+    if not keywords:
+        return []
+    haystack = func.lower(func.coalesce(Product.name, '') + ' ' + func.coalesce(SupplierProduct.name, ''))
+    hits = [case((haystack.like(f'%{k}%'), 1), else_=0) for k in keywords]
+    score = sum(hits[1:], hits[0])
+    return db.query(SupplierProduct).join(Product).join(Supplier).filter(
+        SupplierProduct.is_active == True,
+        or_(*[haystack.like(f'%{k}%') for k in keywords]),
+    ).order_by(score.desc()).limit(limit).all()
+
+
 def _select_relevant_supplier_products(db, query_embedding, limit, query_text, max_products):
-    """ANN candidates by cosine distance, optionally reranked ONCE with the
-    cross-encoder and cut to max_products — otherwise every candidate lands
-    in the quotation prompt regardless of relevance."""
+    """ANN candidates by cosine distance plus keyword candidates, reranked ONCE
+    with the cross-encoder and cut to max_products — otherwise every candidate
+    lands in the quotation prompt regardless of relevance."""
     supplier_products = db.query(SupplierProduct).join(Product).join(Supplier).filter(
         SupplierProduct.is_active == True,
         SupplierProduct.embedding != None
@@ -144,10 +185,17 @@ def _select_relevant_supplier_products(db, query_embedding, limit, query_text, m
         SupplierProduct.embedding.cosine_distance(query_embedding)
     ).limit(limit).all()
 
+    if query_text:
+        seen = {sp.id for sp in supplier_products}
+        for sp in _keyword_supplier_products(db, query_text):
+            if sp.id not in seen:
+                seen.add(sp.id)
+                supplier_products.append(sp)
+
     if query_text and supplier_products:
         from services.pinecone_service import rerank_results
         candidates = [
-            {"metadata": {"text": f"{sp.product.name}. {sp.product.description or ''}"},
+            {"metadata": {"text": f"{sp.product.name}. {sp.name or ''}. {sp.product.description or ''}"},
              "score": 0.0, "_sp": sp}
             for sp in supplier_products
         ]
