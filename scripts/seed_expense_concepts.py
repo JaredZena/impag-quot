@@ -47,6 +47,12 @@ CONCEPTS = [
         "1812",
         "anual 2025 = $21,740 (pagada 31/03/26) ÷ 12",
     ),
+    (
+        "Comisiones bancarias",
+        "operativo",
+        "70",
+        "BBVA serv. banca internet + IVA, promedio dic 2025–jun 2026 ($22–$113)",
+    ),
     ("Pago camioneta", "financiamiento", "14000", "JD 2026-09-26"),
 ]
 
