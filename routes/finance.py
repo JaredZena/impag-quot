@@ -11,12 +11,18 @@
 - POST   /finance/months/{YYYY-MM}/expenses  add a line (one-off or concept)
 - PUT    /finance/expenses/{id}         edit a line (amount, paid, notes...)
 - DELETE /finance/expenses/{id}         remove a line
+- GET    /finance/taxes                 SAT declaration totals per periodo
+- PUT    /finance/taxes/{YYYY-MM}       record / correct one periodo's total
+- DELETE /finance/taxes/{YYYY-MM}       remove it
 - GET    /finance/dashboard             break-even per month + scenarios for
                                         the selected month + open-quote pipeline
 
-Break-even sales = fixed expenses / gross margin. The margin is measured from
-the BALANCES DE VENTA tabs that reconciled against the ledger
-(sum sheet_profit / sum sheet_sale_total) and can be overridden per request.
+Break-even sales = fixed expenses / (gross margin - tax rate). The margin is
+measured from the BALANCES DE VENTA tabs that reconciled against the ledger
+(sum sheet_profit / sum sheet_sale_total); the tax rate from the last
+TAX_SAMPLE_MONTHS declared periodos (sum declared / sum ledger sales). Taxes
+scale with sales, so they are NOT a fixed expense. Both can be overridden
+per request.
 Sales come from the `sale` ledger (non-quarantined), same as /sales/stats —
 an operational snapshot, NOT accounting books.
 """
@@ -33,7 +39,15 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from auth import verify_google_token
-from models import ExpenseConcept, MonthlyExpense, Quote, Sale, SaleBalance, get_db
+from models import (
+    ExpenseConcept,
+    MonthlyExpense,
+    Quote,
+    Sale,
+    SaleBalance,
+    TaxDeclaration,
+    get_db,
+)
 
 router = APIRouter(
     prefix="/finance",
@@ -46,6 +60,8 @@ CATEGORIES = ("operativo", "financiamiento", "otro")
 FIXED_CATEGORIES = ("operativo", "financiamiento")
 OPEN_QUOTE_STATUSES = ("sent", "viewed")
 FALLBACK_MARGIN = 0.225  # used only when no BALANCES tab has reconciled yet
+FALLBACK_TAX_RATE = 0.065  # 2026 H1 acuses / ledger sales; used with no declarations
+TAX_SAMPLE_MONTHS = 6
 
 
 # --------------------------------------------------------------------------- #
@@ -152,6 +168,29 @@ def monthly_sales(db: Session, start: date, end_exclusive: date) -> dict[str, fl
         key = _month_key(sale_date)
         totals[key] = totals.get(key, 0.0) + _num(amount)
     return totals
+
+
+def measured_tax_rate(db: Session, upto: date) -> dict:
+    """Declared taxes / ledger sales over the last TAX_SAMPLE_MONTHS declared
+    periodos up to `upto` (inclusive) that had sales."""
+    rows = (
+        db.query(TaxDeclaration)
+        .filter(TaxDeclaration.month <= upto)
+        .order_by(TaxDeclaration.month.desc())
+        .all()
+    )
+    if not rows:
+        return {"pct": None, "months": []}
+    sales = monthly_sales(db, rows[-1].month, _add_months(rows[0].month, 1))
+    picked = [r for r in rows if sales.get(_month_key(r.month), 0) > 0]
+    picked = picked[:TAX_SAMPLE_MONTHS]
+    total_sales = sum(sales[_month_key(r.month)] for r in picked)
+    if not total_sales:
+        return {"pct": None, "months": []}
+    return {
+        "pct": sum(_num(r.amount) for r in picked) / total_sales,
+        "months": sorted(_month_key(r.month) for r in picked),
+    }
 
 
 def _breakeven(expenses: float, margin: float) -> float | None:
@@ -437,6 +476,51 @@ def delete_expense(expense_id: int, db: Session = Depends(get_db)):
 
 
 # --------------------------------------------------------------------------- #
+# taxes
+# --------------------------------------------------------------------------- #
+
+
+class TaxIn(BaseModel):
+    amount: Decimal = Field(ge=0)
+    notes: str | None = None
+
+
+def _tax_dict(t: TaxDeclaration) -> dict:
+    return {"month": _month_key(t.month), "amount": _num(t.amount), "notes": t.notes}
+
+
+@router.get("/taxes")
+def list_taxes(db: Session = Depends(get_db)):
+    rows = db.query(TaxDeclaration).order_by(TaxDeclaration.month.desc()).all()
+    return [_tax_dict(t) for t in rows]
+
+
+@router.put("/taxes/{month}")
+def put_tax(month: str, body: TaxIn, db: Session = Depends(get_db)):
+    m = _parse_month(month)
+    row = db.query(TaxDeclaration).filter(TaxDeclaration.month == m).first()
+    if row is None:
+        row = TaxDeclaration(month=m)
+        db.add(row)
+    row.amount = body.amount
+    row.notes = body.notes
+    db.commit()
+    db.refresh(row)
+    return _tax_dict(row)
+
+
+@router.delete("/taxes/{month}")
+def delete_tax(month: str, db: Session = Depends(get_db)):
+    m = _parse_month(month)
+    row = db.query(TaxDeclaration).filter(TaxDeclaration.month == m).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Ese mes no tiene impuestos")
+    db.delete(row)
+    db.commit()
+    return {"deleted": _month_key(m)}
+
+
+# --------------------------------------------------------------------------- #
 # dashboard
 # --------------------------------------------------------------------------- #
 
@@ -457,6 +541,9 @@ def dashboard(
     margin_pct: float | None = Query(
         default=None, gt=0, lt=100, description="Override del margen bruto (%)"
     ),
+    tax_pct: float | None = Query(
+        default=None, ge=0, lt=100, description="Override de impuestos (% de venta)"
+    ),
     db: Session = Depends(get_db),
 ):
     today = _today()
@@ -471,6 +558,16 @@ def dashboard(
     else:
         margin, margin_source = FALLBACK_MARGIN, "supuesto"
 
+    measured_tax = measured_tax_rate(db, selected)
+    if tax_pct is not None:
+        tax_rate, tax_source = tax_pct / 100, "manual"
+    elif measured_tax["pct"] is not None:
+        tax_rate, tax_source = measured_tax["pct"], "medido"
+    else:
+        tax_rate, tax_source = FALLBACK_TAX_RATE, "supuesto"
+    # What each peso of sales leaves after cost of goods AND taxes.
+    effective = margin - tax_rate
+
     start = _add_months(selected, -(months - 1))
     end_exclusive = _add_months(selected, 1)
     sales = monthly_sales(db, start, end_exclusive)
@@ -483,6 +580,12 @@ def dashboard(
     by_month: dict[str, list[MonthlyExpense]] = {}
     for line in lines:
         by_month.setdefault(_month_key(line.month), []).append(line)
+    declared = {
+        _month_key(t.month): _num(t.amount)
+        for t in db.query(TaxDeclaration).filter(
+            TaxDeclaration.month >= start, TaxDeclaration.month < end_exclusive
+        )
+    }
 
     # Months nobody opened fall back to the active concepts' defaults so the
     # history still shows a (flagged) break-even line.
@@ -509,6 +612,10 @@ def dashboard(
         fixed = cats["operativo"] + cats["financiamiento"]
         month_sales = round(sales.get(key, 0.0), 2)
         gross_profit = round(month_sales * margin, 2)
+        taxes = declared.get(key)
+        taxes_source = "declarado" if taxes is not None else "estimado"
+        if taxes is None:
+            taxes = month_sales * tax_rate
         series.append(
             {
                 "month": key,
@@ -520,9 +627,11 @@ def dashboard(
                 "unpaid": round(unpaid, 2),
                 "sales": month_sales,
                 "gross_profit": gross_profit,
-                "breakeven_operativo": _breakeven(cats["operativo"], margin),
-                "breakeven_fixed": _breakeven(fixed, margin),
-                "result": round(gross_profit - fixed - cats["otro"], 2),
+                "taxes": round(taxes, 2),
+                "taxes_source": taxes_source,
+                "breakeven_operativo": _breakeven(cats["operativo"], effective),
+                "breakeven_fixed": _breakeven(fixed, effective),
+                "result": round(gross_profit - taxes - fixed - cats["otro"], 2),
                 "is_partial": m == current,
             }
         )
@@ -558,7 +667,7 @@ def dashboard(
         },
     ]
     for s in scenarios:
-        s["breakeven"] = _breakeven(s["expenses"], margin)
+        s["breakeven"] = _breakeven(s["expenses"], effective)
         s["gap"] = (
             round(max(s["breakeven"] - sel["sales"], 0), 2)
             if s["breakeven"] is not None
@@ -600,7 +709,7 @@ def dashboard(
     pipeline = {
         "open_count": open_count,
         "open_total": round(open_total, 2),
-        "gross_profit_if_all_close": round(open_total * margin, 2),
+        "gross_profit_if_all_close": round(open_total * max(effective, 0), 2),
         "share_needed_to_cover_gap": (
             round(gap_fixed / open_total, 4) if open_total else None
         ),
@@ -618,6 +727,17 @@ def dashboard(
             ),
             "sample": measured["sample"],
         },
+        "tax": {
+            "pct": round(tax_rate, 4),
+            "source": tax_source,
+            "measured_pct": (
+                round(measured_tax["pct"], 4)
+                if measured_tax["pct"] is not None
+                else None
+            ),
+            "months": measured_tax["months"],
+        },
+        "effective_margin": round(effective, 4),
         "selected": {
             **sel,
             "opened": bool(sel_lines),

@@ -1416,7 +1416,9 @@ class MonthlyExpense(Base):
 
     __tablename__ = "monthly_expense"
     __table_args__ = (
-        UniqueConstraint("month", "concept_id", name="uq_monthly_expense_month_concept"),
+        UniqueConstraint(
+            "month", "concept_id", name="uq_monthly_expense_month_concept"
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -1440,6 +1442,24 @@ class MonthlyExpense(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     created_by = Column(String(120), nullable=True)  # user email
+
+
+class TaxDeclaration(Base):
+    """Total a pagar of the SAT monthly declaration(s) for one periodo (the
+    accountant's acuses: ISR + IVA + retenciones, complementarias included).
+    Taxes scale with sales, so the break-even treats them as a % of sales
+    measured from these rows, not as a fixed cost."""
+
+    __tablename__ = "tax_declaration"
+
+    id = Column(Integer, primary_key=True, index=True)
+    month = Column(Date, nullable=False, unique=True)  # 1st of the periodo
+    amount = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 if database_url.startswith("sqlite"):

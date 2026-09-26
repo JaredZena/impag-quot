@@ -31,6 +31,7 @@ from models import (
     Quote,
     Sale,
     SaleBalance,
+    TaxDeclaration,
     get_db,
 )
 
@@ -40,6 +41,7 @@ TABLES = [
     Sale.__table__,
     SaleBalance.__table__,
     Quote.__table__,
+    TaxDeclaration.__table__,
 ]
 engine = create_engine(
     "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
@@ -218,7 +220,7 @@ def test_dashboard_breakeven_scenarios_and_pipeline(client, db):
             client.put(f"/finance/expenses/{line['id']}", json={"paid": True})
     client.post("/finance/months/2026-09/open")
 
-    d = client.get("/finance/dashboard?months=3").json()
+    d = client.get("/finance/dashboard?months=3&tax_pct=0").json()
     assert d["margin"] == {
         "pct": 0.25,
         "source": "medido",
@@ -254,7 +256,48 @@ def test_dashboard_margin_override_and_fallback(client):
     _concept(client, "Renta", 3000)
     d = client.get("/finance/dashboard").json()
     assert d["margin"]["source"] == "supuesto" and d["margin"]["pct"] == 0.225
-    d = client.get("/finance/dashboard?margin_pct=30").json()
+    assert d["tax"]["source"] == "supuesto" and d["tax"]["pct"] == 0.065
+    assert d["effective_margin"] == 0.16
+    d = client.get("/finance/dashboard?margin_pct=30&tax_pct=0").json()
     assert d["margin"]["source"] == "manual"
     assert d["selected"]["breakeven_operativo"] == 10000
     assert client.get("/finance/dashboard?month=2026-13").status_code == 422
+
+
+def test_taxes_measured_rate_drives_breakeven(client, db):
+    _concept(client, "Renta", 8000)
+    _sale(db, date(2026, 7, 10), 100000, 1)
+    _sale(db, date(2026, 8, 10), 300000, 2)
+    _sale(db, date(2026, 9, 5), 50000, 3)
+    db.commit()
+
+    assert (
+        client.put("/finance/taxes/2026-07", json={"amount": 5000}).status_code == 200
+    )
+    client.put("/finance/taxes/2026-08", json={"amount": 15000, "notes": "acuse"})
+    # A declaration for a month with no sales is ignored by the rate.
+    client.put("/finance/taxes/2026-05", json={"amount": 999})
+    assert [t["month"] for t in client.get("/finance/taxes").json()] == [
+        "2026-08",
+        "2026-07",
+        "2026-05",
+    ]
+
+    d = client.get("/finance/dashboard?months=3&margin_pct=25").json()
+    assert d["tax"] == {
+        "pct": 0.05,
+        "source": "medido",
+        "measured_pct": 0.05,
+        "months": ["2026-07", "2026-08"],
+    }
+    assert d["effective_margin"] == 0.2
+    assert d["selected"]["breakeven_fixed"] == 40000  # 8000 / (25% - 5%)
+    by_month = {s["month"]: s for s in d["series"]}
+    assert by_month["2026-08"]["taxes"] == 15000
+    assert by_month["2026-08"]["taxes_source"] == "declarado"
+    assert by_month["2026-09"]["taxes"] == 2500  # estimated 5% of 50k
+    assert by_month["2026-09"]["taxes_source"] == "estimado"
+    assert by_month["2026-09"]["result"] == 12500 - 2500 - 8000
+
+    assert client.delete("/finance/taxes/2026-05").status_code == 200
+    assert client.delete("/finance/taxes/2026-05").status_code == 404
