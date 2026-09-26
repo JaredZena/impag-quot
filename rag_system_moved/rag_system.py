@@ -140,6 +140,16 @@ _KEYWORD_STOPWORDS = {
 }
 KEYWORD_POOL = 20
 
+# Requests describe the job ("conducción principal", "líneas regantes"), the
+# catalog names the part ("TUBERIA 2\" PVC", "MANGUERA"). Expand job words to
+# part words so the keyword arm can still find them.
+_KEYWORD_EXPANSIONS = {
+    'conduccion': ['pvc', 'tuberia'], 'conducción': ['pvc', 'tuberia'],
+    'regantes': ['manguera', 'poliducto'], 'regante': ['manguera', 'poliducto'],
+    'aspersion': ['aspersor'], 'aspersión': ['aspersor'],
+    'goteo': ['gotero', 'cintilla'],
+}
+
 
 def _query_keywords(query_text):
     """Distinctive tokens of a free-text request: brand/model words and
@@ -154,7 +164,12 @@ def _query_keywords(query_text):
         if len(t) >= 4 or t.endswith(('"', '”')) or t in ('pvc', 'pad', 'hp'):
             seen.add(t)
             out.append(t.replace('”', '"'))
-    return out[:12]
+    for t in list(out):
+        for extra in _KEYWORD_EXPANSIONS.get(t, []):
+            if extra not in seen:
+                seen.add(extra)
+                out.append(extra)
+    return out[:14]
 
 
 def _keyword_supplier_products(db, query_text, limit=KEYWORD_POOL):
@@ -376,6 +391,12 @@ def get_category(product_name):
         return "Otros insumos agrícolas"
 
 
+def _today_es():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("America/Mexico_City")).strftime("%d/%m/%Y")
+
+
 def generate_simple_quotation(query, matched_products, matched_products_internal,
                               customer_name, customer_location, chat_history_text):
     """
@@ -398,6 +419,7 @@ def generate_simple_quotation(query, matched_products, matched_products_internal
     prompt = (
         f"Genera DOS cotizaciones para IMPAG en formato markdown.\n\n"
         f"**CONSULTA:** {query}\n\n"
+        f"**Fecha de hoy:** {_today_es()} — usa esta fecha y este año en fecha y folio.\n\n"
         f"{chat_history_text}"
         f"**INSTRUCCIONES:**\n"
         f"1. Si la consulta incluye medidas, áreas o cantidades, calcula la cantidad de producto necesaria paso a paso.\n"
@@ -440,6 +462,7 @@ def analyze_request_and_calculate(query, context):
     analysis_prompt = (
         f"Actúa como un experto ingeniero agrónomo y matemático. Analiza la siguiente solicitud de cotización y el contexto histórico.\n\n"
         f"SOLICITUD DEL USUARIO: '{query}'\n\n"
+        f"UNIDADES: medidas como '20X20' son metros (400 m²) salvo que la solicitud diga 'ha' o 'hectáreas'.\n\n"
         f"CONTEXTO HISTÓRICO (Cotizaciones previas y fórmulas):\n{context}\n\n"
         f"TU TAREA:\n"
         f"1. Determina si la solicitud requiere un CÁLCULO basado en dimensiones, área o uso.\n"
@@ -617,6 +640,7 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
 
     # Shared preamble used by both calls
     shared_context = (
+        f"**Fecha de hoy:** {_today_es()} — usa esta fecha y este año en fecha y folio.\n\n"
         f"🔥🔥 **REPORTE DE ANÁLISIS Y CÁLCULO:** 🔥🔥\n"
         f"{calculation_report}\n"
         f"⚠️ Usa las cantidades del reporte como VERDAD TÉCNICA.\n"

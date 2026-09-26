@@ -14,3 +14,8 @@ def test_keeps_brand_model_and_dimension_tokens():
 def test_keeps_short_pipe_terms_and_inch_sizes():
     kw = _query_keywords('tubo pvc 2" y codos de 1 1/2”')
     assert "pvc" in kw and '2"' in kw and "codos" in kw
+
+
+def test_job_words_expand_to_catalog_part_words():
+    kw = _query_keywords("SISTEMA DE CONDUCCION PRINCIPAL LINEAS REGANTES")
+    assert "pvc" in kw and "tuberia" in kw and "manguera" in kw
