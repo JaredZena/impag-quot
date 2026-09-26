@@ -106,6 +106,9 @@ class Product(Base):
     images = Column(
         JSON, nullable=True
     )  # list of R2 object keys, display order, first = primary
+    storefront_title = Column(
+        String(200), nullable=True
+    )  # Customer-facing name on todoparaelcampo.com.mx; NULL keeps the store's own title
     default_margin = Column(
         Numeric(5, 4), nullable=True
     )  # Default margin as decimal (0.25 = 25%)

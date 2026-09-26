@@ -56,6 +56,7 @@ class ProductUpdate(BaseModel):
     default_margin: Optional[float] = None
     is_active: Optional[bool] = None
     archived_at: Optional[datetime] = None
+    storefront_title: Optional[str] = None
 
 
 class ProductResponse(ProductBase):
@@ -571,6 +572,7 @@ def get_products(
             "stock": p.stock,
             "specifications": p.specifications,
             # Images: count + primary only — do NOT presign every image of every row
+            "storefront_title": p.storefront_title,
             "images_count": len(p.images or []),
             "primary_image_url": primary_image_url(p.images),
             "default_margin": (
@@ -855,6 +857,9 @@ def update_product(
             }
 
     for key, value in product.model_dump(exclude_unset=True).items():
+        if key == "storefront_title" and value is not None:
+            # Blank clears the override so the store keeps its own title.
+            value = " ".join(value.split())[:200] or None
         setattr(db_product, key, value)
 
     db.commit()
@@ -882,6 +887,7 @@ def update_product(
         "archived_at": db_product.archived_at,
         "created_at": db_product.created_at,
         "last_updated": db_product.last_updated,
+        "storefront_title": db_product.storefront_title,
     }
     return {"success": True, "data": data, "error": None, "message": None}
 

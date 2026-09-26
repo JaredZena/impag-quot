@@ -102,6 +102,9 @@ def get_storefront_products(
             {
                 "id": p.id,
                 "name": p.name,
+                # Customer-facing title set by the team in the admin; the sync
+                # applies it only when non-empty.
+                "storefront_title": p.storefront_title,
                 "sku": p.sku,
                 # Manual price if set, else the cached calculated fallback —
                 # identical to legacy GET /products.
