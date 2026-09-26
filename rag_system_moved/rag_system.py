@@ -137,8 +137,11 @@ _KEYWORD_STOPWORDS = {
     'para', 'con', 'sin', 'una', 'unos', 'unas', 'los', 'las', 'del', 'que', 'por',
     'sistema', 'sistemas', 'cotizar', 'cotizacion', 'cotización', 'precio', 'metros',
     'favor', 'quiero', 'necesito', 'principal', 'lineas', 'líneas',
+    # Supplier tag in many names ("(Riegos Del Norte)"), not a product word.
+    'riego', 'riegos', 'norte',
 }
 KEYWORD_POOL = 20
+PINNED_MAX = 5
 
 # Requests describe the job ("conducción principal", "líneas regantes"), the
 # catalog names the part ("TUBERIA 2\" PVC", "MANGUERA"). Expand job words to
@@ -151,7 +154,7 @@ _KEYWORD_EXPANSIONS = {
 }
 
 
-def _query_keywords(query_text):
+def _query_keywords(query_text, expand=True):
     """Distinctive tokens of a free-text request: brand/model words and
     dimensions ("wobbler", "pvc", "2\"", "20x20") that dense retrieval
     dilutes when one request names several products."""
@@ -164,7 +167,7 @@ def _query_keywords(query_text):
         if len(t) >= 4 or t.endswith(('"', '”')) or t in ('pvc', 'pad', 'hp'):
             seen.add(t)
             out.append(t.replace('”', '"'))
-    for t in list(out):
+    for t in (list(out) if expand else []):
         for extra in _KEYWORD_EXPANSIONS.get(t, []):
             if extra not in seen:
                 seen.add(extra)
@@ -172,7 +175,7 @@ def _query_keywords(query_text):
     return out[:14]
 
 
-def _keyword_supplier_products(db, query_text, limit=KEYWORD_POOL):
+def _keyword_supplier_products(db, query_text, limit=KEYWORD_POOL, with_scores=False):
     """Lexical arm: active supplier products whose name matches the most query
     keywords. Also reaches rows with no embedding yet (added after the last
     backfill), which the ANN arm can never return."""
@@ -181,12 +184,16 @@ def _keyword_supplier_products(db, query_text, limit=KEYWORD_POOL):
     if not keywords:
         return []
     haystack = func.lower(func.coalesce(Product.name, '') + ' ' + func.coalesce(SupplierProduct.name, ''))
-    hits = [case((haystack.like(f'%{k}%'), 1), else_=0) for k in keywords]
+    typed = set(_query_keywords(query_text, expand=False))
+    # Words the user typed weigh 2, expansions 1: "xcel"+"wobbler" (4) beats
+    # "pvc"+"tuberia" (2) when both compete for the pinned slots.
+    hits = [case((haystack.like(f'%{k}%'), 2 if k in typed else 1), else_=0) for k in keywords]
     score = sum(hits[1:], hits[0])
-    return db.query(SupplierProduct).join(Product).join(Supplier).filter(
+    rows = db.query(SupplierProduct, score).join(Product).join(Supplier).filter(
         SupplierProduct.is_active == True,
         or_(*[haystack.like(f'%{k}%') for k in keywords]),
     ).order_by(score.desc()).limit(limit).all()
+    return rows if with_scores else [sp for sp, _ in rows]
 
 
 def _select_relevant_supplier_products(db, query_embedding, limit, query_text, max_products):
@@ -200,9 +207,15 @@ def _select_relevant_supplier_products(db, query_embedding, limit, query_text, m
         SupplierProduct.embedding.cosine_distance(query_embedding)
     ).limit(limit).all()
 
+    pinned = []
     if query_text:
         seen = {sp.id for sp in supplier_products}
-        for sp in _keyword_supplier_products(db, query_text):
+        for sp, hits in _keyword_supplier_products(db, query_text, with_scores=True):
+            # A row naming 2+ of the request's distinctive words ("xcel" +
+            # "wobbler") is what was asked for; the cross-encoder, scoring the
+            # whole request, can rank it below generic riego parts.
+            if hits >= 2 and len(pinned) < PINNED_MAX:
+                pinned.append(sp)
             if sp.id not in seen:
                 seen.add(sp.id)
                 supplier_products.append(sp)
@@ -216,6 +229,10 @@ def _select_relevant_supplier_products(db, query_embedding, limit, query_text, m
         ]
         kept = rerank_results(query_text, candidates, top_n=max_products)
         supplier_products = [c["_sp"] for c in kept]
+    if pinned:
+        kept_ids = {sp.id for sp in supplier_products}
+        extra = [sp for sp in pinned if sp.id not in kept_ids]
+        supplier_products = extra + supplier_products[:max(0, max_products - len(extra))]
     return supplier_products
 
 
