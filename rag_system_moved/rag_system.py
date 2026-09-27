@@ -320,14 +320,19 @@ def _names_same_part(component, catalog_name):
     if not sizes:
         return True
     first = sizes[0] + '"'
-    # (?<!\d ) keeps 1/2" from matching inside 1 1/2".
-    return any(re.search(r'(?<![\d/.])(?<!\d )' + re.escape(alias), cat)
-               for alias in _SIZE_ALIASES.get(first, [first]))
+    for alias in _SIZE_ALIASES.get(first, [first]):
+        for m in re.finditer(r'(?<![\d/.])' + re.escape(alias), cat):
+            # 1/2" inside 1 1/2" is a different size; "rd26 1.25\"" is not.
+            if re.search(r'(?:^|[^\w.])\d $', cat[:m.start()]):
+                continue
+            return True
+    return False
 
 
 _PART_SYNONYMS = {
     'tuberia': ['tuber', 'tubo'],
     'tubo': ['tuber', 'tubo'],
+    'aspersor': ['asper', 'xcel', 'wobbl'],
 }
 _QUALIFIED_PARTS = {'valvula', 'adaptador'}
 

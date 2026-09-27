@@ -102,3 +102,10 @@ def test_bom_components_reads_sectioned_tables_until_conditions():
         "# --- CONDICIONES COMERCIALES SUGERIDAS ---\n- Vigencia 15 días\n"
     )
     assert _bom_components(report) == ['Aspersor Xcel Wobbler 1/2"', 'Tee PVC 1.25"']
+
+
+def test_same_part_diameter_after_a_pressure_class():
+    from rag_system_moved.rag_system import _names_same_part
+    assert _names_same_part('Tubería PVC RD26 1.25"', 'TUBERIA PVC HIDRAULICA RD26 1.25"')
+    assert _names_same_part('Manguera agrícola RD17 1.25"', 'MANGUERA RD17 1.25" (conducción, por metro)')
+    assert _names_same_part('Aspersor Xcel Wobbler 1/2"', 'Xcel Wobbler 1/2" HA-LD')
