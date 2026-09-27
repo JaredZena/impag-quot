@@ -30,6 +30,17 @@ def _get_raw_products_for_classification(query_embedding, limit=10):
         db.close()
 
 
+JOB_KEYWORDS = ['sistema', 'proyecto', 'instalación', 'instalacion', 'hectárea', 'hectarea']
+
+
+def _is_job_request(query_text):
+    import re
+    text = query_text.lower()
+    return (any(kw in text for kw in JOB_KEYWORDS)
+            or re.search(r'\d+(?:\.\d+)?\s*[x×]\s*\d+', text) is not None
+            or re.search(r'\d+(?:\.\d+)?\s*(?:ha|has)\b', text) is not None)
+
+
 def classify_quotation_tier(query_text, raw_products):
     """
     Classify quotation complexity based on products and query content.
@@ -42,6 +53,11 @@ def classify_quotation_tier(query_text, raw_products):
     has_shipping = any(kw in query_text.lower() for kw in SHIPPING_KEYWORDS)
     if has_shipping:
         return 'mediana_alta'
+
+    # A whole job ("sistema de riego para 20x20") is many lines even when it
+    # names one product: it needs the calculation step and a full BOM.
+    if _is_job_request(query_text):
+        return 'mediana'
 
     # Estimate product line count from query phrasing
     multi_count = sum(1 for kw in MULTI_PRODUCT_KEYWORDS if kw in query_text.lower())
@@ -154,6 +170,11 @@ _KEYWORD_EXPANSIONS = {
 }
 
 
+def _strip_accents(text):
+    import unicodedata
+    return ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
+
+
 def _query_keywords(query_text, expand=True):
     """Distinctive tokens of a free-text request: brand/model words and
     dimensions ("wobbler", "pvc", "2\"", "20x20") that dense retrieval
@@ -164,9 +185,14 @@ def _query_keywords(query_text, expand=True):
     for t in tokens:
         if t in _KEYWORD_STOPWORDS or t in seen:
             continue
-        if len(t) >= 4 or t.endswith(('"', '”')) or t in ('pvc', 'pad', 'hp'):
+        if len(t) >= 4 or t.endswith(('"', '”')) or t in ('pvc', 'pad', 'hp', 'tee', 'rd'):
             seen.add(t)
             out.append(t.replace('”', '"'))
+            # Catalog names are mostly written without accents ("VALVULA").
+            plain = _strip_accents(t)
+            if plain != t and plain not in seen:
+                seen.add(plain)
+                out.append(plain)
     for t in (list(out) if expand else []):
         for extra in _KEYWORD_EXPANSIONS.get(t, []):
             if extra not in seen:
@@ -194,6 +220,116 @@ def _keyword_supplier_products(db, query_text, limit=KEYWORD_POOL, with_scores=F
         or_(*[haystack.like(f'%{k}%') for k in keywords]),
     ).order_by(score.desc()).limit(limit).all()
     return rows if with_scores else [sp for sp, _ in rows]
+
+
+BOM_MAX_LINES = 30
+BOM_MIN_SCORE = 4  # two words the component line itself names
+
+
+def _bom_components(calculation_report):
+    """Component names from the report's 'RECOMENDACIÓN DE CANTIDADES' list
+    ("- Tee PVC 1.25\": 20 pzas" -> "Tee PVC 1.25\"")."""
+    import re
+    if not calculation_report:
+        return []
+    # The list may be split into several tables/sections with '---' between
+    # them; it ends where the commercial conditions start.
+    m = re.search(r'RECOMENDACI[OÓ]N DE CANTIDADES:?(.*?)(?:CONDICIONES COMERCIALES|\Z)', calculation_report,
+                  re.S | re.I)
+    if not m:
+        return []
+    names, header = [], None
+    for line in m.group(1).splitlines():
+        line = re.sub(r'[*_`]', '', line).strip()
+        if not line.startswith('|'):
+            header = None  # the next table brings its own header
+        if line.startswith('|'):
+            # Markdown table: | # | Producto | Diámetro | Cantidad | Unidad |
+            cells = [c.strip() for c in line.strip('|').split('|')]
+            lowered = [_strip_accents(c.lower()) for c in cells]
+            if header is None:
+                header = lowered
+                continue
+            if all(set(c) <= set('-: ') for c in cells):
+                continue
+            col = {h: i for i, h in enumerate(header)}
+            prod = next((i for h, i in col.items() if 'producto' in h or 'descripcion' in h or 'concepto' in h), None)
+            diam = next((i for h, i in col.items() if 'diametro' in h or 'medida' in h), None)
+            if prod is None or prod >= len(cells):
+                continue
+            name = cells[prod]
+            if diam is not None and diam < len(cells) and cells[diam] not in ('', '—', '-'):
+                name = f"{name} {cells[diam]}"
+        elif line.startswith(('-', '•')) and not set(line) <= set('-'):
+            name = line.lstrip('-• ').split(':')[0]
+        else:
+            continue
+        name = re.sub(r'\s*⚠️?', '', name).strip()
+        if name and name not in names:
+            names.append(name)
+    return names[:BOM_MAX_LINES]
+
+
+def _bom_supplier_products(db, components):
+    """Best catalog row for each component of a job (tees, codos, válvulas…):
+    one request names a whole system, so the request-level search only ever
+    reaches its headline parts and the fittings came back as 'Consultar'."""
+    found = []
+    for name in components:
+        rows = _keyword_supplier_products(db, name, limit=10, with_scores=True)
+        for sp, hits in rows:
+            if sp.cost and hits >= BOM_MIN_SCORE and _names_same_part(name, f"{sp.product.name} {sp.name or ''}"):
+                found.append(sp)
+                break
+    return found
+
+
+# Same diameter, written the ways the catalog writes it.
+_SIZE_ALIASES = {
+    '1/2"': ['1/2"', '1/2 "', '13 mm', '13mm'],
+    '3/4"': ['3/4"', '3/4 "', '19 mm', '19mm'],
+    '1"': ['1"', '1 "', '25 mm', '25mm'],
+    '1.25"': ['1.25"', '1 1/4', '32 mm', '32mm'],
+    '1.5"': ['1.5"', '1 1/2', '38 mm', '38mm', '40 mm', '40mm'],
+    '2"': ['2"', '2 "', '50 mm', '50mm'],
+    '3"': ['3"', '3 "', '75 mm', '75mm'],
+    '4"': ['4"', '4 "', '100 mm', '100mm'],
+}
+
+
+def _names_same_part(component, catalog_name):
+    """A catalog row prices a component only if it names the same part (the
+    component's first word: tee, válvula, codo…) and, when the component gives
+    a diameter, that diameter — sharing only 'PVC 1.25\"' is not a match."""
+    import re
+    comp = _strip_accents(component.lower()).replace('”', '"')
+    cat = _strip_accents(catalog_name.lower()).replace('”', '"')
+    words = [w for w in re.findall(r'[a-z]{3,}', comp) if w not in ('del', 'para', 'con', 'pvc')]
+    if not words:
+        return False
+    # The part noun must lead the catalog name: "NIPLE ... CON ABRAZADERA" is a
+    # niple, not an abrazadera.
+    lead = ' '.join(re.findall(r'[a-z]{3,}', cat)[:2])
+    heads = _PART_SYNONYMS.get(words[0], [words[0][:5]])
+    if not any(re.search(r'\b' + re.escape(h), lead) for h in heads):
+        return False
+    # "válvula de esfera" is not "válvula de aire"; "adaptador macho" is not "hembra".
+    if words[0] in _QUALIFIED_PARTS and len(words) > 1 and words[1][:4] not in cat:
+        return False
+    sizes = re.findall(r'(?<![\d/.])(\d+(?:[./]\d+)?)\s*"', comp)
+    if not sizes:
+        return True
+    first = sizes[0] + '"'
+    # (?<!\d ) keeps 1/2" from matching inside 1 1/2".
+    return any(re.search(r'(?<![\d/.])(?<!\d )' + re.escape(alias), cat)
+               for alias in _SIZE_ALIASES.get(first, [first]))
+
+
+_PART_SYNONYMS = {
+    'tuberia': ['tuber', 'tubo'],
+    'tubo': ['tuber', 'tubo'],
+}
+_QUALIFIED_PARTS = {'valvula', 'adaptador'}
 
 
 def _select_relevant_supplier_products(db, query_embedding, limit, query_text, max_products):
@@ -379,13 +515,22 @@ def get_relevant_products(query_embedding, limit=30, include_internal_details=Fa
         db.close()
 
 
-def get_relevant_products_views(query_embedding, query_text=None, limit=30, max_products=15, fallback_margin=30.0):
+def get_relevant_products_views(query_embedding, query_text=None, limit=30, max_products=15, fallback_margin=30.0,
+                                bom_components=None):
     """One retrieval + ONE rerank pass -> (customer_md, internal_md, quote_candidates).
     Guarantees both prompt sections AND the quote candidates describe the same
-    product set, and halves cross-encoder calls versus selecting twice."""
+    product set, and halves cross-encoder calls versus selecting twice.
+    `bom_components` (from the calculation report) adds the best catalog row
+    for each listed part on top of the request-level selection."""
     db = SessionLocal()
     try:
         sps = _select_relevant_supplier_products(db, query_embedding, limit, query_text, max_products)
+        if bom_components:
+            ids = {sp.id for sp in sps}
+            for sp in _bom_supplier_products(db, bom_components):
+                if sp.id not in ids:
+                    ids.add(sp.id)
+                    sps.append(sp)
         return (_format_product_lines(sps, False, fallback_margin),
                 _format_product_lines(sps, True, fallback_margin),
                 supplier_products_to_quote_candidates(sps, fallback_margin))
@@ -485,7 +630,15 @@ def analyze_request_and_calculate(query, context):
         f"1. Determina si la solicitud requiere un CÁLCULO basado en dimensiones, área o uso.\n"
         f"2. Realiza los cálculos necesarios si aplican.\n"
         f"3. ANALIZA LAS NOTAS Y CONDICIONES de las cotizaciones históricas en el contexto. Identifica patrones para este tipo de producto (ej. tiempos de entrega específicos, condiciones de pago, maniobras).\n"
-        f"4. Genera un set de 'NOTAS SUGERIDAS' dinámicas. No uses siempre las mismas. Adáptalas al producto. Por ejemplo, si es maquinaria, el tiempo de entrega suele ser mayor. Si son insumos, es menor.\n\n"
+        f"4. SISTEMAS DE RIEGO: la RECOMENDACIÓN DE CANTIDADES es la lista de materiales COMPLETA, pieza por pieza y con diámetro: "
+        f"tubería de conducción y de regantes, manguera desde la fuente de agua, tees, codos, reducciones/bushings, elevadores, "
+        f"adaptadores, coples, válvulas de esfera, válvula de aire, abrazaderas, pegamento PVC, limpiador y teflón. "
+        f"Nunca escribas 'accesorios' como una sola partida.\n"
+        f"   Práctica de IMPAG (balance real, 20×20 m de alfalfa con Xcel Wobbler): 16 wobblers (4 líneas × 4, ~5 m entre ellos), "
+        f"conducción y líneas regantes en PVC RD26 de 1.25\", manguera RD17 1.25\" desde la fuente. En parcelas menores a 1,000 m² "
+        f"no uses tubería mayor a 1.25\" salvo que la solicitud lo pida. Si no se sabe la distancia a la fuente de agua, "
+        f"supón 50 m y márcalo como supuesto a confirmar.\n"
+        f"5. Genera un set de 'NOTAS SUGERIDAS' dinámicas. No uses siempre las mismas. Adáptalas al producto. Por ejemplo, si es maquinaria, el tiempo de entrega suele ser mayor. Si son insumos, es menor.\n\n"
         
         f"FORMATO DE RESPUESTA:\n"
         f"--- REPORTE DE CÁLCULO ---\n"
@@ -494,7 +647,7 @@ def analyze_request_and_calculate(query, context):
         f"CÁLCULOS PASO A PASO:\n"
         f"[Matemáticas...]\n"
         f"RECOMENDACIÓN DE CANTIDADES:\n"
-        f"- [Producto]: [Cantidad]\n"
+        f"- [Producto con diámetro]: [Cantidad] [Unidad]\n"
         f"\n"
         f"--- CONDICIONES COMERCIALES SUGERIDAS ---\n"
         f"[Lista aquí las notas exactas que deben ir en la cotización. Incluye vigencia, pago, entrega, descarga, etc. Basado en lo que veas en el historial para productos similares.]\n"
@@ -652,8 +805,10 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
     calculation_report = analyze_request_and_calculate(query, context)
     print(f"🔹 Calculation & Analysis Report:\n{calculation_report}")
 
-    # Get products from database using semantic search
-    matched_products, matched_products_internal, quote_candidates = get_relevant_products_views(query_embedding, query_text=query)
+    # Get products from database: request-level search plus one lookup per
+    # component the report listed, so fittings get catalog prices.
+    matched_products, matched_products_internal, quote_candidates = get_relevant_products_views(
+        query_embedding, query_text=query, bom_components=_bom_components(calculation_report))
 
     # Shared preamble used by both calls
     shared_context = (
@@ -693,6 +848,8 @@ def query_rag_system_with_history(query, chat_history=None, customer_name=None, 
         f"| Nombre del producto (especificaciones) | ROLLO | 28 | $2,250.00 MXN | $63,000.00 MXN |\n"
         f"- SIEMPRE 5 columnas. Info extra del producto va en Descripción, no en columnas extra.\n"
         f"- Precio Unitario e Importe: incluir $ y MXN. Sin precio: 'Consultar'.\n"
+        f"- Cada pieza de la RECOMENDACIÓN DE CANTIDADES va en su PROPIA fila con su cantidad; nunca agrupes accesorios en un 'LOTE'. "
+        f"Si alguna fila queda en 'Consultar', rotula el total como 'TOTAL (sin partidas por consultar)'.\n"
         f"- Números con comas como separadores de miles.\n"
         f"- Doble salto de línea entre secciones principales.\n"
     )
