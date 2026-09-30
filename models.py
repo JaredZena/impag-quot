@@ -109,6 +109,9 @@ class Product(Base):
     storefront_title = Column(
         String(200), nullable=True
     )  # Customer-facing name on todoparaelcampo.com.mx; NULL keeps the store's own title
+    online_sale = Column(
+        JSON, nullable=True
+    )  # "Vender en línea" switch set in the admin; NULL = never configured (storefront sync uses its own config)
     default_margin = Column(
         Numeric(5, 4), nullable=True
     )  # Default margin as decimal (0.25 = 25%)

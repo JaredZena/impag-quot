@@ -140,6 +140,10 @@ def get_storefront_products(
                 # the sync fails closed.
                 "iva": p.iva,
                 "unit": p.unit.value if p.unit is not None else None,
+                # "Vender en línea" switch set in the admin; the sync builds the
+                # sale entry from it. NULL = not configured there, so the sync
+                # falls back to its own config.
+                "online_sale": p.online_sale,
                 "package_size": p.package_size,
                 "stock": p.stock,
             }

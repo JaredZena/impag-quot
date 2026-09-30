@@ -1,9 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, case, false, literal
-from typing import List, Optional, Any
-from pydantic import BaseModel
-from datetime import datetime
+from typing import Annotated, List, Literal, Optional, Any
+from pydantic import (
+    BaseModel,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
+from datetime import datetime, timezone
 from models import get_db, Product, Supplier, SupplierProduct, ProductUnit
 from services.price_calculator import (
     enrich_products_with_calculated_prices,
@@ -57,6 +63,35 @@ class ProductUpdate(BaseModel):
     is_active: Optional[bool] = None
     archived_at: Optional[datetime] = None
     storefront_title: Optional[str] = None
+
+
+# "Vender en línea" switch for todoparaelcampo.com.mx. The storefront sync
+# reads it from GET /storefront/products; saved whole (no merge).
+OnlineSaleDelivery = Literal["recoger", "paqueteria", "flete"]
+
+
+class OnlineSaleUpdate(BaseModel):
+    enabled: bool
+    unit_label: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)
+    ]
+    delivery: List[OnlineSaleDelivery] = Field(min_length=1)
+    min_qty: int = Field(ge=1, le=9999)
+    max_qty: int = Field(ge=1, le=9999)
+    stock_status: Literal["in_stock", "backorder"]
+
+    @field_validator("delivery")
+    @classmethod
+    def _unique_delivery(cls, v):
+        if len(set(v)) != len(v):
+            raise ValueError("delivery options must be unique")
+        return v
+
+    @model_validator(mode="after")
+    def _min_le_max(self):
+        if self.min_qty > self.max_qty:
+            raise ValueError("min_qty must be <= max_qty")
+        return self
 
 
 class ProductResponse(ProductBase):
@@ -573,6 +608,7 @@ def get_products(
             "specifications": p.specifications,
             # Images: count + primary only — do NOT presign every image of every row
             "storefront_title": p.storefront_title,
+            "online_sale": p.online_sale,
             "images_count": len(p.images or []),
             "primary_image_url": primary_image_url(p.images),
             "default_margin": (
@@ -752,6 +788,7 @@ def get_product(
         "stock": product.stock,
         "specifications": product.specifications,
         "images": presigned_image_urls(product.images),
+        "online_sale": product.online_sale,
         "default_margin": (
             float(product.default_margin)
             if product.default_margin is not None
@@ -888,8 +925,55 @@ def update_product(
         "created_at": db_product.created_at,
         "last_updated": db_product.last_updated,
         "storefront_title": db_product.storefront_title,
+        "online_sale": db_product.online_sale,
     }
     return {"success": True, "data": data, "error": None, "message": None}
+
+
+def _live_product_or_404(product_id: int, db: Session) -> Product:
+    db_product = (
+        db.query(Product)
+        .filter(Product.id == product_id, Product.archived_at.is_(None))
+        .first()
+    )
+    if db_product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return db_product
+
+
+# PUT /products/{product_id}/online-sale - "Vender en línea" on todoparaelcampo.com.mx
+@router.put("/{product_id}/online-sale")
+def update_product_online_sale(
+    product_id: int,
+    online_sale: OnlineSaleUpdate,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token),
+):
+    db_product = _live_product_or_404(product_id, db)
+    # Replace the whole object (a new dict, so SQLAlchemy sees the JSON change).
+    db_product.online_sale = {
+        **online_sale.model_dump(),
+        "updated_by": (user or {}).get("email"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    db.commit()
+    db.refresh(db_product)
+    return {"id": db_product.id, "online_sale": db_product.online_sale}
+
+
+# DELETE /products/{product_id}/online-sale - back to "never configured" (NULL),
+# so the storefront sync falls back to its own config for this product.
+@router.delete("/{product_id}/online-sale")
+def clear_product_online_sale(
+    product_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token),
+):
+    db_product = _live_product_or_404(product_id, db)
+    db_product.online_sale = None
+    db.commit()
+    db.refresh(db_product)
+    return {"id": db_product.id, "online_sale": None}
 
 
 # SupplierProduct endpoints - ALL REQUIRE AUTHENTICATION for admin operations
