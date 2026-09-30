@@ -462,7 +462,9 @@ def send_quote(quote_id: int, db: Session = Depends(get_db), user=Depends(verify
 
     quote.status = "sent"
     quote.sent_at = datetime.now(timezone.utc)
-    quote.access_token = str(uuid.uuid4())
+    # Keep an existing link working: a storefront quote's buyer already holds
+    # it (services/web_quotes.py), and so may anyone a quote was re-sent to.
+    quote.access_token = quote.access_token or str(uuid.uuid4())
     quote.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(quote)

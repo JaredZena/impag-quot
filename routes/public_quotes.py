@@ -6,6 +6,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session, joinedload
 from datetime import datetime, timezone, timedelta
 from models import get_db, Quote, Notification
+from services.web_quotes import is_web_quote
 
 router = APIRouter(prefix="/public/quote", tags=["public"])
 
@@ -20,7 +21,56 @@ def _h(value):
     return escape("" if value is None else str(value))
 
 
-def render_quote_page(quote, status_message=None, show_accept=True):
+# ?pago=<state> on the public page: where the storefront's /api/quote-checkout
+# and Mercado Pago's back_urls send the buyer. Anything else is ignored.
+PAY_RETURN_MESSAGES = {
+    "exito": ("ok", "¡Gracias! Recibimos tu pago. En cuanto Mercado Pago lo confirme te escribimos para coordinar la entrega."),
+    "pendiente": ("wait", "Tu pago está en proceso (OXXO, SPEI o revisión). Te avisamos en cuanto se acredite."),
+    "error": ("bad", "El pago no se completó. Puedes intentarlo de nuevo o escribirnos por WhatsApp."),
+    "no-disponible": ("bad", "No pudimos iniciar el pago en este momento. Intenta de nuevo en unos minutos o escríbenos por WhatsApp."),
+}
+BANNER_STYLES = {
+    "ok": "background:#E8F5E9;border:1px solid #4CAF50;color:#2E7D32;",
+    "wait": "background:#FFF8E1;border:1px solid #FFB300;color:#8D6E00;",
+    "bad": "background:#FFEBEE;border:1px solid #E53935;color:#B71C1C;",
+}
+# Payments in flight or done: a web quote with one of these never expires.
+PAYMENT_HOLDS = ("pending", "approved", "mismatch")
+
+
+def _web_quote_state(quote):
+    """(banner kind, message) for a storefront quote from its own state, or None."""
+    payment_status = getattr(quote, "payment_status", None)
+    if payment_status == "approved":
+        return "ok", "Cotización pagada. Gracias por tu compra: te contactamos para coordinar la entrega."
+    if payment_status == "pending":
+        return "wait", "Tu pago está en proceso. Te avisamos en cuanto se acredite."
+    if payment_status == "mismatch":
+        return "wait", "Recibimos tu pago y lo estamos verificando. Te contactamos en breve."
+    if quote.status == "draft":
+        return "wait", (
+            "Tu cotización está en revisión: un ingeniero confirma precios y envío y te avisa "
+            "por WhatsApp. Este mismo enlace mostrará el botón de pago cuando esté lista."
+        )
+    return None
+
+
+def _pay_form(quote):
+    total = f"${float(quote.total):,.2f}"
+    return f"""
+        <form method="POST" action="/api/quote-checkout" style="text-align:center;margin:32px 0;">
+            <input type="hidden" name="token" value="{_h(quote.access_token)}">
+            <button type="submit" style="background:linear-gradient(135deg,#4CAF50,#00897B);color:#fff;border:none;padding:16px 40px;font-size:18px;font-weight:700;border-radius:8px;cursor:pointer;letter-spacing:0.5px;">
+                ACEPTAR Y PAGAR {total} MXN
+            </button>
+            <p style="font-size:13px;color:#666;margin-top:12px;">
+                Pago seguro con Mercado Pago: tarjeta, transferencia SPEI u OXXO.<br>
+                Al pagar aceptas esta cotización y los <a href="/terminos" style="color:#00897B;">términos y condiciones</a>.
+            </p>
+        </form>"""
+
+
+def render_quote_page(quote, status_message=None, show_accept=True, pay_return=None):
     """Render the customer-facing quote HTML."""
     items_html = ""
     for item in sorted(quote.items, key=lambda x: x.sort_order):
@@ -49,7 +99,24 @@ def render_quote_page(quote, status_message=None, show_accept=True):
     engineer_display = engineer_name.split("@")[0].replace(".", " ").title() if engineer_name else "IMPAG"
 
     accept_button = ""
-    if show_accept and quote.status in ("sent", "viewed"):
+    web = is_web_quote(quote)
+    payable = (
+        web
+        and quote.status in ("sent", "viewed")
+        and getattr(quote, "payment_status", None) not in PAYMENT_HOLDS
+        and bool(quote.items)
+        and all(float(i.unit_price) > 0 for i in quote.items)
+        and float(quote.total) > 0
+    )
+    if web:
+        state = _web_quote_state(quote)
+        if pay_return in PAY_RETURN_MESSAGES and not (state and state[0] == "ok"):
+            state = PAY_RETURN_MESSAGES[pay_return]
+        if state and not status_message:
+            status_message = state
+        if payable and show_accept:
+            accept_button = _pay_form(quote)
+    elif show_accept and quote.status in ("sent", "viewed"):
         accept_button = f"""
         <form method="POST" style="text-align:center;margin:32px 0;">
             <p style="font-size:14px;color:#666;margin-bottom:16px;">
@@ -62,7 +129,8 @@ def render_quote_page(quote, status_message=None, show_accept=True):
 
     status_banner = ""
     if status_message:
-        status_banner = f'<div style="background:#E8F5E9;border:1px solid #4CAF50;border-radius:8px;padding:16px;text-align:center;margin-bottom:24px;font-weight:600;color:#2E7D32;">{_h(status_message)}</div>'
+        kind, text = status_message if isinstance(status_message, tuple) else ("ok", status_message)
+        status_banner = f'<div style="{BANNER_STYLES.get(kind, BANNER_STYLES["ok"])}border-radius:8px;padding:16px;text-align:center;margin-bottom:24px;font-weight:600;">{_h(text)}</div>'
 
     return f"""<!DOCTYPE html>
 <html lang="es">
@@ -163,7 +231,7 @@ def render_quote_page(quote, status_message=None, show_accept=True):
 
 
 @router.get("/{access_token}", response_class=HTMLResponse)
-def view_quote(access_token: str, db: Session = Depends(get_db)):
+def view_quote(access_token: str, pago: str | None = None, db: Session = Depends(get_db)):
     """Customer-facing quote view. No auth required."""
     quote = (
         db.query(Quote)
@@ -176,9 +244,11 @@ def view_quote(access_token: str, db: Session = Depends(get_db)):
         return HTMLResponse(content=render_not_found(), status_code=404)
 
     # Check if expired
-    if quote.status not in ("accepted", "rejected"):
+    if quote.status not in ("accepted", "rejected") and quote.payment_status not in PAYMENT_HOLDS:
         if quote.sent_at and quote.validity_days:
             expiry = quote.sent_at + timedelta(days=quote.validity_days)
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
             if datetime.now(timezone.utc) > expiry:
                 quote.status = "expired"
                 quote.expired_at = datetime.now(timezone.utc)
@@ -187,7 +257,8 @@ def view_quote(access_token: str, db: Session = Depends(get_db)):
     if quote.status == "expired":
         return HTMLResponse(content=render_expired(quote))
 
-    if quote.status == "accepted":
+    pay_return = pago if pago in PAY_RETURN_MESSAGES else None
+    if quote.status == "accepted" and not is_web_quote(quote):
         return HTMLResponse(
             content=render_quote_page(
                 quote,
@@ -195,6 +266,15 @@ def view_quote(access_token: str, db: Session = Depends(get_db)):
                 show_accept=False,
             )
         )
+
+    # A storefront quote: the buyer made it and is looking at it right now, so
+    # a "viewed" notification is noise; payment events notify instead.
+    if is_web_quote(quote):
+        if not quote.viewed_at and quote.status == "sent":
+            quote.viewed_at = datetime.now(timezone.utc)
+            quote.status = "viewed"
+            db.commit()
+        return HTMLResponse(content=render_quote_page(quote, pay_return=pay_return))
 
     # Track first view
     if not quote.viewed_at and quote.status == "sent":
@@ -235,6 +315,11 @@ def accept_quote(access_token: str, db: Session = Depends(get_db)):
 
     if not quote:
         return HTMLResponse(content=render_not_found(), status_code=404)
+
+    # A storefront quote is accepted by paying it (services/web_orders.py marks
+    # it accepted when Mercado Pago approves the payment).
+    if is_web_quote(quote):
+        return HTMLResponse(content=render_quote_page(quote))
 
     # Idempotent: if already accepted, just show success
     if quote.status == "accepted":

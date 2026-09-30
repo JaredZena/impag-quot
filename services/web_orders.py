@@ -525,6 +525,9 @@ def _block_data(
     kept_lines = lines if lines is not None else existing.get("lines")
     if isinstance(kept_lines, list) and kept_lines:
         data["lines"] = kept_lines
+    # A self-serve quote (services/web_quotes.py) keeps its origin marker.
+    if isinstance(existing.get("origin"), str):
+        data["origin"] = existing["origin"]
     confirmation = buyer_confirmation or existing.get("buyer_confirmation")
     if isinstance(confirmation, dict):
         data["buyer_confirmation"] = confirmation

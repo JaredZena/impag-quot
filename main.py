@@ -34,6 +34,7 @@ from routes.sales import router as sales_router
 from routes.social import router as social_router
 from routes.storefront import router as storefront_router
 from routes.storefront_orders import router as storefront_orders_router
+from routes.storefront_quotes import router as storefront_quotes_router
 from routes.suppliers import router as suppliers_router
 from routes.task_categories import router as task_categories_router
 from routes.task_comments import router as task_comments_router
@@ -132,6 +133,7 @@ app.include_router(notifications_router)
 app.include_router(public_quotes_router)
 app.include_router(storefront_router)
 app.include_router(storefront_orders_router)
+app.include_router(storefront_quotes_router)
 app.include_router(sales_router)
 app.include_router(pos_router)
 app.include_router(tools_router)

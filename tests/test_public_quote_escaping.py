@@ -56,6 +56,8 @@ def _quote(**overrides):
         "validity_days": 15,
         "assigned_to": "hernan@example.com",
         "created_by": "tienda-web",
+        "payment_status": None,
+        "access_token": "5f0c7d1e-3a52-4c1b-9f0e-2b8a6d4e1c37",
         "subtotal": 301.10,
         "iva_amount": 48.18,
         "total": 349.28,
