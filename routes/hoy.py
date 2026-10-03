@@ -8,17 +8,23 @@ Prioritario Mañana).
   follow-ups recorded on quotes, pendientes closed, what clients still owe,
   and the open pendientes flagged urgent/high for tomorrow. Numbers the app
   does not have (e.g. "Atención al cliente") are left to the person.
+- GET  /hoy/seguimiento            today's WhatsApp follow-up list
+  (services/seguimiento.py): who to message and the message, plus who was
+  already messaged today.
+- POST /hoy/seguimiento            record one as sent.
+- POST /hoy/seguimiento/{id}/outcome   Respondió / Venta / No le interesa.
 """
 
 import re
 from datetime import date, datetime, time, timedelta
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from auth import verify_google_token
 from models import Quote, Sale, Task, get_db
-from services import pendientes
+from services import pendientes, seguimiento
 from services.quote_capture import BUSINESS_TZ
 
 router = APIRouter(prefix="/hoy", tags=["hoy"])
@@ -88,6 +94,22 @@ def hoy(
                     "detail": re.sub(r"\s*\([^()]*@[^()]*\)\s*$", "", line).strip(),
                 }
             )
+    # WhatsApp follow-ups from "Seguimiento del día"; a quote whose status
+    # changed today is already listed from its note.
+    noted = {f["quote_id"] for f in followups}
+    for c in seguimiento.todays_contacts(db, day):
+        if c.quote_id and c.quote_id in noted:
+            continue
+        q = db.get(Quote, c.quote_id) if c.quote_id else None
+        followups.append(
+            {
+                "quote_id": c.quote_id,
+                "quote_number": q.quote_number if q else None,
+                "customer_name": c.customer_name,
+                "material": _material(q.notes) if q else None,
+                "detail": seguimiento.OUTCOME_LABEL.get(c.outcome, c.outcome),
+            }
+        )
     closed = (
         db.query(Task)
         .filter(Task.completed_at >= start, Task.completed_at < end)
@@ -162,3 +184,68 @@ def hoy(
             "priority": priority,
         },
     }
+
+
+class ContactIn(BaseModel):
+    key: str | None = Field(default=None, max_length=200)
+    customer_name: str = Field(min_length=1, max_length=200)
+    kind: str
+    quote_ids: list[int] = Field(default_factory=list, max_length=20)
+    phone: str | None = Field(default=None, max_length=30)
+    message: str | None = Field(default=None, max_length=2000)
+    outcome: str = "enviado"
+
+
+class OutcomeIn(BaseModel):
+    outcome: str
+
+
+@router.get("/seguimiento")
+def seguimiento_del_dia(
+    extra: int = Query(default=0, ge=0, le=60),
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token),
+):
+    return {
+        "success": True,
+        "data": seguimiento.daily_list(db, sender_email=user.get("email"), extra=extra),
+    }
+
+
+@router.post("/seguimiento")
+def registrar_seguimiento(
+    data: ContactIn,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token),
+):
+    try:
+        contact = seguimiento.log_contact(
+            db,
+            key=data.key,
+            customer_name=data.customer_name,
+            kind=data.kind,
+            quote_ids=data.quote_ids,
+            phone=(data.phone or "").strip() or None,
+            message=data.message,
+            outcome=data.outcome,
+            user_email=user.get("email", "unknown"),
+        )
+    except seguimiento.SeguimientoError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"success": True, "data": seguimiento.contact_dict(contact)}
+
+
+@router.post("/seguimiento/{contact_id}/outcome")
+def resultado_seguimiento(
+    contact_id: int,
+    data: OutcomeIn,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token),
+):
+    try:
+        contact = seguimiento.set_outcome(
+            db, contact_id, data.outcome, user_email=user.get("email", "unknown")
+        )
+    except seguimiento.SeguimientoError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"success": True, "data": seguimiento.contact_dict(contact)}

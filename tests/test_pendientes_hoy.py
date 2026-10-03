@@ -28,6 +28,7 @@ import routes.tasks_mgmt as tasks_routes
 from models import (
     Base,
     Customer,
+    FollowupContact,
     Quote,
     QuoteItem,
     Sale,
@@ -49,6 +50,7 @@ TABLES = [
     Quote.__table__,
     QuoteItem.__table__,
     Sale.__table__,
+    FollowupContact.__table__,
 ]
 engine = create_engine(
     "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool

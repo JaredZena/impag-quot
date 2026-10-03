@@ -489,6 +489,30 @@ class Sale(Base):
     )
 
 
+class FollowupContact(Base):
+    """One WhatsApp follow-up sent from the "Seguimiento del día" list on Hoy
+    (services/seguimiento.py): who, why (open quote / last season's buyer /
+    inactive customer) and how it went. Keyed by the folded customer name so
+    the same person is not messaged twice from different lists."""
+
+    __tablename__ = "followup_contact"
+
+    id = Column(Integer, primary_key=True, index=True)
+    contact_key = Column(String(200), nullable=False, index=True)
+    customer_name = Column(String(200), nullable=False)
+    phone = Column(String(30), nullable=True)
+    kind = Column(String(20), nullable=False)  # cotizacion | temporada | inactivo
+    quote_id = Column(
+        Integer, ForeignKey("quote.id", ondelete="SET NULL"), nullable=True
+    )
+    # enviado | respondio | venta | no_interesa
+    outcome = Column(String(20), nullable=False, default="enviado")
+    message = Column(Text, nullable=True)
+    created_by = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class SaleBalance(Base):
     """One tab of the BALANCES DE VENTA spreadsheet (per-sale cost breakdown).
 

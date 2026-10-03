@@ -14,6 +14,12 @@ Idempotency lives on the Quote row: last_followup_at (don't re-nudge within the
 reminder interval) + followup_count (never exceed MAX_FOLLOWUPS). No inbound
 message is required — drafts are created with trigger_message_id=NULL.
 
+OFF by default since 2026-10-03 (FOLLOWUP_SWEEP_ENABLED=true turns it back
+on): quote follow-ups are now sent by a person from the "Seguimiento del día"
+list on Hoy (services/seguimiento.py), which bumps the same last_followup_at /
+followup_count. The sweep would otherwise drop one Pendientes task per open
+quote. dry_run still lists the candidates.
+
 Side-effect free until dry_run=False. Callable from a CLI script or an HTTP job
 endpoint; the trigger (local cron / EventBridge / GitHub Actions) is external.
 """
@@ -123,6 +129,10 @@ def _category_id(db: Session) -> Optional[int]:
     return cat.id if cat else None
 
 
+def sweep_enabled() -> bool:
+    return os.getenv("FOLLOWUP_SWEEP_ENABLED", "false").strip().lower() == "true"
+
+
 def sweep_stale_quotes(db: Session, dry_run: bool = True,
                        now: Optional[datetime] = None) -> Dict:
     """Create follow-up Tasks (+ optional WA drafts) for stale quotes.
@@ -137,6 +147,9 @@ def sweep_stale_quotes(db: Session, dry_run: bool = True,
                "wa_drafts_created": 0, "errors": 0, "items": []}
 
     if not candidates:
+        return summary
+    if not dry_run and not sweep_enabled():
+        summary["skipped"] = "off: follow-ups go through Seguimiento del día (Hoy)"
         return summary
 
     # Validate the system task-user up front so a bad id fails once, loudly, rather
