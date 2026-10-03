@@ -6,6 +6,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session, joinedload
 from datetime import datetime, timezone, timedelta
 from models import get_db, Quote, Notification
+from services.web_orders import NOTES_BLOCK_RE
 from services.web_quotes import is_web_quote
 
 router = APIRouter(prefix="/public/quote", tags=["public"])
@@ -19,6 +20,20 @@ def _h(value):
     buyer typed (routes/storefront_orders.py), and this page is served on the
     storefront's own domain."""
     return escape("" if value is None else str(value))
+
+
+# Web quotes carry machine notes for staff: the "[Pedido web]" JSON block in
+# quote.notes and "Tienda en línea: <handle> …" on each item. The buyer sees
+# only the human text around them.
+STAFF_ITEM_NOTE_PREFIX = "Tienda en línea:"
+
+
+def _public_notes(notes):
+    return NOTES_BLOCK_RE.sub("", notes or "").strip() or None
+
+
+def _public_item_note(note):
+    return None if (note or "").startswith(STAFF_ITEM_NOTE_PREFIX) else note
 
 
 # ?pago=<state> on the public page: where the storefront's /api/quote-checkout
@@ -72,10 +87,12 @@ def _pay_form(quote):
 
 def render_quote_page(quote, status_message=None, show_accept=True, pay_return=None):
     """Render the customer-facing quote HTML."""
+    notes = _public_notes(quote.notes)
     items_html = ""
     for item in sorted(quote.items, key=lambda x: x.sort_order):
         line_total = float(item.quantity) * float(item.unit_price)
         iva_badge = ""
+        item_note = _public_item_note(item.notes)
         if item.iva_applicable:
             iva_badge = '<span style="font-size:11px;color:#666;margin-left:4px;">+ IVA</span>'
         items_html += f"""
@@ -83,7 +100,7 @@ def render_quote_page(quote, status_message=None, show_accept=True, pay_return=N
             <td style="padding:12px 8px;border-bottom:1px solid #eee;">
                 <strong>{_h(item.description)}</strong>
                 {f'<br><span style="font-size:12px;color:#888;">SKU: {_h(item.sku)}</span>' if item.sku else ''}
-                {f'<br><span style="font-size:12px;color:#666;">{_h(item.notes)}</span>' if item.notes else ''}
+                {f'<br><span style="font-size:12px;color:#666;">{_h(item_note)}</span>' if item_note else ''}
             </td>
             <td style="padding:12px 8px;border-bottom:1px solid #eee;text-align:center;">{float(item.quantity):g} {_h(item.unit)}</td>
             <td style="padding:12px 8px;border-bottom:1px solid #eee;text-align:right;">${float(item.unit_price):,.2f}{iva_badge}</td>
@@ -208,7 +225,7 @@ def render_quote_page(quote, status_message=None, show_accept=True, pay_return=N
             </div>
         </div>
 
-        {f'<div class="card"><p style="font-size:14px;color:#555;white-space:pre-wrap;">{_h(quote.notes)}</p></div>' if quote.notes else ''}
+        {f'<div class="card"><p style="font-size:14px;color:#555;white-space:pre-wrap;">{_h(notes)}</p></div>' if notes else ''}
 
         {accept_button}
 

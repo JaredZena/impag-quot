@@ -76,7 +76,34 @@ def test_public_quote_page_escapes_every_buyer_field():
     html = render_quote_page(_quote())
     _assert_escaped(html, (NAME, LOCATION, DESCRIPTION, SKU, ITEM_NOTES, UNIT))
     assert "<script" not in html  # (the page has its own <svg> icon)
-    assert "&lt;/p&gt;&lt;img src=x onerror=alert(1)&gt;" in html  # inside the notes
+
+
+def test_public_quote_page_hides_staff_notes_from_the_buyer():
+    item = SimpleNamespace(
+        description="Calefactor",
+        sku=None,
+        unit="pieza",
+        quantity=1,
+        unit_price=28500,
+        iva_applicable=True,
+        sort_order=0,
+        notes="Tienda en línea: calefactor-l-b-white-bloom-400® · SIN PRECIO: capturar antes de enviar",
+    )
+    quote = _quote(
+        notes='[Pedido web WEB-261002-KM2CG2]\n{"invoice": {"rfc": "PEPJ800101AB1"}}\n[/Pedido web]\n\n'
+        "Comentarios del cliente:\nPara invernadero de 1 ha",
+        items=[item],
+    )
+    html = render_quote_page(quote)
+    for hidden in ("Pedido web", "PEPJ800101AB1", "Tienda en línea", "SIN PRECIO"):
+        assert hidden not in html, hidden
+    assert "Para invernadero de 1 ha" in html
+    # a staff quote's own notes still show
+    assert "Entrega en 3 días" in render_quote_page(
+        _quote(notes="Entrega en 3 días", items=[item])
+    )
+    # block only: no empty notes card
+    assert "white-space:pre-wrap" not in render_quote_page(_quote(items=[item]))
 
 
 def test_public_quote_page_escapes_the_status_banner_and_reference():
