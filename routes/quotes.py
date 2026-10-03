@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, func, or_
 from typing import List, Optional
 from pydantic import BaseModel
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import uuid
 
@@ -19,6 +19,8 @@ from models import (
 from services.price_calculator import get_product_display_price
 from services import web_quote_email
 from services.quote_followup import STALE_DAYS as FOLLOWUP_STALE_DAYS
+from services import quote_capture
+from services.web_quotes import is_web_quote
 from auth import verify_google_token
 
 router = APIRouter(prefix="/quotes", tags=["quotes"])
@@ -26,9 +28,22 @@ router = APIRouter(prefix="/quotes", tags=["quotes"])
 IVA_RATE = Decimal("0.16")
 
 # "Open" = delivered to the customer and still unresolved. Mirrors the lifecycle
-# in this module (draft → sent → viewed → accepted | rejected | expired) and the
-# candidate filter in services/quote_followup.find_stale_quotes.
+# in this module (draft → sent → viewed → accepted | rejected | expired, plus
+# needs_work = "por ajustar": the team owes a revised quote) and the candidate
+# filter in services/quote_followup.find_stale_quotes. needs_work is NOT open:
+# the follow-up sweep must not nudge a customer who is waiting on us.
 OPEN_STATUSES = ("sent", "viewed")
+
+# Statuses staff can set by hand from the admin (POST /quotes/{id}/status), with
+# the label written into the audit line. rejected is shown as "Perdida".
+MANUAL_STATUS_LABELS = {
+    "sent": "Enviada",
+    "needs_work": "Por ajustar",
+    "accepted": "Aceptada",
+    "rejected": "Perdida",
+    "expired": "Expirada",
+}
+REASON_REQUIRED = ("needs_work", "rejected")
 
 # ==================== Pydantic Schemas ====================
 
@@ -75,6 +90,22 @@ class QuoteUpdate(BaseModel):
     validity_days: Optional[int] = None
     assigned_to: Optional[str] = None
     status: Optional[str] = None
+    # Only for quotes without line items (registered from the PDF/WhatsApp):
+    # the PDF total, stored flat like scripts/backfill_open_quotes.py.
+    total: Optional[float] = None
+
+
+class QuoteCaptureRequest(BaseModel):
+    text: str
+    total: Optional[str] = None  # "$12,345.50" accepted
+    customer_phone: Optional[str] = None
+    sent_date: Optional[date] = None  # default today
+    dry_run: bool = False
+
+
+class QuoteStatusChange(BaseModel):
+    status: str
+    reason: Optional[str] = None
 
 class QuoteItemResponse(BaseModel):
     id: int
@@ -309,6 +340,7 @@ def quote_stats(db: Session = Depends(get_db), user=Depends(verify_google_token)
     ).scalar() or 0
     sent_count = db.query(Quote).filter(Quote.status == "sent").count()
     viewed_count = db.query(Quote).filter(Quote.status == "viewed").count()
+    needs_work_count = db.query(Quote).filter(Quote.status == "needs_work").count()
 
     return {
         "success": True,
@@ -317,6 +349,7 @@ def quote_stats(db: Session = Depends(get_db), user=Depends(verify_google_token)
             "accepted_value": float(accepted_value),
             "pending_sent": sent_count,
             "pending_viewed": viewed_count,
+            "needs_work": needs_work_count,
         },
     }
 
@@ -425,7 +458,21 @@ def update_quote(quote_id: int, data: QuoteUpdate, db: Session = Depends(get_db)
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
 
-    for field, value in data.model_dump(exclude_unset=True).items():
+    changes = data.model_dump(exclude_unset=True)
+    total = changes.pop("total", None)
+    if total is not None:
+        if quote.items:
+            raise HTTPException(
+                status_code=400,
+                detail="El total sale de los productos; edita los productos.",
+            )
+        if total < 0:
+            raise HTTPException(status_code=400, detail="El total no puede ser negativo")
+        quote.subtotal = Decimal(str(total))
+        quote.iva_amount = Decimal("0")
+        quote.total = Decimal(str(total))
+
+    for field, value in changes.items():
         if field == "customer_phone" and value:
             value = normalize_phone(value)
         setattr(quote, field, value)
@@ -482,6 +529,136 @@ def send_quote(
         "data": serialize_quote(quote),
         "quote_url": f"https://todoparaelcampo.com.mx/cotizacion/{quote.access_token}",
     }
+
+
+# ==================== Capture & Status ====================
+
+def _capture_preview(parsed, result) -> dict:
+    existing = result["existing"]
+    return {
+        "action": result["action"],
+        "quote_number": existing.quote_number if existing else parsed.quote_number,
+        "folio": parsed.folio,
+        "tag": parsed.tag,
+        "customer_name": parsed.cliente,
+        "customer_location": parsed.ubicacion,
+        "delivery": parsed.entrega,
+        "material": parsed.material,
+        "existing": (
+            {
+                "id": existing.id,
+                "status": existing.status,
+                "total": float(existing.total),
+                "customer_name": existing.customer_name,
+            }
+            if existing
+            else None
+        ),
+    }
+
+
+@router.post("/capture")
+def capture_quote(
+    data: QuoteCaptureRequest,
+    db: Session = Depends(get_db),
+    user=Depends(verify_google_token),
+):
+    """Register a quote from the *Cotización Enviada* WhatsApp message (see
+    services/quote_capture.py). A folio already registered is re-sent instead
+    of duplicated. dry_run=true returns the preview without writing."""
+    try:
+        parsed = quote_capture.parse_single(data.text)
+    except quote_capture.CaptureError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    total = None
+    if data.total not in (None, ""):
+        total = quote_capture.parse_money(data.total)
+        if total is None:
+            raise HTTPException(status_code=400, detail="No entendí el total.")
+
+    result = quote_capture.apply_capture(
+        db,
+        parsed,
+        user_email=user.get("email", "unknown"),
+        total=total,
+        phone=data.customer_phone,
+        sent_date=data.sent_date,
+        dry_run=data.dry_run,
+    )
+    return {
+        "success": True,
+        "data": {
+            "preview": _capture_preview(parsed, result),
+            "warnings": result["warnings"],
+            "quote": serialize_quote(result["quote"]) if result["quote"] else None,
+        },
+    }
+
+
+@router.post("/{quote_id}/status")
+def change_quote_status(
+    quote_id: int,
+    data: QuoteStatusChange,
+    db: Session = Depends(get_db),
+    user=Depends(verify_google_token),
+):
+    """Manual status change (Enviada / Por ajustar / Aceptada / Perdida /
+    Expirada) with an audit line in the notes. Por ajustar and Perdida need a
+    reason — that is the whole point of tracking them."""
+    label = MANUAL_STATUS_LABELS.get(data.status)
+    if label is None:
+        raise HTTPException(status_code=400, detail="Estado no válido")
+    reason = (data.reason or "").strip()
+    if data.status in REASON_REQUIRED and not reason:
+        raise HTTPException(status_code=400, detail=f"«{label}» necesita un motivo")
+    if len(reason) > 300:
+        raise HTTPException(status_code=400, detail="Motivo demasiado largo (máx. 300)")
+
+    quote = db.query(Quote).filter(Quote.id == quote_id).first()
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    if quote.status == "draft":
+        raise HTTPException(status_code=400, detail="Envía el borrador antes de cambiar su estado")
+    if is_web_quote(quote):
+        raise HTTPException(
+            status_code=400,
+            detail="Los pedidos web siguen su flujo de pago; no se cambian a mano",
+        )
+    if quote.status == "accepted" and data.status != "accepted":
+        from models import PosSale
+
+        live_sale = (
+            db.query(PosSale.folio)
+            .filter(PosSale.quote_id == quote.id, PosSale.status != "cancelada")
+            .first()
+        )
+        if live_sale:
+            raise HTTPException(
+                status_code=409,
+                detail=f"La cerró la venta {live_sale.folio}; cancela esa venta en el POS primero",
+            )
+
+    now = datetime.now(timezone.utc)
+    quote.status = data.status
+    if data.status == "accepted":
+        quote.accepted_at = quote.accepted_at or now
+    else:
+        quote.accepted_at = None
+    quote.expired_at = (quote.expired_at or now) if data.status == "expired" else None
+    if data.status == "sent" and quote.sent_at is None:
+        quote.sent_at = now
+
+    stamp = quote_capture.sent_at_for(None).astimezone(quote_capture.BUSINESS_TZ)
+    line = f"[Estado] {stamp:%d/%m/%Y} {label}"
+    if reason:
+        line += f" — {reason}"
+    line += f" ({user.get('email', 'unknown')})"
+    quote.notes = f"{quote.notes}\n{line}" if quote.notes else line
+    quote.updated_at = now
+    db.commit()
+    db.refresh(quote)
+    return {"success": True, "data": serialize_quote(quote)}
 
 
 # ==================== Quote Items ====================
