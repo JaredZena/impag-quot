@@ -474,6 +474,10 @@ def _customer_map(db: Session) -> dict[str, int]:
 
 POS_MATCH_DAYS = 14
 
+# From this date the WhatsApp *Venta* is the ledger (services/sale_capture.py).
+WHATSAPP_TAB = "WHATSAPP"
+WHATSAPP_CUTOVER = date.fromisoformat(os.getenv("SALES_WHATSAPP_CUTOVER", "2026-10-01"))
+
 
 def _name_tokens(name: str | None) -> set[str]:
     return {
@@ -537,6 +541,19 @@ def upsert_sales(db: Session, parsed: list[dict], customer_map: dict[str, int]) 
     # within POS_MATCH_DAYS, and customer-name tokens; each POS sale absorbs
     # at most one sheet row.
     unmatched_pos = [p for p in pos_sales if p.total is not None and p.sale_date]
+    # WhatsApp *Venta* guard (services/sale_capture.py): a sheet row whose
+    # folio was registered from WhatsApp is the same sale, and from the
+    # cutover on the WhatsApp message IS the ledger — later sheet rows wait,
+    # quarantined, until their Venta is registered in the app. WhatsApp rows
+    # quarantined themselves (pre-cutover duplicates) leave the sheet row live.
+    wa_labels = {
+        folio: reference
+        for folio, reference in db.query(Sale.folio, Sale.reference).filter(
+            Sale.sheet_tab == WHATSAPP_TAB,
+            Sale.quarantined.is_(False),
+            Sale.folio.isnot(None),
+        )
+    }
 
     now = datetime.now(timezone.utc)
     inserted = updated = quarantined = 0
@@ -547,7 +564,12 @@ def upsert_sales(db: Session, parsed: list[dict], customer_map: dict[str, int]) 
             customer_map.get(normalize_customer_name(name)) if name else None
         )
         record["imported_at"] = now
-        if (
+        if not record.get("quarantined") and record.get("folio") in wa_labels:
+            record["quarantined"] = True
+            record["quarantine_reason"] = (
+                f"duplicado: registrada desde WhatsApp ({wa_labels[record['folio']]})"
+            )[:200]
+        elif (
             not record.get("quarantined")
             and record.get("folio")
             and record["folio"] in active_pos_folios
@@ -562,6 +584,12 @@ def upsert_sales(db: Session, parsed: list[dict], customer_map: dict[str, int]) 
                 record["quarantine_reason"] = (
                     f"duplicado: capturado en POS ({match.folio})"
                 )[:200]
+            elif record.get("sale_date") and record["sale_date"] >= WHATSAPP_CUTOVER:
+                record["quarantined"] = True
+                record["quarantine_reason"] = (
+                    f"en hoja, falta registrar la *Venta* en la app "
+                    f"(desde {WHATSAPP_CUTOVER:%d/%m/%Y} cuenta la de WhatsApp)"
+                )
         if record.get("quarantined"):
             quarantined += 1
 

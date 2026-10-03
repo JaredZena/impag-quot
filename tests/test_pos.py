@@ -23,6 +23,7 @@ os.environ.setdefault("ALLOWED_EMAILS", "dev@local.test")
 
 assert os.environ["DATABASE_URL"].startswith("sqlite"), "not sqlite — abort"
 
+import pytest
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -39,11 +40,22 @@ from models import (
     SessionLocal,
     StockMovement,
 )
+import services.sales_sync as sales_sync
 from services.sales_sync import upsert_sales
 
 from main import app  # noqa: E402
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _no_whatsapp_cutover(monkeypatch):
+    """These POS-guard tests date sheet rows today; keep the WhatsApp *Venta*
+    cutover (services/sale_capture.py, tested in test_sale_capture.py) out of
+    the way so they only see the POS rules."""
+    monkeypatch.setattr(sales_sync, "WHATSAPP_CUTOVER", date.max)
+
+
 # Folios are minted on the BUSINESS date (Durango local), not the server clock
 from routes.pos import _business_today  # noqa: E402
 

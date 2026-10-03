@@ -474,6 +474,15 @@ class Sale(Base):
     quarantined = Column(Boolean, default=False, nullable=False)
     quarantine_reason = Column(String(200), nullable=True)
     imported_at = Column(DateTime(timezone=True), server_default=func.now())
+    # ── *Venta* captured from WhatsApp (sheet_tab='WHATSAPP'; NULL elsewhere) ──
+    paid_amount = Column(Numeric(12, 2), nullable=True)  # Σ anticipos/pagos
+    pending_amount = Column(Numeric(12, 2), nullable=True)  # lo que aún debe
+    # [{"label": "Anticipo 1", "amount": "40.00", "date": "2026-10-01", "method": "efectivo"}]
+    payments = Column(JSON, nullable=True)
+    quote_id = Column(
+        Integer, ForeignKey("quote.id", ondelete="SET NULL"), nullable=True, index=True
+    )  # the quote this sale closes
+    notes = Column(Text, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("sheet_tab", "source_row", name="uq_sale_tab_row"),

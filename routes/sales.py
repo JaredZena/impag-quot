@@ -6,6 +6,8 @@ Sales ledger routes (mirror of the VENTAS Google Sheet).
                      daily GitHub Action calls it machine-to-machine).
 - GET  /sales/stats  dashboard aggregates (Google auth)
 - GET  /sales        filtered row listing (Google auth)
+- POST /sales/capture register a *Venta NN_MM_YYYY* WhatsApp message
+                     (services/sale_capture.py; from 2026-10-01 it is the ledger)
 
 The ledger is an operational snapshot — NOT accounting books.
 """
@@ -17,6 +19,7 @@ from datetime import date
 import requests
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from pydantic import BaseModel, Field
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import extract, func, or_
 from sqlalchemy.orm import Session
@@ -24,6 +27,7 @@ from sqlalchemy.orm import Session
 from auth import DISABLE_AUTH, verify_google_token
 from models import Sale, SaleBalance, get_db
 from services.balance_sync import sync_balances
+from services import sale_capture
 from services.sales_sync import sync_all
 
 # NOTE: like routes/storefront.py, this router must NOT apply
@@ -118,6 +122,13 @@ def _row_to_dict(s: Sale) -> dict:
         "quarantined": s.quarantined,
         "quarantine_reason": s.quarantine_reason,
         "imported_at": s.imported_at.isoformat() if s.imported_at else None,
+        "paid_amount": float(s.paid_amount) if s.paid_amount is not None else None,
+        "pending_amount": (
+            float(s.pending_amount) if s.pending_amount is not None else None
+        ),
+        "payments": s.payments,
+        "quote_id": s.quote_id,
+        "notes": s.notes,
     }
 
 
@@ -234,6 +245,12 @@ def sales_stats(
 
     quarantined_count = (
         db.query(func.count(Sale.id)).filter(Sale.quarantined.is_(True)).scalar()
+    )
+
+    receivable_count, receivable_total = (
+        db.query(func.count(Sale.id), func.coalesce(func.sum(Sale.pending_amount), 0))
+        .filter(Sale.quarantined.is_(False), Sale.pending_amount > 0)
+        .one()
     )
 
     grand_total = (
@@ -354,6 +371,11 @@ def sales_stats(
             "total": float(invoice_total or 0),
         },
         "quarantined": {"count": quarantined_count},
+        # Lo que los clientes aún deben de sus *Venta* de WhatsApp.
+        "receivable": {
+            "count": receivable_count,
+            "total": float(receivable_total or 0),
+        },
         "grand_total": float(grand_total or 0),
         "ytd_total": float(ytd_total or 0),
         "label": STATS_LABEL,
@@ -466,4 +488,90 @@ def list_sales(
         "limit": limit,
         "offset": offset,
         "items": [_row_to_dict(s) for s in rows],
+    }
+
+
+class SaleCaptureRequest(BaseModel):
+    text: str = Field(..., max_length=5000)
+    sent_date: date | None = None  # when the message has no payment date
+    link_quote: bool = True
+    dry_run: bool = False
+
+
+@router.post("/capture")
+def capture_sale(
+    data: SaleCaptureRequest,
+    user: dict = Depends(verify_google_token),
+    db: Session = Depends(get_db),
+):
+    """Register (or update) a sale from the *Venta NN_MM_YYYY* WhatsApp
+    message: one ledger row with its payments and pending balance; the sheet
+    row with the same folio is quarantined as a duplicate and the customer's
+    open quote, if unambiguous, is marked accepted. dry_run previews."""
+    try:
+        venta = sale_capture.parse_venta(data.text)
+    except sale_capture.VentaError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    result = sale_capture.apply_venta(
+        db,
+        venta,
+        user_email=user.get("email", "unknown"),
+        sent_date=data.sent_date,
+        link_quote=data.link_quote,
+        dry_run=data.dry_run,
+    )
+    quote = result["quote"]
+    return {
+        "success": True,
+        "data": {
+            "preview": {
+                "action": result["action"],
+                "label": venta.label,
+                "folio": venta.folio,
+                "tag": venta.tag,
+                "customer_name": venta.customer,
+                "location": venta.location,
+                "sale_date": result["sale_date"].isoformat(),
+                "items": [
+                    {
+                        "description": i.description,
+                        "quantity": (
+                            float(i.quantity) if i.quantity is not None else None
+                        ),
+                        "unit": i.unit,
+                        "unit_price": (
+                            float(i.unit_price) if i.unit_price is not None else None
+                        ),
+                    }
+                    for i in venta.items
+                ],
+                "total": float(venta.total),
+                "payments": [
+                    {
+                        "label": p.label,
+                        "amount": float(p.amount),
+                        "date": p.date.isoformat() if p.date else None,
+                        "method": p.method,
+                    }
+                    for p in venta.payments
+                ],
+                "paid": float(venta.paid),
+                "pending": float(sale_capture.pending_of(venta)),
+                "notes": venta.notes,
+                "sheet_duplicates": result["sheet_duplicates"],
+                "quote": (
+                    {
+                        "id": quote.id,
+                        "quote_number": quote.quote_number,
+                        "status": quote.status,
+                        "customer_name": quote.customer_name,
+                        "total": float(quote.total or 0),
+                    }
+                    if quote is not None
+                    else None
+                ),
+            },
+            "warnings": result["warnings"],
+            "sale": _row_to_dict(result["sale"]) if result["sale"] else None,
+        },
     }
