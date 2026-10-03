@@ -34,7 +34,8 @@ from models import (
     get_db,
 )
 from routes import storefront_orders as orders_route
-from services import web_orders
+from services import mailer, web_orders
+from services.web_quote_email import build_staff_alert
 from services.web_quotes import MAX_PER_PHONE_PER_HOUR
 
 _tmpdir = tempfile.mkdtemp(prefix="storefront_quotes_tests_")
@@ -125,7 +126,29 @@ def _env(monkeypatch):
     monkeypatch.delenv("WEB_QUOTES_MAX_PER_HOUR", raising=False)
     monkeypatch.delenv("WEB_QUOTE_VALIDITY_DAYS", raising=False)
     monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    monkeypatch.delenv("GMAIL_SMTP_USER", raising=False)
+    monkeypatch.delenv("GMAIL_SMTP_APP_PASSWORD", raising=False)
     monkeypatch.setattr(orders_route, "send_buyer_confirmation", lambda message: None)
+
+
+OUTBOX: list[dict] = []
+
+
+@pytest.fixture(autouse=True)
+def _outbox(monkeypatch):
+    """Capture what services/web_quote_email.py hands the mailer."""
+    OUTBOX.clear()
+
+    def capture(message, *, tag, idempotency_key=None):
+        OUTBOX.append({**message, "tag": tag, "key": idempotency_key})
+        return True
+
+    monkeypatch.setattr(mailer, "send", capture)
+    return OUTBOX
+
+
+def _mail_to(address):
+    return [m for m in OUTBOX if address in m["to"]]
 
 
 @pytest.fixture(autouse=True)
@@ -485,3 +508,122 @@ def test_quote_closed_at_the_pos_is_not_payable_online():
         f"/storefront/quotes/{data['access_token']}/checkout", headers=HEADERS
     )
     assert r.status_code == 409 and r.json()["detail"]["reason"] == "closed"
+
+
+# ── emails (services/web_quote_email.py) ─────────────────────────────────────
+
+
+def test_new_quote_alerts_staff_and_sends_the_buyer_the_link():
+    data = _create(phone=6181110001)
+    quote = _quote(data["quote_number"])
+    [staff] = _mail_to(HERNAN)
+    assert (
+        staff["subject"].startswith("🛒") and data["quote_number"] in staff["subject"]
+    )
+    assert f"/quotes/{quote.id}" in staff["html"]
+    assert "https://wa.me/526181110001" in staff["html"]
+    assert data["access_token"] in staff["html"]
+    assert staff["key"] == f"web-quote/{data['quote_number']}/staff"
+    [buyer] = _mail_to("rodrigo@example.com")
+    assert (
+        buyer["subject"]
+        == f"Tu cotización {data['quote_number']} de Todo Para El Campo"
+    )
+    assert (
+        f"https://www.todoparaelcampo.com.mx/cotizacion/{data['access_token']}"
+        in buyer["html"]
+    )
+    assert "Ver y pagar mi cotización" in buyer["html"]
+    assert buyer["reply_to"] == "impagtodoparaelcampo@gmail.com"
+    # the buyer never sees staff notes
+    assert "Pedido web" not in buyer["html"] and "Tienda en línea" not in buyer["html"]
+
+
+def test_quote_in_review_tells_staff_what_is_missing_and_the_buyer_to_wait():
+    data = _create(
+        delivery={
+            "method": "flete",
+            "address": {
+                "street": "Av. Juárez",
+                "number": "10",
+                "cp": "34000",
+                "municipio": "Durango",
+                "estado": "Durango",
+            },
+        },
+        notes="Lo necesito antes del 15",
+    )
+    [staff] = _mail_to(HERNAN)
+    assert staff["subject"].startswith("🔔 Cotización web por revisar")
+    assert "cotizar flete" in staff["html"] and "Av. Juárez 10" in staff["html"]
+    assert "Lo necesito antes del 15" in staff["html"]
+    [buyer] = _mail_to("rodrigo@example.com")
+    assert (
+        buyer["subject"]
+        == f"Recibimos tu solicitud de cotización {data['quote_number']}"
+    )
+    assert "cotiza el flete" in buyer["html"] and "Ver mi cotización" in buyer["html"]
+
+
+def test_no_buyer_email_without_an_address():
+    body = _request()
+    body["customer"]["email"] = None
+    r = client.post("/storefront/quote-requests", json=body, headers=HEADERS)
+    assert r.status_code == 200, r.text
+    assert [m["to"] for m in OUTBOX] == [[HERNAN]]
+
+
+def test_staff_send_emails_the_buyer_that_the_quote_is_ready():
+    data = _create(
+        items=[
+            {
+                "handle": "x",
+                "description": "Sin precio",
+                "quantity": 1,
+                "unit_price": 0,
+                "iva_rate": 0.16,
+            }
+        ]
+    )
+    OUTBOX.clear()
+    quote = _quote(data["quote_number"])
+    r = client.post(f"/quotes/{quote.id}/send")
+    assert r.status_code == 200, r.text
+    [ready] = OUTBOX
+    assert ready["to"] == ["rodrigo@example.com"]
+    assert (
+        ready["subject"]
+        == f"Tu cotización {data['quote_number']} está lista para pagar"
+    )
+    assert data["access_token"] in ready["html"]
+
+
+def test_staff_alert_escapes_buyer_fields():
+    from types import SimpleNamespace
+
+    item = SimpleNamespace(
+        description="<script>x</script>",
+        unit="pz",
+        quantity=1,
+        unit_price=10,
+        iva_applicable=True,
+        sort_order=0,
+    )
+    quote = SimpleNamespace(
+        id=7,
+        quote_number="WEB-261003-AAAAAA",
+        customer_name='Juan<img src=x onerror="alert(1)">',
+        customer_phone="+526181234567",
+        customer_email=None,
+        customer_location="<b>Durango</b>",
+        access_token="5f0c7d1e-3a52-4c1b-9f0e-2b8a6d4e1c37",
+        notes='[Pedido web WEB-261003-AAAAAA]\n{"delivery": {"method": "flete", "address": '
+        '{"street": "</td><svg onload=alert(1)>"}}, "review": ["delivery"]}\n[/Pedido web]',
+        items=[item],
+        subtotal=10,
+        iva_amount=1.6,
+        total=11.6,
+    )
+    html = build_staff_alert(quote)["html"]
+    for payload in ("<script>", "<img", "<b>Durango", "<svg"):
+        assert payload not in html, payload

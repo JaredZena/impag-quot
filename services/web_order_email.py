@@ -32,6 +32,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+from services import mailer
+
 logger = logging.getLogger(__name__)
 
 RESEND_URL = "https://api.resend.com/emails"
@@ -75,8 +77,8 @@ def return_address() -> str | None:
 def missing_config() -> list[str]:
     """Env vars the confirmation still needs (empty when it can be sent)."""
     missing = []
-    if not _env("RESEND_API_KEY"):
-        missing.append("RESEND_API_KEY")
+    if not mailer.configured():
+        missing.append("RESEND_API_KEY o GMAIL_SMTP_APP_PASSWORD")
     if not store_address():
         missing.append("WEB_ORDER_STORE_ADDRESS")
     return missing
@@ -346,6 +348,11 @@ def send_buyer_confirmation(message: dict) -> bool:
     or the key."""
     ref = message.get("ref")
     api_key = _env("RESEND_API_KEY")
+    if not api_key and mailer.transport() == "gmail":
+        return mailer.send(
+            {**message, "to": [message["to"]]},
+            tag=f"web order {ref} buyer confirmation",
+        )
     if not api_key:
         logger.warning(
             "web order %s: buyer confirmation not sent, RESEND_API_KEY unset", ref

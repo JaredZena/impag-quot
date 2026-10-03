@@ -17,7 +17,7 @@ arrives through POST /storefront/orders like any web order.
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
@@ -28,6 +28,7 @@ from routes.storefront_orders import (
     Quantity,
     require_orders_key,
 )
+from services import web_quote_email
 from services.web_orders import IVA_RATES
 from services.web_quotes import (
     QuoteLimitReached,
@@ -85,10 +86,14 @@ class QuoteRequest(_Body):
 
 
 @router.post("/quote-requests", dependencies=[Depends(require_orders_key)])
-def post_quote_request(body: QuoteRequest, db: Annotated[Session, Depends(get_db)]):
+def post_quote_request(
+    body: QuoteRequest,
+    background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db)],
+):
     """Record a self-serve storefront quote; returns its public link."""
     try:
-        return create_quote_request(db, body)
+        result = create_quote_request(db, body)
     except QuoteRequestRejected as exc:
         db.rollback()
         raise HTTPException(
@@ -103,6 +108,9 @@ def post_quote_request(body: QuoteRequest, db: Annotated[Session, Depends(get_db
     except Exception:
         db.rollback()
         raise
+    # Staff alert + the buyer's copy, after the commit (services/web_quote_email.py).
+    web_quote_email.queue_created(db, result["quote_number"], background_tasks)
+    return result
 
 
 @router.post(

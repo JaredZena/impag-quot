@@ -3,7 +3,8 @@ import os
 import re
 from html import escape
 
-RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+from services import mailer
+
 FROM_EMAIL = os.getenv("QUOTE_FROM_EMAIL", "cotizaciones@todoparaelcampo.com.mx")
 
 
@@ -61,33 +62,16 @@ def build_quote_notification_email(quote, event_type: str):
 
 
 def send_quote_notification_email(engineer_email: str, quote, event_type: str):
-    """Send an email notification to the engineer when a quote is viewed or accepted.
-
-    Args:
-        engineer_email: Engineer's email address
-        quote: Quote model instance
-        event_type: 'viewed' or 'accepted'
-    """
-    if not RESEND_API_KEY:
-        print(f"[EMAIL] Skipping email (no RESEND_API_KEY): {event_type} for quote {quote.quote_number}")
+    """Email the engineer when a quote is viewed or accepted (services/mailer.py
+    picks Resend or Gmail; nothing is sent while neither is configured)."""
+    if not mailer.configured():
+        print(f"[EMAIL] Skipping email (no email transport): {event_type} for quote {quote.quote_number}")
         return
-
-    try:
-        built = build_quote_notification_email(quote, event_type)
-        if built is None:
-            return
-        subject, body = built
-
-        import resend
-        resend.api_key = RESEND_API_KEY
-
-        resend.Emails.send({
-            "from": FROM_EMAIL,
-            "to": [engineer_email],
-            "subject": subject,
-            "html": body,
-        })
-        print(f"[EMAIL] Sent {event_type} notification for {quote.quote_number} to {engineer_email}")
-
-    except Exception as e:
-        print(f"[EMAIL] Failed to send {event_type} notification: {e}")
+    built = build_quote_notification_email(quote, event_type)
+    if built is None:
+        return
+    subject, body = built
+    mailer.send(
+        {"from": FROM_EMAIL, "to": [engineer_email], "subject": subject, "html": body},
+        tag=f"quote {quote.quote_number} {event_type} notification",
+    )

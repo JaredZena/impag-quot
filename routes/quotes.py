@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, func, or_
 from typing import List, Optional
@@ -17,6 +17,7 @@ from models import (
     get_next_quote_number,
 )
 from services.price_calculator import get_product_display_price
+from services import web_quote_email
 from services.quote_followup import STALE_DAYS as FOLLOWUP_STALE_DAYS
 from auth import verify_google_token
 
@@ -450,7 +451,12 @@ def delete_quote(quote_id: int, db: Session = Depends(get_db), user=Depends(veri
 
 
 @router.post("/{quote_id}/send")
-def send_quote(quote_id: int, db: Session = Depends(get_db), user=Depends(verify_google_token)):
+def send_quote(
+    quote_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user=Depends(verify_google_token),
+):
     """Mark quote as sent and generate access token."""
     quote = db.query(Quote).options(joinedload(Quote.items)).filter(Quote.id == quote_id).first()
     if not quote:
@@ -468,6 +474,8 @@ def send_quote(quote_id: int, db: Session = Depends(get_db), user=Depends(verify
     quote.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(quote)
+    # A storefront buyer waiting on a reviewed quote gets "lista para pagar".
+    web_quote_email.queue_ready(quote, background_tasks)
 
     return {
         "success": True,
