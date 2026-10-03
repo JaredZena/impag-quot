@@ -73,7 +73,7 @@ KIT_VALUES = [
     ["", "VDE SOLUCIONES SOLARES"],
     ["", "CABLE3X8", 20, "CABLE PLANO", 50, "M", 161.19, 8059.5],
     ["", "KOLOS3-47-40-4", 10, "SIST.SUM.KOLOS 47M", 1, "PZA", 5379.52, 5379.52],
-    ["", "", "", "", "", "", "Subtotal", 13439.02],
+    ["", "", "", "", "", "", "Subtotal", 8059.5],
     [],
     BLOCK_HEADER,
     ["", "KOLOS-AP550X-48", 10, "BOMBA SUPERFICIE", 1, "PZA", 3588.02, 3588.02],
@@ -83,7 +83,8 @@ KIT_VALUES = [
     ["", "", "", "", "", "", " Precio De Venta ", 5213.87],
 ]
 KIT_FORMULAS = [[] for _ in KIT_VALUES]
-KIT_FORMULAS[6] = ["", "", "", "", "", "", "Subtotal", "=+SUM(H4:H6)"]
+# Like the real 2 HP-60M block: the =SUM starts below the pump and misses it.
+KIT_FORMULAS[6] = ["", "", "", "", "", "", "Subtotal", "=+SUM(H5:H5)"]
 KIT_FORMULAS[11] = ["", "", "", "", "", "", "Subtotal", "=+SUM(H10:H11)"]
 KIT_FORMULAS[13] = ["", "", "", "", "", "", "", "=+H12/(1-H13)"]
 
@@ -182,3 +183,10 @@ def test_kit_identity_is_the_pump_not_the_first_line():
 def test_kit_price_is_thirty_percent_on_sale_price():
     assert kit_price(Decimal("7000")) == Decimal("10000.00")
     assert kit_price(Decimal("40521.98")) == Decimal("57888.54")
+
+
+def test_kit_cost_counts_every_line_even_when_the_sheet_sum_skips_one():
+    kits, _ = parse_kits(WORKBOOK)
+    kit = next(k for k in kits if k.name.startswith("Kit Bombeo Solar 0.5"))
+    assert kit.sheet_subtotal == Decimal("8059.50")
+    assert kit.cost == Decimal("13439.02")

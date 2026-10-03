@@ -54,6 +54,8 @@ def main() -> None:
         print(
             f"    {k.get('product_id')}: {k['kit']} → {k.get('price', k.get('new_price'))}"
         )
+    for m in report["subtotal_mismatches"]:
+        print(f"  subtotal mismatch: {m}")
     for s in report["skipped"]:
         print(f"  skipped: {s}")
 

@@ -89,7 +89,7 @@ SUM_RE = re.compile(r"SUM\(\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)\)", re.I)
 CELL_RE = re.compile(r"(?<![A-Z!'])\$?([A-Z]{1,3})\$?(\d+)")
 
 # Offsets from the IMPORTE column inside a kit block.
-OFF_CODE, OFF_DESC, OFF_QTY, OFF_UNIT = -6, -4, -3, -2
+OFF_CODE, OFF_DESC, OFF_QTY, OFF_UNIT, OFF_PRICE = -6, -4, -3, -2, -1
 
 
 @dataclass
@@ -109,6 +109,7 @@ class KitLine:
     description: str
     quantity: Decimal
     unit: str
+    amount: Decimal  # IMPORTE (cantidad x precio unitario)
 
 
 @dataclass
@@ -119,6 +120,7 @@ class Kit:
     block_cell: str  # e.g. "H22"
     lines: list[KitLine]
     shipping: dict = field(default_factory=dict)
+    sheet_subtotal: Decimal | None = None  # the sheet's own =SUM, for the report
 
     @property
     def pump_code(self) -> str:
@@ -221,27 +223,38 @@ def _subtotal_cell(formulas: list, col: int, row: int, depth: int = 0):
     return None
 
 
-def _kit_lines(values: list, imp_col: int, r0: int, r1: int) -> list[KitLine] | None:
-    """Component rows of a kit block; None when the block layout is unexpected."""
-    header_ok = any(
-        _norm(_cell(values, r, imp_col + OFF_DESC)) == "descripcion"
-        and _norm(_cell(values, r, imp_col + OFF_QTY)) == "cantidad"
-        for r in range(max(0, r0 - 8), r0 + 1)
+def _kit_lines(values: list, imp_col: int, sum_row: int) -> list[KitLine] | None:
+    """Every component row between the block's header and its subtotal row;
+    None when the block layout is unexpected. Not the =SUM range: one block
+    (2 HP-60M) summed from the line below its pump and left the pump out."""
+    header = next(
+        (
+            r
+            for r in range(sum_row - 1, max(-1, sum_row - 60), -1)
+            if _norm(_cell(values, r, imp_col + OFF_DESC)) == "descripcion"
+            and _norm(_cell(values, r, imp_col + OFF_QTY)) == "cantidad"
+        ),
+        None,
     )
-    if not header_ok:
+    if header is None:
         return None
     lines = []
-    for r in range(r0, r1 + 1):
+    for r in range(header + 1, sum_row):
         code = str(_cell(values, r, imp_col + OFF_CODE)).strip()
         qty = _decimal(_cell(values, r, imp_col + OFF_QTY))
         if not code or not qty or qty <= 0:
             continue
+        amount = _decimal(_cell(values, r, imp_col))
+        if amount is None:
+            unit_price = _decimal(_cell(values, r, imp_col + OFF_PRICE)) or Decimal(0)
+            amount = (unit_price * qty).quantize(Decimal("0.01"))
         lines.append(
             KitLine(
                 code=code,
                 description=str(_cell(values, r, imp_col + OFF_DESC)).strip(),
                 quantity=qty,
                 unit=str(_cell(values, r, imp_col + OFF_UNIT)).strip(),
+                amount=amount,
             )
         )
     return lines
@@ -280,14 +293,9 @@ def parse_kits(workbook: dict) -> tuple[list[Kit], list[str]]:
             skipped.append(f"{COTIZADOR_TAB}!{i + 1} {name} — sin subtotal =SUM")
             continue
         s_col, s_row, sm = target
-        cost = _decimal(_cell(k_values, s_row, s_col))
-        lines = _kit_lines(
-            k_values,
-            _col_index(sm.group(1)),
-            int(sm.group(2)) - 1,
-            int(sm.group(4)) - 1,
-        )
-        if not cost or cost <= 0 or not lines:
+        lines = _kit_lines(k_values, _col_index(sm.group(1)), s_row)
+        cost = sum((ln.amount for ln in lines or []), Decimal(0))
+        if cost <= 0 or not lines:
             skipped.append(
                 f"{COTIZADOR_TAB}!{i + 1} {name} — bloque {_a1(s_col, s_row)} ilegible"
             )
@@ -299,6 +307,7 @@ def parse_kits(workbook: dict) -> tuple[list[Kit], list[str]]:
                 cotizador_row=i + 1,
                 block_cell=_a1(s_col, s_row),
                 lines=lines,
+                sheet_subtotal=_decimal(_cell(k_values, s_row, s_col)),
                 shipping={
                     k: (_decimal(_cell(values, i, j)) if j is not None else None)
                     or Decimal(0)
@@ -584,6 +593,12 @@ def sync_bombeo_sheet(db: Session, dry_run: bool = True, workbook=None) -> dict:
         raise
     return {
         "dry_run": dry_run,
+        "subtotal_mismatches": [
+            f"{k.name}: la hoja suma {k.sheet_subtotal} en {KITS_TAB}!{k.block_cell},"
+            f" las partidas del kit suman {k.cost} (se usa {k.cost})"
+            for k in kits
+            if k.sheet_subtotal is not None and k.sheet_subtotal != k.cost
+        ],
         "parts_parsed": len(parts),
         "kits_parsed": len(kits),
         "parts": part_report,
