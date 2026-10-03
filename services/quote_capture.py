@@ -38,11 +38,11 @@ NO_PHONE = "S/N"  # what the PDF backfill stores when there is no phone
 # accepted (a sale already closed it); drafts never carry a COT-IMPAG number.
 REOPEN_ON_RESEND = ("sent", "viewed", "needs_work", "rejected", "expired")
 
-# "*Cotización Enviada 400926DGO (Actualización)*" — accent, case, bold and a
-# space before the state are all optional. The state may not run into the next
-# word ("150626\nCliente" must not read state "CL").
+# "*Cotización Enviada 400926DGO (Actualización)*" — accent, case, bold, the z
+# ("Cotiacion" happens) and a space before the state are all optional. The
+# state may not run into the next word ("150626\nCliente" must not read "CL").
 HEADER_RE = re.compile(
-    r"\*?\s*cotizaci[oó]n\s+enviada\s*:?\s*"
+    r"\*?\s*coti[sz]?aci[oó]n\s+enviada\s*:?\s*"
     r"(?P<digits>\d{6})[ ]?(?P<state>[A-Za-z]{2,4})?(?![A-Za-z0-9])"
     r"\s*(?:\((?P<tag>[^)\n]{1,40})\))?\s*\*?",
     re.IGNORECASE,

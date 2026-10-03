@@ -131,6 +131,15 @@ def test_parses_flattened_line_and_whatsapp_web_prefix():
     assert p.total == Decimal("12450.50")
 
 
+def test_tolerates_the_cotiacion_typo():
+    p = parse_single(
+        "Cotiacion Enviada 300926QUI Cliente: Grupo JURENA Ubicación: Cancun Quintanaroo. "
+        "Entrega: Cancun Quintanaroo Material/Proyecto: 2 sacos Multicote"
+    )
+    assert p.quote_number == "COT-IMPAG-300926QUI"
+    assert p.cliente == "Grupo JURENA"
+
+
 def test_rejects_unusable_pastes():
     with pytest.raises(CaptureError, match="No encontré"):
         parse_single("Balance de Venta 021026 Cliente: VICOR")
