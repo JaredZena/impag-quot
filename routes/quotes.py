@@ -1089,6 +1089,16 @@ def delete_item(
 # ==================== Product Search (for quote form) ====================
 
 
+# Words that say nothing about the product in what Hernán types
+# ("sistema de riego de 20x20 para alfalfa").
+_SEARCH_STOPWORDS = {"de", "del", "la", "las", "el", "los", "para", "con", "en", "y", "a", "un", "una", "por", "al"}
+
+
+def _search_terms(q: str) -> list[str]:
+    words = [w for w in q.lower().split() if len(w) >= 2 and w not in _SEARCH_STOPWORDS]
+    return words or [q.strip()]
+
+
 @router.get("/product-search/query")
 def search_products(
     q: str = Query(..., min_length=1),
@@ -1096,47 +1106,86 @@ def search_products(
     db: Session = Depends(get_db),
     user=Depends(verify_google_token),
 ):
-    """Search products for the quote form autocomplete."""
-    search_term = f"%{q}%"
-    results = (
-        db.query(SupplierProduct)
-        .join(Product, SupplierProduct.product_id == Product.id, isouter=True)
-        .filter(
-            or_(
-                SupplierProduct.name.ilike(search_term),
-                SupplierProduct.sku.ilike(search_term),
-                Product.name.ilike(search_term),
-                Product.sku.ilike(search_term),
-            )
+    """Search products for the quote form autocomplete.
+
+    Matches word by word, so a sentence finds the product as long as every
+    word appears (falling back to the rows matching the most words). The price
+    is the product's "Precio de venta" when Hernán set one; otherwise the one
+    calculated from the supplier cost and margin.
+    """
+    postgres = db.get_bind().dialect.name == "postgresql"
+
+    def like(column, word):
+        pattern = f"%{word}%"
+        if postgres:
+            return func.unaccent(column).ilike(func.unaccent(pattern))
+        return column.ilike(pattern)
+
+    def matches(word):
+        return or_(
+            like(SupplierProduct.name, word),
+            like(SupplierProduct.sku, word),
+            like(Product.name, word),
+            like(Product.sku, word),
         )
-        .limit(limit)
-        .all()
+
+    terms = _search_terms(q)
+    base = (
+        db.query(SupplierProduct)
+        .options(joinedload(SupplierProduct.product))
+        .join(Product, SupplierProduct.product_id == Product.id, isouter=True)
+        .filter(SupplierProduct.archived_at.is_(None))
+        .order_by(Product.price.is_(None), SupplierProduct.name)
     )
+    results = base.filter(*[matches(t) for t in terms]).limit(limit * 3).all()
+    if not results and len(terms) > 1:
+        loose = base.filter(or_(*[matches(t) for t in terms])).limit(200).all()
+
+        def hits(sp):
+            text = f"{sp.name or ''} {sp.sku or ''} {sp.product.name if sp.product else ''}".lower()
+            return sum(t in text for t in terms)
+
+        results = sorted(loose, key=hits, reverse=True)
 
     products = []
+    seen_products = set()
     for sp in results:
-        # Calculate display price using standardized formula
-        cost = float(sp.cost or 0)
-        shipping = float(sp.shipping_cost_direct or 0)
-        margin = float(sp.default_margin or 0.25)
-        cost_basis = cost + shipping
-        display_price = cost_basis / (1 - margin) if margin < 1 else cost_basis
+        product = sp.product
+        if product is not None and product.price is not None:
+            # One row per product: every supplier of it sells at the same price.
+            if product.id in seen_products:
+                continue
+            seen_products.add(product.id)
+            display_price = float(product.price)
+            price_source = "precio_de_venta"
+            unit = product.unit.value if product.unit else (sp.unit or "PIEZA")
+            iva = product.iva if product.iva is not None else True
+        else:
+            # Calculate display price using standardized formula
+            cost = float(sp.cost or 0)
+            shipping = float(sp.shipping_cost_direct or 0)
+            margin = float(sp.default_margin or 0.25)
+            cost_basis = cost + shipping
+            display_price = cost_basis / (1 - margin) if margin < 1 else cost_basis
+            price_source = "calculado"
+            unit = sp.unit or (
+                product.unit.value if product is not None and product.unit else "PIEZA"
+            )
+            iva = sp.iva if sp.iva is not None else True
 
         products.append(
             {
                 "supplier_product_id": sp.id,
                 "product_id": sp.product_id,
-                "name": sp.name or (sp.product.name if sp.product_id else "Unknown"),
-                "sku": sp.sku or (sp.product.sku if sp.product_id else None),
-                "unit": sp.unit
-                or (
-                    sp.product.unit.value
-                    if sp.product_id and sp.product and sp.product.unit
-                    else "PIEZA"
-                ),
+                "name": sp.name or (product.name if product is not None else "Sin nombre"),
+                "sku": sp.sku or (product.sku if product is not None else None),
+                "unit": unit,
                 "display_price": round(display_price, 2),
-                "iva": sp.iva if sp.iva is not None else True,
+                "price_source": price_source,
+                "iva": iva,
             }
         )
+        if len(products) >= limit:
+            break
 
     return {"success": True, "data": products}

@@ -386,7 +386,14 @@ def _compute_final_price(sp, fallback_margin):
     and the quote-candidate builder so a quoted price never drifts from the
     price the LLM was shown.
     """
+    # Hernán's "Precio de venta" (Product.price) wins over the calculated price:
+    # it is the price the team charges and the one the store publishes.
+    product = getattr(sp, "product", None)
+    sale_price = float(product.price) if product is not None and product.price is not None else None
+
     if not sp.cost:
+        if sale_price is not None:
+            return sale_price, None, None, "PRECIO DE VENTA", 0.0
         return None, None, None, None, 0.0
 
     shipping_total = (
@@ -409,6 +416,9 @@ def _compute_final_price(sp, fallback_margin):
         margin_source = f"FALLBACK (DB margin {float(sp.default_margin) * 100:.1f}% too low)"
 
     cost_basis = float(sp.cost) + shipping_total
+    if sale_price is not None and sale_price > 0:
+        # Same margin-on-price convention as the formula below, so it reads alike.
+        return sale_price, cost_basis, (1 - cost_basis / sale_price) * 100, "PRECIO DE VENTA", shipping_total
     final_price = cost_basis / (1 - margin_decimal) if margin_decimal < 1 else cost_basis
     return final_price, cost_basis, margin_percentage, margin_source, shipping_total
 
@@ -455,30 +465,32 @@ def _format_product_lines(supplier_products, include_internal_details, fallback_
         product = sp.product
         supplier = sp.supplier
 
-        # Calculate final price from supplier cost + shipping + margin
-        if sp.cost:
-            final_price, cost_basis, margin_percentage, margin_source, shipping_total = \
-                _compute_final_price(sp, fallback_margin)
-
+        # Precio de venta, or supplier cost + shipping + margin
+        final_price, cost_basis, margin_percentage, margin_source, shipping_total = \
+            _compute_final_price(sp, fallback_margin)
+        if final_price is not None:
             price_str = f"${final_price:,.2f} MXN"
 
             # Include internal details if requested
             if include_internal_details:
-                cost_str = f"${float(sp.cost):,.2f} {sp.currency or 'MXN'}"
+                cost_str = f"${float(sp.cost):,.2f} {sp.currency or 'MXN'}" if sp.cost else "Consultar"
                 shipping_str = f"${shipping_total:,.2f}"
                 
                 shipping_warning = ""
-                if shipping_total == 0:
+                if sp.cost and shipping_total == 0:
                     shipping_warning = " ⚠️ VERIFICAR ENVÍO (Costo $0.00)"
 
-                margin_str = f"{margin_percentage:.1f}% ({margin_source})"
+                margin_str = (
+                    f"{margin_percentage:.1f}% ({margin_source})" if margin_percentage is not None else margin_source
+                )
+                total_str = f"${cost_basis:,.2f}" if cost_basis is not None else "Consultar"
                 # Internal view: Detailed specs + commercial info + SOURCE
                 specs_str = ""
                 if product.specifications:
                     specs_str = ", ".join([f"{k}: {v}" for k, v in product.specifications.items()])
                 
                 # Explicitly state source is DATABASE
-                line = f"SOURCE: DATABASE (SupplierProduct ID: {sp.id}) | {product.name} | {supplier.name} | Costo Base: {cost_str} | Envío: {shipping_str}{shipping_warning} | Costo Total: ${cost_basis:,.2f} | Margen: {margin_str} | Precio Final: {price_str} | {product.unit.value} | SKU: {product.sku} | Specs: {specs_str}"
+                line = f"SOURCE: DATABASE (SupplierProduct ID: {sp.id}) | {product.name} | {supplier.name} | Costo Base: {cost_str} | Envío: {shipping_str}{shipping_warning} | Costo Total: {total_str} | Margen: {margin_str} | Precio Final: {price_str} | {product.unit.value} | SKU: {product.sku} | Specs: {specs_str}"
             else:
                 # Customer view: Simplified for quotation generation
                 # We still provide specs to the AI so it can describe the product, 

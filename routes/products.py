@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, case, false, literal
+from sqlalchemy import func, case, false, literal, select
 from typing import Annotated, List, Literal, Optional, Any
 from pydantic import (
     BaseModel,
@@ -512,10 +512,21 @@ def get_products(
         query = query.join(Product.supplier_products).filter(
             SupplierProduct.supplier_id == supplier_id
         )
-    if min_stock is not None:
-        query = query.filter(Product.stock >= min_stock)
-    if max_stock is not None:
-        query = query.filter(Product.stock <= max_stock)
+    if min_stock is not None or max_stock is not None:
+        # Same stock the list shows: the sum over the product's supplier rows.
+        stock_sum = (
+            select(func.coalesce(func.sum(SupplierProduct.stock), 0))
+            .where(
+                SupplierProduct.product_id == Product.id,
+                SupplierProduct.archived_at.is_(None),
+            )
+            .correlate(Product)
+            .scalar_subquery()
+        )
+        if min_stock is not None:
+            query = query.filter(stock_sum >= min_stock)
+        if max_stock is not None:
+            query = query.filter(stock_sum <= max_stock)
 
     # Currency filter - temporarily disabled due to complex subquery issues
     # TODO: Implement simpler currency filtering logic
@@ -567,6 +578,18 @@ def get_products(
     products = query.offset(skip).limit(limit).all()
     data = []
 
+    # The stock the team keeps (Stock page) lives on the supplier rows, not on
+    # Product.stock; one grouped query for the whole page.
+    supplier_stock = dict(
+        db.query(SupplierProduct.product_id, func.coalesce(func.sum(SupplierProduct.stock), 0))
+        .filter(
+            SupplierProduct.product_id.in_([p.id for p in products]),
+            SupplierProduct.archived_at.is_(None),
+        )
+        .group_by(SupplierProduct.product_id)
+        .all()
+    ) if products else {}
+
     for p in products:
         # Get currency for calculated prices or check supplier currencies for manual prices
         calculated_currency = None
@@ -605,6 +628,7 @@ def get_products(
                 )
             ),
             "stock": p.stock,
+            "supplier_stock": int(supplier_stock.get(p.id, 0)),
             "specifications": p.specifications,
             # Images: count + primary only — do NOT presign every image of every row
             "storefront_title": p.storefront_title,
