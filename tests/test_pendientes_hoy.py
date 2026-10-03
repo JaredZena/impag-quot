@@ -263,7 +263,8 @@ def test_hoy_collects_the_days_numbers(client):
             sent_at=datetime(2026, 9, 10, tzinfo=timezone.utc),
             notes=(
                 "Material/Proyecto: Cerco solar\n"
-                "[Estado] 02/10/2026 Por ajustar — Busca algo más económico (hernan@x.com)"
+                "[Estado] 02/10/2026 Por ajustar — Busca algo más económico (hernan@x.com)\n"
+                "[Estado] 02/10/2026 Perdida — carga masiva (carga-whatsapp-2026-10)"
             ),
             created_by="t",
         )

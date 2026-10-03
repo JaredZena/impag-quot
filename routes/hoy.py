@@ -70,8 +70,11 @@ def hoy(
         )
         .all()
     )
+    # Only lines signed by a person "(name@domain)": bulk loads sign with a
+    # tag like "(carga-whatsapp-2026-10)" and are not follow-ups.
     followup_re = re.compile(
-        rf"^\[(?:{'|'.join(FOLLOWUP_TAGS)})\] {re.escape(stamp)} (.+)$", re.M
+        rf"^\[(?:{'|'.join(FOLLOWUP_TAGS)})\] {re.escape(stamp)} (.+\([^()\s]+@[^()\s]+\))\s*$",
+        re.M,
     )
     followups = []
     for q in db.query(Quote).filter(Quote.notes.like(f"%] {stamp} %")):
