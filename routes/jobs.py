@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 from models import get_db
+from services.bombeo_sheet_sync import sync_bombeo_sheet
 from services.quote_followup import sweep_stale_quotes
 from services.supplier_price_sync import sync_supplier_prices
 from services.tool_sheet_sync import sync_tools
@@ -75,5 +76,14 @@ def run_tool_sheet_sync(dry_run: bool = False, db: Session = Depends(get_db)):
     """Mirror the HERRAMIENTAS tab into tool / tool_movement (sheet wins)."""
     try:
         return sync_tools(db, dry_run=dry_run)
+    except (RuntimeError, requests.RequestException) as e:
+        raise HTTPException(status_code=502, detail=str(e)[:300])
+
+
+@router.post("/bombeo-sheet-sync", dependencies=[Depends(verify_job_token)])
+def run_bombeo_sheet_sync(dry_run: bool = False, db: Session = Depends(get_db)):
+    """Mirror the Bombeo Solar sheet: VDE parts + kit products sold online."""
+    try:
+        return sync_bombeo_sheet(db, dry_run=dry_run)
     except (RuntimeError, requests.RequestException) as e:
         raise HTTPException(status_code=502, detail=str(e)[:300])
