@@ -213,6 +213,13 @@ def test_quotas_and_backfill(db):
     assert kinds == ["cotizacion"] * 15 + ["temporada"] * 6
 
 
+def test_messages_are_signed_by_hernan_whoever_opens_the_list(db):
+    _quote(db, "COT-IMPAG-110926DGO", "Morales", days=10)
+    for viewer in ("jared@x.com", None):
+        card = seguimiento.daily_list(db, sender_email=viewer, now=NOW)["todo"][0]
+        assert "Le saluda Hernán de IMPAG." in card["message"]
+
+
 def test_every_due_quote_is_listed(db):
     # More quotes than a 20-person day: all of them show, plus the season quota.
     for i in range(30):
