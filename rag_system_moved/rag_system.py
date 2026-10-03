@@ -389,7 +389,8 @@ def _compute_final_price(sp, fallback_margin):
     # Hernán's "Precio de venta" (Product.price) wins over the calculated price:
     # it is the price the team charges and the one the store publishes.
     product = getattr(sp, "product", None)
-    sale_price = float(product.price) if product is not None and product.price is not None else None
+    # A $0 price is a blank, not a price.
+    sale_price = float(product.price) if product is not None and product.price else None
 
     if not sp.cost:
         if sale_price is not None:

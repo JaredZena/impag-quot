@@ -62,6 +62,8 @@ def setup_module(module):
             id=10, name="Malla sombra 50% raschel 4.20 x 100 m", sku="MS50",
             price=Decimal("6853.45"), iva=True, unit=ProductUnit.ROLLO, stock=0,
         )
+        db.add(Product(id=12, name="Aspersor Rondo 51 lph", sku="AR51", price=Decimal("0"), iva=True,
+                       unit=ProductUnit.PIEZA, stock=0))
         bolsa = Product(id=11, name="Bolsa vivero 17x17", sku="BV17", price=None, iva=True,
                         unit=ProductUnit.PAQUETE, stock=9)
         db.add_all([malla, bolsa])
@@ -73,6 +75,9 @@ def setup_module(module):
             SupplierProduct(supplier_id=paula.id, product_id=10, name="Malla sombra 50% 4.2 x 100",
                             sku="MS50-D", cost=Decimal("5900"), default_margin=Decimal("0.20"), stock=1,
                             unit="ROLLO"),
+            SupplierProduct(supplier_id=paula.id, product_id=12, name="Aspersor Rondo 51 lph",
+                            sku="AR51-D", cost=Decimal("30"), default_margin=Decimal("0.25"), stock=0,
+                            unit="PIEZA"),
             SupplierProduct(supplier_id=popusa.id, product_id=11, name="Bolsa vivero 17x17",
                             sku="BV17-P", cost=Decimal("750"), shipping_cost_direct=Decimal("0"),
                             default_margin=Decimal("0.25"), stock=0, unit="PAQUETE"),
@@ -118,6 +123,12 @@ def test_without_precio_de_venta_the_price_is_calculated():
     assert rows[0]["display_price"] == 1000.0  # 750 / (1 - 0.25)
 
 
+def test_a_zero_precio_de_venta_falls_back_to_the_calculated_price():
+    rows = _search("aspersor rondo")
+    assert rows[0]["price_source"] == "calculado"
+    assert rows[0]["display_price"] == 40.0  # 30 / (1 - 0.25)
+
+
 def test_products_list_shows_supplier_stock_and_filters_on_it():
     res = client.get("/products", params={"limit": 50})
     by_id = {p["id"]: p for p in res.json()["data"]}
@@ -127,7 +138,7 @@ def test_products_list_shows_supplier_stock_and_filters_on_it():
     in_stock = client.get("/products", params={"min_stock": 1}).json()["data"]
     assert [p["id"] for p in in_stock] == [10]
     sold_out = client.get("/products", params={"max_stock": 0}).json()["data"]
-    assert [p["id"] for p in sold_out] == [11]
+    assert sorted(p["id"] for p in sold_out) == [11, 12]
 
 
 def _import_cotizador():

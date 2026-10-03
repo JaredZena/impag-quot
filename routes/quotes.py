@@ -1154,7 +1154,8 @@ def search_products(
     seen_products = set()
     for sp in results:
         product = sp.product
-        if product is not None and product.price is not None:
+        # A $0 "Precio de venta" is a blank, not a price.
+        if product is not None and product.price is not None and product.price > 0:
             # One row per product: every supplier of it sells at the same price.
             if product.id in seen_products:
                 continue
