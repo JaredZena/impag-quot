@@ -208,8 +208,21 @@ def test_quotas_and_backfill(db):
         _sale(db, f"Temporada{i} Dos", date(2025, 10, 15), str(1000 + i))
     todo = _todo(db)
     kinds = [c["kind"] for c in todo]
-    # 12 quotes + 5 season; the 3 empty "inactivo" slots go to quotes first.
-    assert kinds == ["cotizacion"] * 15 + ["temporada"] * 5
+    # Every due quote (15) + 5 season; the 3 empty "inactivo" slots take the
+    # one season buyer left.
+    assert kinds == ["cotizacion"] * 15 + ["temporada"] * 6
+
+
+def test_every_due_quote_is_listed(db):
+    # More quotes than a 20-person day: all of them show, plus the season quota.
+    for i in range(30):
+        _quote(db, f"COT-IMPAG-{i:02d}0926DGO", f"Cliente{i} Uno", days=5 + (i % 30))
+    for i in range(6):
+        _sale(db, f"Temporada{i} Dos", date(2025, 10, 15), str(1000 + i))
+    data = seguimiento.daily_list(db, now=NOW)
+    kinds = [c["kind"] for c in data["todo"]]
+    assert kinds == ["cotizacion"] * 30 + ["temporada"] * 6
+    assert data["target"] == 38  # 30 quotes + 5 season + 3 inactive slots
 
 
 def test_send_then_outcomes(db):

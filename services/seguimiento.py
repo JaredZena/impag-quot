@@ -12,8 +12,10 @@ Impag Local, picked by the app and shown on Hoy. Three lists, in order:
 3. inactivo: customers with ≥ $10,000 bought since 2024, nothing in the
    last 90 days and something in the last 18 months.
 
-A day has DAILY_TARGET people: up to 12 quotes, 5 season buyers and 3
-inactive customers; empty slots go to the other lists. One card per person
+A day lists every quote that is due (the owner wants them all at once, not
+12 a day), plus 5 season buyers and 3 inactive customers; with few quotes
+the day is still DAILY_TARGET people and empty slots go to the other lists.
+"Agregar 10 más" (extra) adds more season and inactive people. One card per person
 (contact_key = the folded name), so three open quotes make one message.
 Someone already messaged is left out for 4 days (quotes), 30 days (others)
 or 180 days after "no le interesa".
@@ -456,8 +458,9 @@ def daily_list(
     now = now or datetime.now(timezone.utc)
     today = now.astimezone(BUSINESS_TZ).date()
     done = todays_contacts(db, today)
-    target = DAILY_TARGET + max(0, extra)
-    remaining = max(0, target - len(done))
+    done_by_kind = defaultdict(int)
+    for c in done:
+        done_by_kind[c.kind] += 1
 
     sender = sender_name(db, sender_email)
     phones = _Phones(db)
@@ -468,9 +471,15 @@ def daily_list(
     for kind in KINDS:
         lists[kind] = [c for c in lists[kind] if c.key not in blocked]
 
-    done_by_kind = defaultdict(int)
-    for c in done:
-        done_by_kind[c.kind] += 1
+    # Every due quote is listed today, not 12 a day: its quota grows to what is
+    # due and the day grows with it.
+    quotas = dict(QUOTAS)
+    quotas["cotizacion"] = max(
+        quotas["cotizacion"], done_by_kind["cotizacion"] + len(lists["cotizacion"])
+    )
+    target = max(DAILY_TARGET, sum(quotas.values())) + max(0, extra)
+    remaining = max(0, target - len(done))
+
     picked: dict[str, list[Card]] = {k: [] for k in KINDS}
     seen = set()
 
@@ -484,7 +493,7 @@ def daily_list(
             picked[kind].append(card)
             n -= 1
 
-    for kind, quota in QUOTAS:
+    for kind, quota in quotas.items():
         take(kind, quota - done_by_kind[kind])
     for kind in KINDS:  # empty slots go to whichever list still has people
         take(kind, remaining)
