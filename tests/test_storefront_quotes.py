@@ -213,6 +213,15 @@ def _quote(ref) -> Quote:
         db.close()
 
 
+def _price_all(quote, price=250):
+    for item in quote.items:
+        if item.unit_price <= 0:
+            r = client.put(
+                f"/quotes/{quote.id}/items/{item.id}", json={"unit_price": price}
+            )
+            assert r.status_code == 200, r.text
+
+
 def _pay(ref, status="approved", amount=None, payment_id=555001):
     quote = _quote(ref)
     body = {
@@ -488,6 +497,7 @@ def test_staff_send_keeps_the_buyer_link():
         ]
     )
     quote = _quote(data["quote_number"])
+    _price_all(quote)
     r = client.post(f"/quotes/{quote.id}/send")
     assert r.status_code == 200, r.text
     assert r.json()["data"]["access_token"] == data["access_token"]
@@ -585,8 +595,9 @@ def test_staff_send_emails_the_buyer_that_the_quote_is_ready():
             }
         ]
     )
-    OUTBOX.clear()
     quote = _quote(data["quote_number"])
+    _price_all(quote)
+    OUTBOX.clear()
     r = client.post(f"/quotes/{quote.id}/send")
     assert r.status_code == 200, r.text
     [ready] = OUTBOX
@@ -627,3 +638,98 @@ def test_staff_alert_escapes_buyer_fields():
     html = build_staff_alert(quote)["html"]
     for payload in ("<script>", "<img", "<b>Durango", "<svg"):
         assert payload not in html, payload
+
+
+# ── staff complete a web quote in the admin (routes/quotes.py items) ─────────
+
+UNPRICED = {
+    "handle": "x",
+    "description": "Sin precio",
+    "quantity": 2,
+    "unit_price": 0,
+    "iva_rate": 0.16,
+}
+
+
+def test_unpriced_web_quote_cannot_be_sent_until_staff_price_it():
+    data = _create(items=[UNPRICED])
+    quote = _quote(data["quote_number"])
+    r = client.post(f"/quotes/{quote.id}/send")
+    assert r.status_code == 400 and "precio" in r.json()["detail"]
+    [item] = quote.items
+    r = client.put(f"/quotes/{quote.id}/items/{item.id}", json={"unit_price": 500})
+    assert r.status_code == 200, r.text
+    priced = _quote(data["quote_number"])
+    assert float(priced.total) == 1160.0  # 2 × 500 + 16%
+    assert "SIN PRECIO" not in priced.items[0].notes
+    assert client.post(f"/quotes/{quote.id}/send").status_code == 200
+    r = client.post(
+        f"/storefront/quotes/{data['access_token']}/checkout", headers=HEADERS
+    )
+    assert r.status_code == 200 and r.json()["data"]["total"] == "1160.00"
+
+
+def test_staff_add_the_flete_and_the_buyer_pays_it():
+    data = _create(
+        delivery={
+            "method": "flete",
+            "address": {
+                "street": "Av. Juárez",
+                "number": "10",
+                "cp": "34000",
+                "municipio": "Durango",
+                "estado": "Durango",
+            },
+        }
+    )
+    before = float(_quote(data["quote_number"]).total)
+    quote = _quote(data["quote_number"])
+    r = client.post(
+        f"/quotes/{quote.id}/items",
+        json={
+            "description": "Flete a Durango, Dgo.",
+            "quantity": 1,
+            "unit_price": 1500,
+            "iva_applicable": True,
+            "sort_order": 9,
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert client.post(f"/quotes/{quote.id}/send").status_code == 200
+    r = client.post(
+        f"/storefront/quotes/{data['access_token']}/checkout", headers=HEADERS
+    )
+    assert float(r.json()["data"]["total"]) == round(before + 1740, 2)
+    page = client.get(f"/public/quote/{data['access_token']}")
+    assert "Flete a Durango, Dgo." in page.text
+
+
+def test_items_are_locked_once_the_quote_is_paid():
+    data = _create()
+    _pay(data["quote_number"])
+    quote = _quote(data["quote_number"])
+    item = quote.items[0]
+    line = {"description": "Extra", "quantity": 1, "unit_price": 10}
+    assert client.post(f"/quotes/{quote.id}/items", json=line).status_code == 409
+    assert (
+        client.put(
+            f"/quotes/{quote.id}/items/{item.id}", json={"unit_price": 1}
+        ).status_code
+        == 409
+    )
+    assert client.delete(f"/quotes/{quote.id}/items/{item.id}").status_code == 409
+
+
+def test_item_payloads_are_validated():
+    data = _create(items=[UNPRICED])
+    quote = _quote(data["quote_number"])
+    [item] = quote.items
+    bad = [
+        {"description": "", "quantity": 1, "unit_price": 1},
+        {"description": "x", "quantity": 0, "unit_price": 1},
+        {"description": "x", "quantity": 1, "unit_price": -1},
+    ]
+    for line in bad:
+        assert client.post(f"/quotes/{quote.id}/items", json=line).status_code == 422
+    r = client.put(f"/quotes/{quote.id}/items/{item.id}", json={"quantity": 0})
+    assert r.status_code == 422

@@ -2,7 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, func, or_
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import uuid
@@ -45,28 +45,33 @@ MANUAL_STATUS_LABELS = {
 }
 REASON_REQUIRED = ("needs_work", "rejected")
 
+# Products can change while the quote is still being worked or waiting on the
+# buyer. Once accepted, paid or closed, its lines are the record of the sale.
+ITEM_EDITABLE_STATUSES = ("draft", "sent", "viewed", "needs_work")
+UNPRICED_NOTE = " · SIN PRECIO: capturar antes de enviar"
+
 # ==================== Pydantic Schemas ====================
 
 
 class QuoteItemCreate(BaseModel):
     product_id: Optional[int] = None
     supplier_product_id: Optional[int] = None
-    description: str
+    description: str = Field(min_length=1, max_length=500)
     sku: Optional[str] = None
-    quantity: float
+    quantity: float = Field(gt=0)
     unit: Optional[str] = None
-    unit_price: float
+    unit_price: float = Field(ge=0)
     iva_applicable: bool = True
     notes: Optional[str] = None
     sort_order: int = 0
 
 
 class QuoteItemUpdate(BaseModel):
-    description: Optional[str] = None
+    description: Optional[str] = Field(default=None, min_length=1, max_length=500)
     sku: Optional[str] = None
-    quantity: Optional[float] = None
+    quantity: Optional[float] = Field(default=None, gt=0)
     unit: Optional[str] = None
-    unit_price: Optional[float] = None
+    unit_price: Optional[float] = Field(default=None, ge=0)
     iva_applicable: Optional[bool] = None
     notes: Optional[str] = None
     sort_order: Optional[int] = None
@@ -512,6 +517,12 @@ def send_quote(
         raise HTTPException(status_code=400, detail="Cannot send a quote with no items")
     if not quote.customer_phone:
         raise HTTPException(status_code=400, detail="Customer phone is required to send a quote")
+    if is_web_quote(quote) and any(Decimal(str(i.unit_price or 0)) <= 0 for i in quote.items):
+        # The buyer would get a link they cannot pay (services/web_quotes.quote_checkout).
+        raise HTTPException(
+            status_code=400,
+            detail="Captura el precio de todos los productos antes de enviar",
+        )
 
     quote.status = "sent"
     quote.sent_at = datetime.now(timezone.utc)
@@ -663,12 +674,24 @@ def change_quote_status(
 
 # ==================== Quote Items ====================
 
+def _items_editable(quote: Quote) -> None:
+    if quote.status not in ITEM_EDITABLE_STATUSES or quote.payment_status in (
+        "approved",
+        "mismatch",
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Esta cotización ya está cerrada o pagada; sus productos no se pueden cambiar",
+        )
+
+
 @router.post("/{quote_id}/items")
 def add_item(quote_id: int, data: QuoteItemCreate, db: Session = Depends(get_db), user=Depends(verify_google_token)):
     """Add a line item to a quote."""
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
+    _items_editable(quote)
 
     item = QuoteItem(
         quote_id=quote_id,
@@ -699,9 +722,13 @@ def update_item(quote_id: int, item_id: int, data: QuoteItemUpdate, db: Session 
     item = db.query(QuoteItem).filter(QuoteItem.id == item_id, QuoteItem.quote_id == quote_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+    _items_editable(item.quote)
 
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(item, field, value)
+    # A storefront line staff just priced no longer needs the reminder.
+    if item.notes and UNPRICED_NOTE in item.notes and Decimal(str(item.unit_price or 0)) > 0:
+        item.notes = item.notes.replace(UNPRICED_NOTE, "")
 
     db.commit()
 
@@ -718,6 +745,7 @@ def delete_item(quote_id: int, item_id: int, db: Session = Depends(get_db), user
     item = db.query(QuoteItem).filter(QuoteItem.id == item_id, QuoteItem.quote_id == quote_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+    _items_editable(item.quote)
 
     db.delete(item)
     db.commit()
