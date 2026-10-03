@@ -20,7 +20,7 @@ the day is still DAILY_TARGET people and empty slots go to the other lists.
 Someone already messaged is left out for 4 days (quotes), 30 days (others)
 or 180 days after "no le interesa".
 
-Each card has a ready message (usted, signed by Hernán, see SIGNER) and, when the
+Each card has a ready message (usted, signed by the sender) and, when the
 app knows the number, a wa.me link that opens WhatsApp with it typed.
 Sending stays a person's click: automating WhatsApp Business puts the
 number at risk, and the Cloud API number is not the one customers know.
@@ -33,10 +33,10 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from models import Customer, FollowupContact, Quote, Sale
+from models import Customer, FollowupContact, Quote, Sale, TaskUser
 from services.quote_capture import BUSINESS_TZ
 from services.quote_followup import (
     DEAD_AFTER_DAYS,
@@ -125,11 +125,6 @@ def _hello(name: str) -> str:
     return f"Hola {first[:1].upper()}{first[1:].lower()}, buen día."
 
 
-# Messages go out from Impag Local, which Hernán runs, so they are signed by
-# him whoever has the list open (the owner asked for this on 2026-10-03).
-SIGNER = "Hernán"
-
-
 def _sign(sender: str | None) -> str:
     return f"Le saluda {sender} de IMPAG." if sender else "Le saludamos de IMPAG."
 
@@ -199,6 +194,18 @@ class Card:
             "amount": self.amount,
             "quote_ids": self.quote_ids,
         }
+
+
+def sender_name(db: Session, email: str | None) -> str | None:
+    if not email:
+        return None
+    user = (
+        db.query(TaskUser)
+        .filter(func.lower(TaskUser.email) == email.strip().lower())
+        .first()
+    )
+    name = (user.display_name or "").split() if user else []
+    return name[0] if name else None
 
 
 def _blocked(db: Session, now: datetime) -> dict[str, str]:
@@ -455,7 +462,7 @@ def daily_list(
     for c in done:
         done_by_kind[c.kind] += 1
 
-    sender = SIGNER
+    sender = sender_name(db, sender_email)
     phones = _Phones(db)
     blocked = _blocked(db, now)
     lists = {"cotizacion": _quote_cards(db, now, sender, phones)}
