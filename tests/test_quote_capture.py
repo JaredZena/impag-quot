@@ -362,3 +362,16 @@ def test_stats_count_needs_work(client):
 
 def test_sent_at_for_today_is_now():
     assert quote_capture.sent_at_for(None).date() >= date(2026, 1, 1)
+
+
+def test_july_template_labels():
+    """July 2026 messages: "Entrega en:", "Material:", "Monto Total:"."""
+    p = parse_single(
+        "Cotización Enviada 050726DGO Cliente: Miguel Serrano Ubicación: Nazas, "
+        "Durango Entrega en: Corsarios Nazas Durango Material: Malla al 70% "
+        "Monto Total: $11,820.00"
+    )
+    assert p.ubicacion == "Nazas, Durango"
+    assert p.entrega == "Corsarios Nazas Durango"
+    assert p.material == "Malla al 70%"
+    assert p.total == Decimal("11820.00")

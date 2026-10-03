@@ -50,9 +50,10 @@ HEADER_RE = re.compile(
 
 # Field labels Hernán uses. Matched anywhere (not only at line start) so a
 # message flattened onto one line still parses.
+# The July 2026 version said "Entrega en:", "Material:" and "Monto Total:".
 LABEL_RE = re.compile(
-    r"(?P<label>cliente|ubicaci[oó]n|entrega|material\s*/\s*proyecto|"
-    r"tel[eé]fono|tel|total)\s*:",
+    r"(?P<label>cliente|ubicaci[oó]n|entrega(?:\s+en)?|material(?:\s*/\s*proyecto)?|"
+    r"tel[eé]fono|tel|(?:monto\s+)?total)\s*:",
     re.IGNORECASE,
 )
 
@@ -132,13 +133,13 @@ def parse_cotizaciones(text: str) -> List[ParsedCotizacion]:
                 item.cliente = value
             elif key.startswith("ubicaci"):
                 item.ubicacion = value
-            elif key == "entrega":
+            elif key.startswith("entrega"):
                 item.entrega = value
             elif key.startswith("material"):
                 item.material = value
             elif key.startswith("tel"):
                 item.telefono = value
-            elif key == "total":
+            elif key.endswith("total"):
                 item.total = parse_money(value)
 
         month = int(digits[2:4])

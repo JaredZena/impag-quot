@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, func, or_
 from typing import List, Optional
@@ -19,7 +19,7 @@ from models import (
 from services.price_calculator import get_product_display_price
 from services import web_quote_email
 from services.quote_followup import STALE_DAYS as FOLLOWUP_STALE_DAYS
-from services import quote_capture
+from services import quote_capture, quote_pdf
 from services.web_quotes import is_web_quote
 from auth import verify_google_token
 
@@ -320,7 +320,14 @@ def list_quotes(
         )
 
     total = query.count()
-    quotes = query.order_by(desc(Quote.created_at)).offset(offset).limit(limit).all()
+    # Newest send first: loaded/backfilled quotes are created long after they
+    # went out, so created_at alone would float old quotes to the top.
+    quotes = (
+        query.order_by(desc(func.coalesce(Quote.sent_at, Quote.created_at)), desc(Quote.id))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
 
     return {
         "success": True,
@@ -338,7 +345,11 @@ def quote_stats(db: Session = Depends(get_db), user=Depends(verify_google_token)
     now = datetime.datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    total_this_month = db.query(Quote).filter(Quote.created_at >= month_start).count()
+    total_this_month = (
+        db.query(Quote)
+        .filter(sqlfunc.coalesce(Quote.sent_at, Quote.created_at) >= month_start)
+        .count()
+    )
     accepted_value = db.query(sqlfunc.sum(Quote.total)).filter(
         Quote.status == "accepted",
         Quote.accepted_at >= month_start,
@@ -603,6 +614,167 @@ def capture_quote(
             "preview": _capture_preview(parsed, result),
             "warnings": result["warnings"],
             "quote": serialize_quote(result["quote"]) if result["quote"] else None,
+        },
+    }
+
+
+# ==================== Quote PDF ====================
+
+MAX_PDF_BYTES = 15 * 1024 * 1024
+
+
+async def _read_upload(file: UploadFile) -> bytes:
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="El PDF está vacío.")
+    if len(content) > MAX_PDF_BYTES:
+        raise HTTPException(status_code=400, detail="El PDF pesa más de 15 MB.")
+    return content
+
+
+def _serialize_file(row) -> dict:
+    from services.r2_storage import generate_presigned_view_url
+
+    return {
+        "id": row.id,
+        "filename": row.original_filename,
+        "size": row.file_size_bytes,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "view_url": generate_presigned_view_url(row.file_key, "application/pdf", expires_in=3600),
+    }
+
+
+def _index_pdf(background_tasks: BackgroundTasks, row) -> None:
+    # Same RAG processing every other upload gets (routes/files.upload_file).
+    from routes.files import _run_background_processing
+
+    background_tasks.add_task(_run_background_processing, row.id)
+
+
+@router.post("/capture-pdf")
+async def capture_quote_pdf(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    text: Optional[str] = Form(None),
+    customer_phone: Optional[str] = Form(None),
+    sent_date: Optional[date] = Form(None),
+    dry_run: bool = Form(False),
+    db: Session = Depends(get_db),
+    user=Depends(verify_google_token),
+):
+    """Register a quote from its PDF (services/quote_pdf.py): folio, client,
+    place, date and total come from the PDF; a pasted *Cotización Enviada*
+    message is optional and its labels win. The PDF is stored with the quote.
+    Without sent_date the PDF's Fecha is the send date."""
+    content = await _read_upload(file)
+    try:
+        pdf = quote_pdf.read_pdf(content, file.filename)
+        parsed = (
+            quote_pdf.merge_with_message(pdf, quote_capture.parse_single(text))
+            if text and text.strip()
+            else pdf.parsed
+        )
+    except quote_capture.CaptureError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    result = quote_capture.apply_capture(
+        db,
+        parsed,
+        user_email=user.get("email", "unknown"),
+        phone=customer_phone,
+        sent_date=sent_date or pdf.fecha,
+        dry_run=dry_run,
+    )
+    quote = result["quote"]
+    if quote is not None:
+        if result["action"] == "created" and pdf.contexto:
+            quote_capture._append_note(quote, f"Contexto: {pdf.contexto}")
+            db.commit()
+        row = quote_pdf.attach_pdf(db, quote, content, file.filename, user=user, fecha=pdf.fecha)
+        _index_pdf(background_tasks, row)
+        db.refresh(quote)
+    preview = _capture_preview(parsed, result)
+    preview.update(
+        total=float(parsed.total) if parsed.total is not None else None,
+        pdf_date=pdf.fecha.isoformat() if pdf.fecha else None,
+        contexto=pdf.contexto,
+    )
+    return {
+        "success": True,
+        "data": {
+            "preview": preview,
+            "warnings": result["warnings"],
+            "quote": serialize_quote(quote) if quote else None,
+        },
+    }
+
+
+@router.get("/{quote_id}/files")
+def list_quote_files(quote_id: int, db: Session = Depends(get_db), user=Depends(verify_google_token)):
+    """The quote's PDFs (found by folio in file_metadata), newest first, each
+    with a 1-hour inline view URL."""
+    quote = db.query(Quote).filter(Quote.id == quote_id).first()
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    return {"success": True, "data": [_serialize_file(f) for f in quote_pdf.quote_files(db, quote)]}
+
+
+@router.post("/{quote_id}/files")
+async def upload_quote_file(
+    quote_id: int,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user=Depends(verify_google_token),
+):
+    """Attach the quote's PDF. A quote without products and still at $0 takes
+    the PDF's TOTAL."""
+    quote = db.query(Quote).filter(Quote.id == quote_id).first()
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    if not (quote.quote_number or "").startswith(quote_capture.QUOTE_PREFIX):
+        raise HTTPException(
+            status_code=400,
+            detail="Solo las cotizaciones COT-IMPAG llevan PDF adjunto.",
+        )
+    content = await _read_upload(file)
+    warnings = []
+    try:
+        pdf = quote_pdf.read_pdf(content, file.filename)
+    except quote_capture.CaptureError as exc:
+        pdf = None
+        warnings.append(f"Se guardó el PDF pero no pude leerlo: {exc}")
+    if pdf and pdf.parsed.digits != quote.quote_number[10:16]:
+        warnings.append(f"El PDF es del folio {pdf.parsed.folio}, no de {quote.quote_number}.")
+    total_set = None
+    if (
+        pdf
+        and pdf.parsed.total is not None
+        and not quote.items
+        and Decimal(quote.total or 0) == 0
+        and pdf.parsed.digits == quote.quote_number[10:16]
+    ):
+        quote_capture._set_flat_total(quote, pdf.parsed.total)
+        quote_capture._append_note(
+            quote,
+            f"[Total] {quote_capture._stamp(datetime.now(timezone.utc))} "
+            f"${pdf.parsed.total:,.2f} leído del PDF ({user.get('email', 'unknown')})",
+        )
+        quote.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        total_set = float(pdf.parsed.total)
+    row = quote_pdf.attach_pdf(
+        db, quote, content, file.filename, user=user, fecha=pdf.fecha if pdf else None
+    )
+    _index_pdf(background_tasks, row)
+    db.refresh(quote)
+    return {
+        "success": True,
+        "data": {
+            "files": [_serialize_file(f) for f in quote_pdf.quote_files(db, quote)],
+            "total_set": total_set,
+            "warnings": warnings,
+            "quote": serialize_quote(quote),
         },
     }
 
