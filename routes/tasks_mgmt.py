@@ -7,9 +7,22 @@ from typing import Optional
 from datetime import datetime, timedelta, date
 
 from auth import verify_google_token
-from models import get_db, Task, TaskUser, TaskCategory, TaskComment, get_current_task_user, get_next_task_number
+from models import (
+    get_db,
+    Task,
+    TaskUser,
+    TaskCategory,
+    TaskComment,
+    get_current_task_user,
+    get_next_task_number,
+)
 from services.archive_service import auto_archive_completed_tasks
-from services.import_service import parse_import_text, detect_duplicates_with_ai, create_imported_tasks
+from services.import_service import (
+    parse_import_text,
+    detect_duplicates_with_ai,
+    create_imported_tasks,
+)
+from services import pendientes
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -18,6 +31,7 @@ VALID_PRIORITIES = {"low", "medium", "high", "urgent"}
 
 
 # --- Pydantic schemas ---
+
 
 class TaskCreate(BaseModel):
     title: str
@@ -47,6 +61,7 @@ class ImportBody(BaseModel):
 
 
 # --- Serializers ---
+
 
 def serialize_user(user):
     if not user:
@@ -96,15 +111,21 @@ def serialize_task(task):
 
 
 def _load_task(db: Session, task_id: int):
-    return db.query(Task).options(
-        joinedload(Task.creator),
-        joinedload(Task.assignee),
-        joinedload(Task.category),
-        joinedload(Task.comments),
-    ).filter(Task.id == task_id).first()
+    return (
+        db.query(Task)
+        .options(
+            joinedload(Task.creator),
+            joinedload(Task.assignee),
+            joinedload(Task.category),
+            joinedload(Task.comments),
+        )
+        .filter(Task.id == task_id)
+        .first()
+    )
 
 
 # --- Endpoints ---
+
 
 @router.get("/archive")
 def list_archive(
@@ -112,17 +133,28 @@ def list_archive(
     token_data: dict = Depends(verify_google_token),
 ):
     cutoff = datetime.utcnow() - timedelta(days=30)
-    tasks = db.query(Task).options(
-        joinedload(Task.creator),
-        joinedload(Task.assignee),
-        joinedload(Task.category),
-        joinedload(Task.comments),
-    ).filter(
-        Task.status == "archived",
-        Task.archived_at >= cutoff,
-    ).order_by(Task.archived_at.desc()).all()
+    tasks = (
+        db.query(Task)
+        .options(
+            joinedload(Task.creator),
+            joinedload(Task.assignee),
+            joinedload(Task.category),
+            joinedload(Task.comments),
+        )
+        .filter(
+            Task.status == "archived",
+            Task.archived_at >= cutoff,
+        )
+        .order_by(Task.archived_at.desc())
+        .all()
+    )
 
-    return {"success": True, "data": [serialize_task(t) for t in tasks], "error": None, "message": None}
+    return {
+        "success": True,
+        "data": [serialize_task(t) for t in tasks],
+        "error": None,
+        "message": None,
+    }
 
 
 @router.post("/import")
@@ -141,7 +173,9 @@ def import_tasks(
 
     parsed = parse_import_text(text)
     if not parsed:
-        raise HTTPException(status_code=400, detail="No tasks could be parsed from the text")
+        raise HTTPException(
+            status_code=400, detail="No tasks could be parsed from the text"
+        )
 
     existing_tasks = db.query(Task).filter(Task.status != "archived").all()
     existing_for_ai = [
@@ -153,17 +187,24 @@ def import_tasks(
     to_create = [t for t in analyzed if not t["is_duplicate"]]
     duplicates = [t for t in analyzed if t["is_duplicate"]]
 
-    created_tasks = create_imported_tasks(db, to_create, assigned_to=body.assigned_to, created_by=current_user.id)
+    created_tasks = create_imported_tasks(
+        db, to_create, assigned_to=body.assigned_to, created_by=current_user.id
+    )
     db.commit()
 
     created_ids = [t.id for t in created_tasks]
     if created_ids:
-        created_tasks = db.query(Task).options(
-            joinedload(Task.creator),
-            joinedload(Task.assignee),
-            joinedload(Task.category),
-            joinedload(Task.comments),
-        ).filter(Task.id.in_(created_ids)).all()
+        created_tasks = (
+            db.query(Task)
+            .options(
+                joinedload(Task.creator),
+                joinedload(Task.assignee),
+                joinedload(Task.category),
+                joinedload(Task.comments),
+            )
+            .filter(Task.id.in_(created_ids))
+            .all()
+        )
 
     return {
         "success": True,
@@ -184,6 +225,79 @@ def import_tasks(
         },
         "error": None,
         "message": f"{len(created_tasks)} tareas creadas, {len(duplicates)} duplicadas omitidas",
+    }
+
+
+class PendientesSyncBody(BaseModel):
+    text: str
+    dry_run: bool = False
+
+
+def _section_label(key: str) -> str:
+    return pendientes.CATEGORY_NAME.get(key, key)
+
+
+@router.post("/pendientes/sync")
+def sync_pendientes(
+    body: PendientesSyncBody,
+    db: Session = Depends(get_db),
+    token_data: dict = Depends(verify_google_token),
+):
+    """Sync the board to the pasted *PENDIENTES ddmmyy* WhatsApp list
+    (services/pendientes.py): new lines become tasks, lines still there stay,
+    open tasks no longer on the list are closed. dry_run previews."""
+    current_user = get_current_task_user(db, token_data["email"])
+    if not current_user:
+        raise HTTPException(status_code=404, detail="User not found in task system")
+    try:
+        parsed = pendientes.parse_pendientes(body.text)
+    except pendientes.PendientesError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    plan = pendientes.plan_sync(db, parsed)
+    preview = {
+        "stamp": parsed.stamp,
+        "total": parsed.count,
+        "create": [{"section": _section_label(s), "title": t} for s, t in plan.create],
+        "keep": [
+            {"id": t.id, "title": t.title, "section": _section_label(s)}
+            for t, s in plan.keep
+        ],
+        "move": [
+            {
+                "id": t.id,
+                "title": t.title,
+                "section": _section_label(s),
+                "from": t.category.name if t.category else None,
+            }
+            for t, s in plan.move
+        ],
+        "close": [
+            {
+                "id": t.id,
+                "title": t.title,
+                "category": t.category.name if t.category else None,
+            }
+            for t in plan.close
+        ],
+    }
+    if not body.dry_run:
+        pendientes.apply_sync(db, parsed, plan, user_id=current_user.id)
+    return {"success": True, "data": preview, "error": None}
+
+
+@router.get("/pendientes/text")
+def pendientes_text(
+    db: Session = Depends(get_db),
+    token_data: dict = Depends(verify_google_token),
+):
+    """The open board as the *PENDIENTES ddmmyy* message, ready to post."""
+    from services.quote_capture import BUSINESS_TZ
+
+    today = datetime.now(BUSINESS_TZ).date()
+    return {
+        "success": True,
+        "data": {"text": pendientes.render_text(pendientes.board(db), today)},
+        "error": None,
     }
 
 
@@ -239,12 +353,15 @@ def list_tasks(
 
     if search:
         term = f"%{search}%"
-        query = query.filter(
-            or_(Task.title.ilike(term), Task.description.ilike(term))
-        )
+        query = query.filter(or_(Task.title.ilike(term), Task.description.ilike(term)))
 
     tasks = query.order_by(Task.created_at.desc()).offset(skip).limit(limit).all()
-    return {"success": True, "data": [serialize_task(t) for t in tasks], "error": None, "message": None}
+    return {
+        "success": True,
+        "data": [serialize_task(t) for t in tasks],
+        "error": None,
+        "message": None,
+    }
 
 
 @router.get("/{task_id}")
@@ -253,12 +370,17 @@ def get_task(
     db: Session = Depends(get_db),
     token_data: dict = Depends(verify_google_token),
 ):
-    task = db.query(Task).options(
-        joinedload(Task.creator),
-        joinedload(Task.assignee),
-        joinedload(Task.category),
-        joinedload(Task.comments).joinedload(TaskComment.user),
-    ).filter(Task.id == task_id).first()
+    task = (
+        db.query(Task)
+        .options(
+            joinedload(Task.creator),
+            joinedload(Task.assignee),
+            joinedload(Task.category),
+            joinedload(Task.comments).joinedload(TaskComment.user),
+        )
+        .filter(Task.id == task_id)
+        .first()
+    )
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -293,7 +415,10 @@ def create_task(
         raise HTTPException(status_code=400, detail="Title is required")
 
     if body.priority not in VALID_PRIORITIES:
-        raise HTTPException(status_code=400, detail=f"Invalid priority. Must be one of: {', '.join(VALID_PRIORITIES)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid priority. Must be one of: {', '.join(VALID_PRIORITIES)}",
+        )
 
     task = Task(
         title=body.title.strip(),
@@ -310,7 +435,12 @@ def create_task(
     db.refresh(task)
 
     task = _load_task(db, task.id)
-    return {"success": True, "data": serialize_task(task), "error": None, "message": "Task created"}
+    return {
+        "success": True,
+        "data": serialize_task(task),
+        "error": None,
+        "message": "Task created",
+    }
 
 
 @router.put("/{task_id}")
@@ -350,7 +480,12 @@ def update_task(
     db.commit()
 
     task = _load_task(db, task_id)
-    return {"success": True, "data": serialize_task(task), "error": None, "message": "Task updated"}
+    return {
+        "success": True,
+        "data": serialize_task(task),
+        "error": None,
+        "message": "Task updated",
+    }
 
 
 @router.put("/{task_id}/status")
@@ -365,7 +500,10 @@ def update_task_status(
         raise HTTPException(status_code=404, detail="Task not found")
 
     if body.status not in VALID_STATUSES:
-        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(VALID_STATUSES)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Must be one of: {', '.join(VALID_STATUSES)}",
+        )
 
     old_status = task.status
     task.status = body.status
@@ -386,7 +524,12 @@ def update_task_status(
     db.commit()
 
     task = _load_task(db, task_id)
-    return {"success": True, "data": serialize_task(task), "error": None, "message": f"Status changed to {body.status}"}
+    return {
+        "success": True,
+        "data": serialize_task(task),
+        "error": None,
+        "message": f"Status changed to {body.status}",
+    }
 
 
 @router.delete("/{task_id}")
@@ -405,4 +548,9 @@ def delete_task(
     task.last_updated = datetime.utcnow()
     db.commit()
 
-    return {"success": True, "data": {"id": task_id}, "error": None, "message": "Task archived"}
+    return {
+        "success": True,
+        "data": {"id": task_id},
+        "error": None,
+        "message": "Task archived",
+    }
