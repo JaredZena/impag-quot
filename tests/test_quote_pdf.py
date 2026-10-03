@@ -289,3 +289,34 @@ def test_reused_folio_shows_the_customers_own_pdf(client):
     assert [f["filename"] for f in files] == [
         "COT-IMPAG-070326DGO-MIGUEL ESCOBAR-BOMBA.pdf"
     ]
+
+
+def test_pdf_on_a_request_sends_it(client):
+    req = client.post(
+        "/quotes/capture",
+        json={
+            "text": "Solicitud de Cotización Cliente: Edwin Santillano "
+            "Material/Proyecto: Malla sombra"
+        },
+    ).json()["data"]["quote"]
+    assert req["status"] == "requested"
+    data = _upload(client, f"/quotes/{req['id']}/files").json()["data"]
+    q = data["quote"]
+    assert data["converted_from"] == req["quote_number"]
+    assert q["quote_number"] == "COT-IMPAG-390526DGO"
+    assert q["status"] == "sent"
+    assert q["sent_at"].startswith("2026-05-16")
+    assert q["total"] == 17200.0
+    assert [f["filename"] for f in data["files"]] == [NAME]
+
+
+def test_pdf_on_a_request_with_a_taken_folio_is_refused(client):
+    _quote()  # COT-IMPAG-390526DGO already exists
+    req = client.post(
+        "/quotes/capture",
+        json={
+            "text": "Solicitud de Cotización Cliente: Otra Persona Material/Proyecto: X"
+        },
+    ).json()["data"]["quote"]
+    r = _upload(client, f"/quotes/{req['id']}/files")
+    assert r.status_code == 409

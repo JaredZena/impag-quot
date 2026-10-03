@@ -1,4 +1,13 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+)
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, func, or_
 from typing import List, Optional
@@ -76,6 +85,7 @@ class QuoteItemUpdate(BaseModel):
     notes: Optional[str] = None
     sort_order: Optional[int] = None
 
+
 class QuoteCreate(BaseModel):
     customer_name: str
     customer_phone: str
@@ -85,6 +95,7 @@ class QuoteCreate(BaseModel):
     validity_days: int = 15
     assigned_to: Optional[str] = None
     items: Optional[List[QuoteItemCreate]] = None
+
 
 class QuoteUpdate(BaseModel):
     customer_name: Optional[str] = None
@@ -112,6 +123,7 @@ class QuoteStatusChange(BaseModel):
     status: str
     reason: Optional[str] = None
 
+
 class QuoteItemResponse(BaseModel):
     id: int
     quote_id: int
@@ -131,6 +143,7 @@ class QuoteItemResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
 
 class QuoteResponse(BaseModel):
     id: int
@@ -161,6 +174,7 @@ class QuoteResponse(BaseModel):
 
 
 # ==================== Helper Functions ====================
+
 
 def recalculate_totals(quote: Quote, db: Session):
     """Recalculate subtotal, IVA, and total from line items."""
@@ -196,23 +210,29 @@ def serialize_quote(quote: Quote) -> dict:
     items = []
     for item in quote.items:
         line_total = float(item.quantity) * float(item.unit_price)
-        items.append({
-            "id": item.id,
-            "quote_id": item.quote_id,
-            "product_id": item.product_id,
-            "supplier_product_id": item.supplier_product_id,
-            "description": item.description,
-            "sku": item.sku,
-            "quantity": float(item.quantity),
-            "unit": item.unit,
-            "unit_price": float(item.unit_price),
-            "iva_applicable": item.iva_applicable,
-            "discount_percent": float(item.discount_percent) if item.discount_percent else None,
-            "discount_amount": float(item.discount_amount) if item.discount_amount else None,
-            "notes": item.notes,
-            "sort_order": item.sort_order,
-            "line_total": line_total,
-        })
+        items.append(
+            {
+                "id": item.id,
+                "quote_id": item.quote_id,
+                "product_id": item.product_id,
+                "supplier_product_id": item.supplier_product_id,
+                "description": item.description,
+                "sku": item.sku,
+                "quantity": float(item.quantity),
+                "unit": item.unit,
+                "unit_price": float(item.unit_price),
+                "iva_applicable": item.iva_applicable,
+                "discount_percent": (
+                    float(item.discount_percent) if item.discount_percent else None
+                ),
+                "discount_amount": (
+                    float(item.discount_amount) if item.discount_amount else None
+                ),
+                "notes": item.notes,
+                "sort_order": item.sort_order,
+                "line_total": line_total,
+            }
+        )
 
     return {
         "id": quote.id,
@@ -246,8 +266,11 @@ def serialize_quote(quote: Quote) -> dict:
 
 # ==================== Quote CRUD ====================
 
+
 @router.post("")
-def create_quote(data: QuoteCreate, db: Session = Depends(get_db), user=Depends(verify_google_token)):
+def create_quote(
+    data: QuoteCreate, db: Session = Depends(get_db), user=Depends(verify_google_token)
+):
     """Create a new quote in draft status."""
     quote = Quote(
         quote_number=get_next_quote_number(db),
@@ -323,7 +346,9 @@ def list_quotes(
     # Newest send first: loaded/backfilled quotes are created long after they
     # went out, so created_at alone would float old quotes to the top.
     quotes = (
-        query.order_by(desc(func.coalesce(Quote.sent_at, Quote.created_at)), desc(Quote.id))
+        query.order_by(
+            desc(func.coalesce(Quote.sent_at, Quote.created_at)), desc(Quote.id)
+        )
         .offset(offset)
         .limit(limit)
         .all()
@@ -350,11 +375,19 @@ def quote_stats(db: Session = Depends(get_db), user=Depends(verify_google_token)
         .filter(sqlfunc.coalesce(Quote.sent_at, Quote.created_at) >= month_start)
         .count()
     )
-    accepted_value = db.query(sqlfunc.sum(Quote.total)).filter(
-        Quote.status == "accepted",
-        Quote.accepted_at >= month_start,
-    ).scalar() or 0
+    accepted_value = (
+        db.query(sqlfunc.sum(Quote.total))
+        .filter(
+            Quote.status == "accepted",
+            Quote.accepted_at >= month_start,
+        )
+        .scalar()
+        or 0
+    )
     sent_count = db.query(Quote).filter(Quote.status == "sent").count()
+    requested_count = (
+        db.query(Quote).filter(Quote.status == quote_capture.REQUEST_STATUS).count()
+    )
     viewed_count = db.query(Quote).filter(Quote.status == "viewed").count()
     needs_work_count = db.query(Quote).filter(Quote.status == "needs_work").count()
 
@@ -366,6 +399,7 @@ def quote_stats(db: Session = Depends(get_db), user=Depends(verify_google_token)
             "pending_sent": sent_count,
             "pending_viewed": viewed_count,
             "needs_work": needs_work_count,
+            "requested": requested_count,
         },
     }
 
@@ -459,16 +493,28 @@ def pipeline_summary(db: Session = Depends(get_db), user=Depends(verify_google_t
 
 
 @router.get("/{quote_id}")
-def get_quote(quote_id: int, db: Session = Depends(get_db), user=Depends(verify_google_token)):
+def get_quote(
+    quote_id: int, db: Session = Depends(get_db), user=Depends(verify_google_token)
+):
     """Get a single quote with items."""
-    quote = db.query(Quote).options(joinedload(Quote.items)).filter(Quote.id == quote_id).first()
+    quote = (
+        db.query(Quote)
+        .options(joinedload(Quote.items))
+        .filter(Quote.id == quote_id)
+        .first()
+    )
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
     return {"success": True, "data": serialize_quote(quote)}
 
 
 @router.put("/{quote_id}")
-def update_quote(quote_id: int, data: QuoteUpdate, db: Session = Depends(get_db), user=Depends(verify_google_token)):
+def update_quote(
+    quote_id: int,
+    data: QuoteUpdate,
+    db: Session = Depends(get_db),
+    user=Depends(verify_google_token),
+):
     """Update quote metadata (not items)."""
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
     if not quote:
@@ -483,7 +529,9 @@ def update_quote(quote_id: int, data: QuoteUpdate, db: Session = Depends(get_db)
                 detail="El total sale de los productos; edita los productos.",
             )
         if total < 0:
-            raise HTTPException(status_code=400, detail="El total no puede ser negativo")
+            raise HTTPException(
+                status_code=400, detail="El total no puede ser negativo"
+            )
         quote.subtotal = Decimal(str(total))
         quote.iva_amount = Decimal("0")
         quote.total = Decimal(str(total))
@@ -500,7 +548,9 @@ def update_quote(quote_id: int, data: QuoteUpdate, db: Session = Depends(get_db)
 
 
 @router.delete("/{quote_id}")
-def delete_quote(quote_id: int, db: Session = Depends(get_db), user=Depends(verify_google_token)):
+def delete_quote(
+    quote_id: int, db: Session = Depends(get_db), user=Depends(verify_google_token)
+):
     """Delete a draft quote."""
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
     if not quote:
@@ -521,14 +571,23 @@ def send_quote(
     user=Depends(verify_google_token),
 ):
     """Mark quote as sent and generate access token."""
-    quote = db.query(Quote).options(joinedload(Quote.items)).filter(Quote.id == quote_id).first()
+    quote = (
+        db.query(Quote)
+        .options(joinedload(Quote.items))
+        .filter(Quote.id == quote_id)
+        .first()
+    )
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
     if not quote.items:
         raise HTTPException(status_code=400, detail="Cannot send a quote with no items")
     if not quote.customer_phone:
-        raise HTTPException(status_code=400, detail="Customer phone is required to send a quote")
-    if is_web_quote(quote) and any(Decimal(str(i.unit_price or 0)) <= 0 for i in quote.items):
+        raise HTTPException(
+            status_code=400, detail="Customer phone is required to send a quote"
+        )
+    if is_web_quote(quote) and any(
+        Decimal(str(i.unit_price or 0)) <= 0 for i in quote.items
+    ):
         # The buyer would get a link they cannot pay (services/web_quotes.quote_checkout).
         raise HTTPException(
             status_code=400,
@@ -555,11 +614,19 @@ def send_quote(
 
 # ==================== Capture & Status ====================
 
+
 def _capture_preview(parsed, result) -> dict:
     existing = result["existing"]
+    converted = result["action"] == "converted"
     return {
         "action": result["action"],
-        "quote_number": existing.quote_number if existing else parsed.quote_number,
+        "kind": parsed.kind,  # "quote" | "request" (Solicitud → Por cotizar)
+        "request_number": result.get("request_number"),
+        "phone": parsed.telefono,
+        "datos": parsed.datos,
+        "quote_number": (
+            parsed.quote_number if converted or not existing else existing.quote_number
+        ),
         "folio": parsed.folio,
         "tag": parsed.tag,
         "customer_name": parsed.cliente,
@@ -589,7 +656,7 @@ def capture_quote(
     services/quote_capture.py). A folio already registered is re-sent instead
     of duplicated. dry_run=true returns the preview without writing."""
     try:
-        parsed = quote_capture.parse_single(data.text)
+        parsed = quote_capture.parse_message(data.text)
     except quote_capture.CaptureError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -640,7 +707,9 @@ def _serialize_file(row) -> dict:
         "filename": row.original_filename,
         "size": row.file_size_bytes,
         "created_at": row.created_at.isoformat() if row.created_at else None,
-        "view_url": generate_presigned_view_url(row.file_key, "application/pdf", expires_in=3600),
+        "view_url": generate_presigned_view_url(
+            row.file_key, "application/pdf", expires_in=3600
+        ),
     }
 
 
@@ -690,7 +759,9 @@ async def capture_quote_pdf(
         if result["action"] == "created" and pdf.contexto:
             quote_capture._append_note(quote, f"Contexto: {pdf.contexto}")
             db.commit()
-        row = quote_pdf.attach_pdf(db, quote, content, file.filename, user=user, fecha=pdf.fecha)
+        row = quote_pdf.attach_pdf(
+            db, quote, content, file.filename, user=user, fecha=pdf.fecha
+        )
         _index_pdf(background_tasks, row)
         db.refresh(quote)
     preview = _capture_preview(parsed, result)
@@ -710,13 +781,18 @@ async def capture_quote_pdf(
 
 
 @router.get("/{quote_id}/files")
-def list_quote_files(quote_id: int, db: Session = Depends(get_db), user=Depends(verify_google_token)):
+def list_quote_files(
+    quote_id: int, db: Session = Depends(get_db), user=Depends(verify_google_token)
+):
     """The quote's PDFs (found by folio in file_metadata), newest first, each
     with a 1-hour inline view URL."""
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
-    return {"success": True, "data": [_serialize_file(f) for f in quote_pdf.quote_files(db, quote)]}
+    return {
+        "success": True,
+        "data": [_serialize_file(f) for f in quote_pdf.quote_files(db, quote)],
+    }
 
 
 @router.post("/{quote_id}/files")
@@ -728,16 +804,64 @@ async def upload_quote_file(
     user=Depends(verify_google_token),
 ):
     """Attach the quote's PDF. A quote without products and still at $0 takes
-    the PDF's TOTAL."""
+    the PDF's TOTAL. On a pending request (Por cotizar) the PDF is the quote
+    going out: the request takes its folio, total and date and becomes
+    Enviada."""
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
-    if not (quote.quote_number or "").startswith(quote_capture.QUOTE_PREFIX):
+    is_request = quote.status == quote_capture.REQUEST_STATUS
+    if not is_request and not (quote.quote_number or "").startswith(
+        quote_capture.QUOTE_PREFIX
+    ):
         raise HTTPException(
             status_code=400,
             detail="Solo las cotizaciones COT-IMPAG llevan PDF adjunto.",
         )
     content = await _read_upload(file)
+    if is_request:
+        try:
+            pdf = quote_pdf.read_pdf(content, file.filename)
+        except quote_capture.CaptureError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        taken = quote_capture.find_existing(db, pdf.parsed)
+        if taken is not None and taken.id != quote.id:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"El folio {pdf.parsed.folio} ya es la cotización "
+                    f"{taken.quote_number}: súbelo ahí."
+                ),
+            )
+        request_number = quote.quote_number
+        quote_capture.convert_request(
+            db,
+            quote,
+            pdf.parsed,
+            user_email=user.get("email", "unknown"),
+            total=pdf.parsed.total,
+            when=quote_capture.sent_at_for(pdf.fecha),
+        )
+        if pdf.contexto:
+            quote_capture._append_note(quote, f"Contexto: {pdf.contexto}")
+            db.commit()
+        row = quote_pdf.attach_pdf(
+            db, quote, content, file.filename, user=user, fecha=pdf.fecha
+        )
+        _index_pdf(background_tasks, row)
+        db.refresh(quote)
+        return {
+            "success": True,
+            "data": {
+                "files": [_serialize_file(f) for f in quote_pdf.quote_files(db, quote)],
+                "total_set": (
+                    float(pdf.parsed.total) if pdf.parsed.total is not None else None
+                ),
+                "converted_from": request_number,
+                "warnings": pdf.parsed.warnings,
+                "quote": serialize_quote(quote),
+            },
+        }
     warnings = []
     try:
         pdf = quote_pdf.read_pdf(content, file.filename)
@@ -745,7 +869,9 @@ async def upload_quote_file(
         pdf = None
         warnings.append(f"Se guardó el PDF pero no pude leerlo: {exc}")
     if pdf and pdf.parsed.digits != quote.quote_number[10:16]:
-        warnings.append(f"El PDF es del folio {pdf.parsed.folio}, no de {quote.quote_number}.")
+        warnings.append(
+            f"El PDF es del folio {pdf.parsed.folio}, no de {quote.quote_number}."
+        )
     total_set = None
     if (
         pdf
@@ -802,7 +928,9 @@ def change_quote_status(
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
     if quote.status == "draft":
-        raise HTTPException(status_code=400, detail="Envía el borrador antes de cambiar su estado")
+        raise HTTPException(
+            status_code=400, detail="Envía el borrador antes de cambiar su estado"
+        )
     if is_web_quote(quote):
         raise HTTPException(
             status_code=400,
@@ -846,6 +974,7 @@ def change_quote_status(
 
 # ==================== Quote Items ====================
 
+
 def _items_editable(quote: Quote) -> None:
     if quote.status not in ITEM_EDITABLE_STATUSES or quote.payment_status in (
         "approved",
@@ -858,7 +987,12 @@ def _items_editable(quote: Quote) -> None:
 
 
 @router.post("/{quote_id}/items")
-def add_item(quote_id: int, data: QuoteItemCreate, db: Session = Depends(get_db), user=Depends(verify_google_token)):
+def add_item(
+    quote_id: int,
+    data: QuoteItemCreate,
+    db: Session = Depends(get_db),
+    user=Depends(verify_google_token),
+):
     """Add a line item to a quote."""
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
     if not quote:
@@ -889,9 +1023,19 @@ def add_item(quote_id: int, data: QuoteItemCreate, db: Session = Depends(get_db)
 
 
 @router.put("/{quote_id}/items/{item_id}")
-def update_item(quote_id: int, item_id: int, data: QuoteItemUpdate, db: Session = Depends(get_db), user=Depends(verify_google_token)):
+def update_item(
+    quote_id: int,
+    item_id: int,
+    data: QuoteItemUpdate,
+    db: Session = Depends(get_db),
+    user=Depends(verify_google_token),
+):
     """Update a line item."""
-    item = db.query(QuoteItem).filter(QuoteItem.id == item_id, QuoteItem.quote_id == quote_id).first()
+    item = (
+        db.query(QuoteItem)
+        .filter(QuoteItem.id == item_id, QuoteItem.quote_id == quote_id)
+        .first()
+    )
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     _items_editable(item.quote)
@@ -899,7 +1043,11 @@ def update_item(quote_id: int, item_id: int, data: QuoteItemUpdate, db: Session 
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(item, field, value)
     # A storefront line staff just priced no longer needs the reminder.
-    if item.notes and UNPRICED_NOTE in item.notes and Decimal(str(item.unit_price or 0)) > 0:
+    if (
+        item.notes
+        and UNPRICED_NOTE in item.notes
+        and Decimal(str(item.unit_price or 0)) > 0
+    ):
         item.notes = item.notes.replace(UNPRICED_NOTE, "")
 
     db.commit()
@@ -912,9 +1060,18 @@ def update_item(quote_id: int, item_id: int, data: QuoteItemUpdate, db: Session 
 
 
 @router.delete("/{quote_id}/items/{item_id}")
-def delete_item(quote_id: int, item_id: int, db: Session = Depends(get_db), user=Depends(verify_google_token)):
+def delete_item(
+    quote_id: int,
+    item_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(verify_google_token),
+):
     """Delete a line item."""
-    item = db.query(QuoteItem).filter(QuoteItem.id == item_id, QuoteItem.quote_id == quote_id).first()
+    item = (
+        db.query(QuoteItem)
+        .filter(QuoteItem.id == item_id, QuoteItem.quote_id == quote_id)
+        .first()
+    )
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     _items_editable(item.quote)
@@ -930,6 +1087,7 @@ def delete_item(quote_id: int, item_id: int, db: Session = Depends(get_db), user
 
 
 # ==================== Product Search (for quote form) ====================
+
 
 @router.get("/product-search/query")
 def search_products(
@@ -964,14 +1122,21 @@ def search_products(
         cost_basis = cost + shipping
         display_price = cost_basis / (1 - margin) if margin < 1 else cost_basis
 
-        products.append({
-            "supplier_product_id": sp.id,
-            "product_id": sp.product_id,
-            "name": sp.name or (sp.product.name if sp.product_id else "Unknown"),
-            "sku": sp.sku or (sp.product.sku if sp.product_id else None),
-            "unit": sp.unit or (sp.product.unit.value if sp.product_id and sp.product and sp.product.unit else "PIEZA"),
-            "display_price": round(display_price, 2),
-            "iva": sp.iva if sp.iva is not None else True,
-        })
+        products.append(
+            {
+                "supplier_product_id": sp.id,
+                "product_id": sp.product_id,
+                "name": sp.name or (sp.product.name if sp.product_id else "Unknown"),
+                "sku": sp.sku or (sp.product.sku if sp.product_id else None),
+                "unit": sp.unit
+                or (
+                    sp.product.unit.value
+                    if sp.product_id and sp.product and sp.product.unit
+                    else "PIEZA"
+                ),
+                "display_price": round(display_price, 2),
+                "iva": sp.iva if sp.iva is not None else True,
+            }
+        )
 
     return {"success": True, "data": products}

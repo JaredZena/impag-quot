@@ -375,3 +375,92 @@ def test_july_template_labels():
     assert p.entrega == "Corsarios Nazas Durango"
     assert p.material == "Malla al 70%"
     assert p.total == Decimal("11820.00")
+
+
+# ---------- *Solicitud de Cotización* → Por cotizar ----------
+
+REQUEST = """Solicitud de Cotización
+Proyecto/Material: Sistema de Riego e Invernadero 1 ha
+Cliente: Camila Ortiz Aviña +52 393 131 2326v
+Ubicación: La barca entre Jalisco y Michoacán.
+Datos:  Área: 1 Ha Cultivo: Jitomate."""
+
+
+def test_parses_the_request_template():
+    p = quote_capture.parse_message(REQUEST)
+    assert p.kind == "request"
+    assert p.cliente == "Camila Ortiz Aviña"
+    assert p.telefono == "+52 393 131 2326"
+    assert p.ubicacion == "La barca entre Jalisco y Michoacán"
+    assert p.material == "Sistema de Riego e Invernadero 1 ha"
+    assert p.datos == "Área: 1 Ha Cultivo: Jitomate"
+
+
+def test_request_becomes_por_cotizar_dated_the_day_asked(client):
+    r = client.post(
+        "/quotes/capture", json={"text": REQUEST, "sent_date": "2026-10-01"}
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["preview"]["kind"] == "request"
+    q = data["quote"]
+    assert q["quote_number"] == "SOL-011026-1"
+    assert q["status"] == "requested"
+    assert q["sent_at"] is None
+    assert q["created_at"].startswith("2026-10-01")
+    assert q["customer_phone"] == "+523931312326"
+    assert "Datos: Área: 1 Ha Cultivo: Jitomate" in q["notes"]
+
+    # Asking again adds to the same request.
+    again = client.post(
+        "/quotes/capture", json={"text": REQUEST, "sent_date": "2026-10-02"}
+    )
+    assert again.json()["data"]["preview"]["action"] == "updated"
+    db = _db()
+    assert db.query(Quote).count() == 1
+    assert db.query(Quote).first().notes.count("[Solicitud]") == 2
+    stats = client.get("/quotes/stats").json()["data"]
+    assert stats["requested"] == 1
+
+
+def test_cotizacion_enviada_turns_the_request_into_the_quote(client):
+    rid = client.post("/quotes/capture", json={"text": REQUEST}).json()["data"][
+        "quote"
+    ]["id"]
+    sent = (
+        "*Cotización Enviada 051026JAL*\nCliente: Camila Ortiz\n"
+        "Material/Proyecto: Riego por goteo invernadero 1 ha"
+    )
+    preview = client.post(
+        "/quotes/capture", json={"text": sent, "dry_run": True}
+    ).json()
+    assert preview["data"]["preview"]["action"] == "converted"
+    assert preview["data"]["preview"]["request_number"].startswith("SOL-")
+    assert preview["data"]["preview"]["quote_number"] == "COT-IMPAG-051026JAL"
+
+    r = client.post("/quotes/capture", json={"text": sent, "total": "250,000"})
+    q = r.json()["data"]["quote"]
+    assert q["id"] == rid  # same row, history kept
+    assert q["quote_number"] == "COT-IMPAG-051026JAL"
+    assert q["status"] == "sent" and q["sent_at"] is not None
+    assert q["total"] == 250000
+    assert "de la solicitud SOL-" in q["notes"]
+    assert _db().query(Quote).count() == 1
+
+
+def test_request_matched_by_phone_when_the_quote_names_the_company(client):
+    client.post(
+        "/quotes/capture",
+        json={
+            "text": "Solicitud de cotización Cliente: Pablo Valencia +52 55 4386 6137 "
+            "Material/Proyecto: 3 Geomembranas de 20 mil litros"
+        },
+    )
+    sent = "Cotización Enviada 320926CDMX Cliente: Cimentaciones NECS Material/Proyecto: Bolsa"
+    r = client.post(
+        "/quotes/capture", json={"text": sent, "customer_phone": "55 4386 6137"}
+    )
+    data = r.json()["data"]
+    assert data["preview"]["action"] == "converted"
+    assert data["quote"]["customer_name"] == "Cimentaciones NECS"
+    assert "(Pablo Valencia)" in data["quote"]["notes"]
