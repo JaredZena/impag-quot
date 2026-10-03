@@ -57,6 +57,14 @@ SECTION_KEYS = [s[0] for s in SECTIONS]
 CATEGORY_NAME = {s[0]: s[2] for s in SECTIONS}
 PAGOS_HEADER = "PAGOS PENDIENTES"
 OPEN_STATUSES = ("pending", "in_progress")
+# Queues the app fills by itself (quote follow-up sweep and web quote review,
+# web-order shipping and invoicing). They are not on Hernán's list, so a sync
+# must never close or move them.
+SYSTEM_CATEGORIES = (
+    "Seguimiento a cotizaciones",  # services/quote_followup.py, web_quotes.py
+    "Por enviar",  # services/web_orders.py
+    "Solicitud de facturas",  # services/web_orders.py
+)
 MATCH_RATIO = 0.85
 
 HEADER_RE = re.compile(r"^\s*\*?pendientes\s*(?P<stamp>\d{6})?\*?\s*$", re.I)
@@ -167,7 +175,17 @@ def plan_sync(db: Session, parsed: ParsedList) -> SyncPlan:
     similar); unmatched lines are new, unmatched open tasks are closed."""
     categories = section_categories(db, created_by=0, create=False)
     section_of_category = {c.id: k for k, c in categories.items() if c is not None}
-    open_tasks = db.query(Task).filter(Task.status.in_(OPEN_STATUSES)).all()
+    system_ids = {
+        cid
+        for (cid,) in db.query(TaskCategory.id).filter(
+            TaskCategory.name.in_(SYSTEM_CATEGORIES)
+        )
+    }
+    open_tasks = [
+        t
+        for t in db.query(Task).filter(Task.status.in_(OPEN_STATUSES))
+        if t.category_id not in system_ids
+    ]
     unmatched = {t.id: t for t in open_tasks}
     plan = SyncPlan()
 

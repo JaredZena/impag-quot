@@ -195,8 +195,22 @@ def test_old_category_task_moves_into_its_section(client):
         )
     )
     db.commit()
+    queue = TaskCategory(name="Seguimiento a cotizaciones", created_by=user.id)
+    db.add(queue)
+    db.flush()
+    db.add(
+        Task(
+            title="Cotización web WEB-260930 — revisar",
+            category_id=queue.id,
+            created_by=user.id,
+            status="pending",
+        )
+    )
+    db.commit()
     data = client.post("/tasks/pendientes/sync", json={"text": LIST}).json()["data"]
     assert [m["title"] for m in data["move"]] == ["Internet $349"]
+    # The app's own queues (follow-ups, web orders) are never closed.
+    assert "Cotización web WEB-260930 — revisar" in _open_titles()
     assert [c["title"] for c in data["close"]] == ["Tarea zombi de febrero"]
     assert len(data["create"]) == 10
 
