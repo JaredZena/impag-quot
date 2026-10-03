@@ -14,6 +14,7 @@ background task after the database commit. Logs never carry an address or a
 secret.
 """
 
+import base64
 import logging
 import os
 import smtplib
@@ -55,7 +56,8 @@ def configured() -> bool:
 
 
 def send(message: dict, *, tag: str, idempotency_key: str | None = None) -> bool:
-    """Send {from, to: [..], subject, html, text?, reply_to?}. `tag` names the
+    """Send {from, to: [..], subject, html, text?, reply_to?, attachments?}
+    (attachments: [{filename, content: bytes, content_type}]). `tag` names the
     message in the logs (e.g. "web quote WEB-261002-KM2CG2 staff alert")."""
     to = [addr for addr in message.get("to") or [] if addr]
     if not to:
@@ -93,6 +95,14 @@ def _send_resend(message: dict, to: list[str], idempotency_key: str | None) -> b
         payload["text"] = message["text"]
     if message.get("reply_to"):
         payload["reply_to"] = message["reply_to"]
+    if message.get("attachments"):
+        payload["attachments"] = [
+            {
+                "filename": a["filename"],
+                "content": base64.b64encode(a["content"]).decode("ascii"),
+            }
+            for a in message["attachments"]
+        ]
     response = requests.post(
         RESEND_URL, headers=headers, json=payload, timeout=SEND_TIMEOUT_SECONDS
     )
@@ -110,6 +120,14 @@ def _send_gmail(message: dict, to: list[str]) -> bool:
         email["Reply-To"] = message["reply_to"]
     email.set_content(message.get("text") or "Abre este correo en formato HTML.")
     email.add_alternative(message["html"], subtype="html")
+    for attachment in message.get("attachments") or []:
+        maintype, _, subtype = attachment["content_type"].partition("/")
+        email.add_attachment(
+            attachment["content"],
+            maintype=maintype,
+            subtype=subtype,
+            filename=attachment["filename"],
+        )
     with smtplib.SMTP_SSL(
         GMAIL_SMTP_HOST, GMAIL_SMTP_PORT, timeout=SEND_TIMEOUT_SECONDS
     ) as smtp:

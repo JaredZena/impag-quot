@@ -50,6 +50,11 @@ DELIVERY_NAMES = {
 BUYER_REVIEW_LABELS = {
     "unpriced_items": "confirma el precio de los productos que aún no lo tienen",
     "delivery": "cotiza el flete a tu domicilio",
+    "solar_no_fit": "arma la propuesta para lo que necesitas",
+    "solar_specs": "confirma el modelo de bomba",
+    "solar_large": "confirma la ingeniería de tu sistema",
+    "solar_media_tension": "revisa la ingeniería para tu tarifa",
+    "solar_install_outside": "cotiza el traslado a tu localidad",
 }
 
 GREEN = "#2E7D32"
@@ -169,6 +174,62 @@ def _buyer_comments(quote: Quote) -> str | None:
     return notes.split(marker, 1)[1].strip() or None
 
 
+SOLAR_SYSTEM_NAMES = {
+    "interconectado": "Interconectado",
+    "aislado": "Aislado",
+    "bombeo": "Bombeo solar",
+}
+
+
+def _solar_text(solar: Any) -> str | None:
+    """The cotizador solar's reading of the bill and its sizing, for staff."""
+    if not isinstance(solar, dict):
+        return None
+    lines = [
+        f"Sistema: {SOLAR_SYSTEM_NAMES.get(solar.get('system'), solar.get('system'))}"
+    ]
+    bill = solar.get("bill") or {}
+    usage = solar.get("usage") or {}
+    if bill:
+        lines.append(
+            "Recibo: "
+            + ", ".join(
+                f"{label} {value}"
+                for label, value in (
+                    ("tarifa", bill.get("tarifa")),
+                    ("titular", bill.get("titular")),
+                    ("servicio", bill.get("numero_servicio")),
+                    ("periodo", bill.get("periodo")),
+                    ("kWh del periodo", bill.get("consumo_kwh")),
+                    ("lectura", bill.get("calidad")),
+                )
+                if value not in (None, "")
+            )
+        )
+    if usage:
+        lines.append(
+            f"Consumo promedio: {usage.get('monthly_kwh')} kWh/mes "
+            f"({usage.get('periods_read')} periodos leídos)"
+            + (
+                f", importe promedio ${usage.get('avg_importe_period'):,.0f} por periodo"
+                if usage.get("avg_importe_period")
+                else ""
+            )
+        )
+    if bill.get("observaciones"):
+        lines.append(f"Observaciones: {bill['observaciones']}")
+    answers = solar.get("answers") or {}
+    if answers:
+        lines.append("Respuestas: " + ", ".join(f"{k} {v}" for k, v in answers.items()))
+    sizing = solar.get("sizing") or {}
+    if sizing:
+        lines.append(
+            "Cálculo: "
+            + ", ".join(f"{k} {v}" for k, v in sizing.items() if v not in (None, ""))
+        )
+    return "\n".join(lines)
+
+
 # ── messages ─────────────────────────────────────────────────────────────────
 
 
@@ -219,6 +280,7 @@ def build_staff_alert(quote: Quote) -> dict | None:
             ),
         ),
         ("Comentarios", _buyer_comments(quote)),
+        ("Cotizador solar", _solar_text(block.get("solar"))),
     ]
     facts = "".join(
         f'<tr><td style="color:#888;padding:2px 12px 2px 0;vertical-align:top;">{label}</td>'
@@ -316,8 +378,14 @@ def _buyer_message(quote, to, subject, first_name, intro, label) -> dict:
 # ── queueing (called by the routes after their commit) ───────────────────────
 
 
-def queue_created(db: Session, quote_number: str, tasks: BackgroundTasks) -> None:
-    """Queue the staff alert and the buyer's copy of a new web quote."""
+def queue_created(
+    db: Session,
+    quote_number: str,
+    tasks: BackgroundTasks,
+    attachments: list[dict] | None = None,
+) -> None:
+    """Queue the staff alert and the buyer's copy of a new web quote.
+    `attachments` (the cotizador solar's CFE bill) go on the staff alert only."""
     try:
         quote = (
             db.query(Quote)
@@ -328,6 +396,8 @@ def queue_created(db: Session, quote_number: str, tasks: BackgroundTasks) -> Non
         if quote is None:
             return
         staff = build_staff_alert(quote)
+        if staff and attachments:
+            staff["attachments"] = attachments
         if staff:
             tasks.add_task(
                 mailer.send,

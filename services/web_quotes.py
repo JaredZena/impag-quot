@@ -86,6 +86,12 @@ EVENT_REVIEW = "web_quote_review"
 REVIEW_LABELS = {
     "unpriced_items": "hay productos sin precio publicado",
     "delivery": "el cliente pide envío (cotizar flete)",
+    # Cotizador solar (services/solar_quotes.py)
+    "solar_no_fit": "ningún kit del catálogo cubre lo que pide el cliente: arma la propuesta",
+    "solar_specs": "la bomba de superficie no tiene altura/caudal publicados: confirma el modelo",
+    "solar_large": "sistema interconectado grande: confirma la ingeniería y el precio",
+    "solar_media_tension": "tarifa de media tensión: requiere ingeniería",
+    "solar_install_outside": "instalación fuera de Durango: agrega traslado y viáticos",
 }
 
 
@@ -328,9 +334,21 @@ def _review_task(
     db.flush()
 
 
-def create_quote_request(db: Session, req: Any, now: datetime | None = None) -> dict:
+def create_quote_request(
+    db: Session,
+    req: Any,
+    now: datetime | None = None,
+    *,
+    extra_reasons: list[str] | None = None,
+    block_extra: dict | None = None,
+    notes_text: str | None = None,
+) -> dict:
     """Record one storefront quote request and commit. Raises
-    QuoteRequestRejected (bad input) or QuoteLimitReached (flood cap)."""
+    QuoteRequestRejected (bad input) or QuoteLimitReached (flood cap).
+
+    The cotizador solar (services/solar_quotes.py) adds its own review
+    reasons, its data under block_extra, and notes_text: the explanation the
+    buyer reads on the public quote page (shown instead of the comments)."""
     now = _utc(now or datetime.now(timezone.utc))
     problems = request_problems(req)
     if problems:
@@ -338,7 +356,9 @@ def create_quote_request(db: Session, req: Any, now: datetime | None = None) -> 
     phone = _valid_phone(req.customer.phone)
     _check_limits(db, phone, now)
 
-    reasons = review_reasons(req)
+    reasons = review_reasons(req) + [
+        r for r in extra_reasons or [] if r not in review_reasons(req)
+    ]
     instant = not reasons
     warnings: list[str] = []
     location = _clean(req.customer.location)
@@ -369,6 +389,7 @@ def create_quote_request(db: Session, req: Any, now: datetime | None = None) -> 
             "payment": None,
             "warnings": [],
             "review": reasons,
+            **(block_extra or {}),
         }
         candidate = Quote(
             quote_number=ref,
@@ -378,7 +399,10 @@ def create_quote_request(db: Session, req: Any, now: datetime | None = None) -> 
             customer_email=(_clean(req.customer.email) or "")[:255] or None,
             customer_location=(location or "")[:300] or None,
             notes=write_notes_block(
-                f"Comentarios del cliente:\n{buyer_notes}" if buyer_notes else None,
+                notes_text
+                or (
+                    f"Comentarios del cliente:\n{buyer_notes}" if buyer_notes else None
+                ),
                 ref,
                 block,
             ),
