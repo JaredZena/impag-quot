@@ -1145,7 +1145,10 @@ def search_products(
             text = f"{sp.name or ''} {sp.sku or ''} {sp.product.name if sp.product else ''}".lower()
             return sum(t in text for t in terms)
 
-        results = sorted(loose, key=hits, reverse=True)
+        # Only rows holding at least half the words: one shared word ("sistema")
+        # would otherwise surface unrelated products.
+        needed = (len(terms) + 1) // 2
+        results = sorted((sp for sp in loose if hits(sp) >= needed), key=hits, reverse=True)
 
     products = []
     seen_products = set()

@@ -99,6 +99,10 @@ def test_a_sentence_finds_the_product_word_by_word():
     assert [r["product_id"] for r in rows] == [10]
 
 
+def test_a_sentence_sharing_one_word_finds_nothing():
+    assert _search("sistema de riego para alfalfa con malla") == []
+
+
 def test_precio_de_venta_wins_and_the_product_is_listed_once():
     rows = _search("malla")
     assert len(rows) == 1
