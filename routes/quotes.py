@@ -11,7 +11,7 @@ from fastapi import (
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, func, or_
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import uuid
@@ -28,7 +28,7 @@ from models import (
 from services.price_calculator import get_product_display_price
 from services import web_quote_email
 from services.quote_followup import STALE_DAYS as FOLLOWUP_STALE_DAYS
-from services import quote_capture, quote_pdf
+from services import quote_capture, quote_next_action, quote_pdf
 from services.web_quotes import is_web_quote
 from auth import verify_google_token
 
@@ -122,6 +122,17 @@ class QuoteCaptureRequest(BaseModel):
 class QuoteStatusChange(BaseModel):
     status: str
     reason: Optional[str] = None
+
+
+class QuoteNextActionUpdate(BaseModel):
+    next_action: Optional[str] = None  # null or blank = "Hecho"
+    owner: Optional[str] = None
+    due: Optional[date] = None
+
+    @field_validator("due", mode="before")
+    @classmethod
+    def _blank_due(cls, value):
+        return None if isinstance(value, str) and not value.strip() else value
 
 
 class QuoteItemResponse(BaseModel):
@@ -258,6 +269,11 @@ def serialize_quote(quote: Quote) -> dict:
         "payment_method": quote.payment_method,
         "payment_reference": quote.payment_reference,
         "customer_id": quote.customer_id,
+        "next_action": quote.next_action,
+        "next_action_owner": quote.next_action_owner,
+        "next_action_due": (
+            quote.next_action_due.isoformat() if quote.next_action_due else None
+        ),
         "created_at": quote.created_at.isoformat() if quote.created_at else None,
         "updated_at": quote.updated_at.isoformat() if quote.updated_at else None,
         "items": items,
@@ -318,12 +334,17 @@ def list_quotes(
     status: Optional[str] = None,
     engineer: Optional[str] = None,
     search: Optional[str] = None,
+    next_action_due_to: Optional[date] = None,
+    has_next_action: Optional[bool] = None,
+    order: Optional[str] = None,
     limit: int = Query(default=100, le=500),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     user=Depends(verify_google_token),
 ):
-    """List quotes with optional filters."""
+    """List quotes with optional filters. next_action_due_to = quotes with a
+    next step due on or before that day; order=next_action sorts by that due
+    date (none last), then newest send."""
     query = db.query(Quote).options(joinedload(Quote.items))
 
     if status:
@@ -341,18 +362,31 @@ def list_quotes(
                 Quote.customer_phone.ilike(search_term),
             )
         )
+    if next_action_due_to is not None:
+        query = query.filter(
+            Quote.next_action.isnot(None), Quote.next_action_due <= next_action_due_to
+        )
+    if has_next_action is not None:
+        query = query.filter(
+            Quote.next_action.isnot(None)
+            if has_next_action
+            else Quote.next_action.is_(None)
+        )
 
     total = query.count()
     # Newest send first: loaded/backfilled quotes are created long after they
     # went out, so created_at alone would float old quotes to the top.
-    quotes = (
-        query.order_by(
-            desc(func.coalesce(Quote.sent_at, Quote.created_at)), desc(Quote.id)
+    newest_sent = desc(func.coalesce(Quote.sent_at, Quote.created_at))
+    if order == "next_action":
+        ordering = (
+            Quote.next_action_due.is_(None),
+            Quote.next_action_due.asc(),
+            newest_sent,
+            desc(Quote.id),
         )
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+    else:
+        ordering = (newest_sent, desc(Quote.id))
+    quotes = query.order_by(*ordering).offset(offset).limit(limit).all()
 
     return {
         "success": True,
@@ -969,6 +1003,40 @@ def change_quote_status(
     quote.updated_at = now
     db.commit()
     db.refresh(quote)
+    return {"success": True, "data": serialize_quote(quote)}
+
+
+@router.put("/{quote_id}/next-action")
+def set_quote_next_action(
+    quote_id: int,
+    data: QuoteNextActionUpdate,
+    db: Session = Depends(get_db),
+    user=Depends(verify_google_token),
+):
+    """Siguiente paso: what to do next, who and by when, with an audit line in
+    the notes. A null or blank next_action marks it done and clears owner and
+    due."""
+    next_action = quote_next_action.clean(data.next_action)
+    owner = quote_next_action.clean(data.owner)
+    if next_action and len(next_action) > quote_next_action.MAX_ACTION:
+        raise HTTPException(
+            status_code=422,
+            detail=f"El siguiente paso es demasiado largo (máx. {quote_next_action.MAX_ACTION})",
+        )
+    if owner and len(owner) > quote_next_action.MAX_OWNER:
+        raise HTTPException(
+            status_code=422,
+            detail=f"El responsable es demasiado largo (máx. {quote_next_action.MAX_OWNER})",
+        )
+
+    quote = db.query(Quote).filter(Quote.id == quote_id).first()
+    if not quote:
+        raise HTTPException(status_code=404, detail="No se encontró la cotización")
+
+    who = user.get("email") or user.get("name") or "unknown"
+    if quote_next_action.set_next_action(quote, next_action, owner, data.due, who=who):
+        db.commit()
+        db.refresh(quote)
     return {"success": True, "data": serialize_quote(quote)}
 
 

@@ -1227,6 +1227,12 @@ class Quote(Base):
     last_followup_at = Column(DateTime(timezone=True), nullable=True)
     followup_count = Column(Integer, nullable=False, server_default="0", default=0)
 
+    # Siguiente paso: what the team does next on this quote, who (a first name:
+    # "Hernán", "JD", ...) and by when. NULL next_action = nothing pending.
+    next_action = Column(String(200), nullable=True)
+    next_action_owner = Column(String(50), nullable=True)
+    next_action_due = Column(Date, nullable=True, index=True)
+
     # Ownership
     created_by = Column(String(255), nullable=False)  # engineer email
     assigned_to = Column(String(255), nullable=True)  # engineer email
