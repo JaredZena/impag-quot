@@ -294,6 +294,60 @@ def test_not_interested_without_a_message(db):
     assert _todo(db) == []
 
 
+def test_already_bought_closes_only_that_quote(db):
+    q = _quote(db, "COT-IMPAG-020926DGO", "Linda Ramos Medina", days=30)
+    other = _quote(db, "COT-IMPAG-150926DGO", "Linda Ramos Medina", days=20)
+    contact = seguimiento.log_contact(
+        db,
+        customer_name="Linda Ramos Medina",
+        kind="cotizacion",
+        quote_ids=[q.id],
+        outcome="venta",
+        user_email="hernan@x.com",
+        now=NOW,
+    )
+    assert contact.outcome == "venta" and contact.message is None
+    db.expire_all()
+    q, other = db.get(Quote, q.id), db.get(Quote, other.id)
+    assert q.status == "accepted" and q.accepted_at is not None
+    assert q.followup_count == 0
+    assert "Aceptada — compró (seguimiento por WhatsApp)" in q.notes
+    assert other.status == "sent"  # may still be alive
+
+
+def test_misclicked_outcome_reopens_the_quote(db):
+    q = _quote(db, "COT-IMPAG-090926DGO", "Ordoñez", days=10)
+    contact = seguimiento.log_contact(
+        db,
+        customer_name="Ordoñez",
+        kind="cotizacion",
+        quote_ids=[q.id],
+        user_email="hernan@x.com",
+        now=NOW,
+    )
+
+    def mark(outcome, minutes):
+        seguimiento.set_outcome(
+            db,
+            contact.id,
+            outcome,
+            user_email="hernan@x.com",
+            now=NOW + timedelta(minutes=minutes),
+        )
+        db.expire_all()
+        return db.get(Quote, q.id).status
+
+    assert mark("venta", 1) == "accepted"
+    assert mark("no_interesa", 2) == "rejected"  # Venta undone, then Perdida
+    assert mark("respondio", 3) == "sent"
+    assert mark("venta", 4) == "accepted"
+    # Closed again by someone else after the misclick: leave it alone.
+    db.get(Quote, q.id).updated_at = NOW + timedelta(minutes=5)
+    db.commit()
+    assert mark("respondio", 6) == "accepted"
+    assert db.get(Quote, q.id).notes.count("se corrigió el seguimiento") == 2
+
+
 def test_messaged_people_wait(db):
     _sale(db, "Vanessa Aguilar Bautista", date(2025, 11, 3), "10900")
     db.add(

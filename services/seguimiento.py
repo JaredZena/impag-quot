@@ -545,11 +545,11 @@ def log_contact(
 ) -> FollowupContact:
     """Record a WhatsApp follow-up as sent. On quotes it counts as a nudge
     (followup_count / last_followup_at, like the sweep) and fills a missing
-    phone with the one typed. outcome="no_interesa" takes the person off the
-    list without a message (see set_outcome)."""
+    phone with the one typed. outcome="no_interesa" / "venta" takes the person
+    off the list without a message (see set_outcome)."""
     if kind not in KINDS:
         raise SeguimientoError("Tipo de seguimiento no válido")
-    if outcome not in ("enviado", "no_interesa"):
+    if outcome not in ("enviado", "no_interesa", "venta"):
         raise SeguimientoError("Resultado no válido")
     if not contact_key(customer_name):
         raise SeguimientoError("Falta el nombre del cliente")
@@ -581,7 +581,7 @@ def log_contact(
     db.add(contact)
     db.commit()
     db.refresh(contact)
-    if outcome == "no_interesa":
+    if outcome != "enviado":
         return set_outcome(db, contact.id, outcome, user_email=user_email, now=now)
     return contact
 
@@ -594,35 +594,78 @@ def set_outcome(
     user_email: str,
     now: datetime | None = None,
 ) -> FollowupContact:
-    """Respondió / Venta / No le interesa. "No le interesa" on a quote closes
-    it as Perdida, with the same audit line as a manual status change."""
+    """Respondió / Venta / No le interesa. On a quote, "Venta" closes it as
+    Aceptada and "No le interesa" as Perdida (all of that person's open
+    quotes), with the same audit line as a manual status change. Changing a
+    misclicked Venta / No le interesa reopens the quotes it closed."""
     if outcome not in OUTCOMES:
         raise SeguimientoError("Resultado no válido")
     contact = db.query(FollowupContact).filter(FollowupContact.id == contact_id).first()
     if not contact:
         raise SeguimientoError("Seguimiento no encontrado")
     now = now or datetime.now(timezone.utc)
+    previous, closed_at = contact.outcome, contact.updated_at
     contact.outcome = outcome
     contact.updated_at = now
-    if outcome == "no_interesa" and contact.kind == "cotizacion":
-        stamp = now.astimezone(BUSINESS_TZ)
-        name_key, _, wa = contact.contact_key.partition("|")
-        quotes = [
+    if contact.kind != "cotizacion" or outcome == previous:
+        db.commit()
+        db.refresh(contact)
+        return contact
+
+    stamp = now.astimezone(BUSINESS_TZ)
+    name_key, _, wa = contact.contact_key.partition("|")
+
+    def theirs(statuses: tuple[str, ...]) -> list[Quote]:
+        return [
             q
-            for q in db.query(Quote).filter(Quote.status.in_(("sent", "viewed")))
+            for q in db.query(Quote).filter(Quote.status.in_(statuses))
             if q.id == contact.quote_id
             or (
                 contact_key(q.customer_name) == name_key
                 and (not wa or wa_number(q.customer_phone) in (None, wa))
             )
         ]
-        for q in quotes:
+
+    # Undo what the previous outcome closed — only quotes nothing else has
+    # touched since (same updated_at stamp as the contact). No flush in
+    # between: re-setting the same updated_at would let onupdate overwrite it.
+    reopened: list[Quote] = []
+    if previous in ("venta", "no_interesa"):
+        status = "accepted" if previous == "venta" else "rejected"
+        for q in theirs((status,)):
+            if q.updated_at and closed_at and _aware(q.updated_at) == _aware(closed_at):
+                q.status = "sent"
+                q.accepted_at = None
+                q.updated_at = now
+                _note(
+                    q,
+                    f"[Estado] {stamp:%d/%m/%Y} Enviada — se corrigió el seguimiento "
+                    f"({user_email})",
+                )
+                reopened.append(q)
+
+    if outcome == "no_interesa":
+        for q in {q.id: q for q in [*theirs(("sent", "viewed")), *reopened]}.values():
             q.status = "rejected"
             q.accepted_at = None
             q.updated_at = now
             _note(
                 q,
                 f"[Estado] {stamp:%d/%m/%Y} Perdida — no le interesa "
+                f"(seguimiento por WhatsApp) ({user_email})",
+            )
+    elif outcome == "venta":
+        # Only the quote on the card: other open quotes of the same person
+        # may still be alive.
+        q = db.get(Quote, contact.quote_id) if contact.quote_id else None
+        if q is not None and q.status in ("sent", "viewed", "expired"):
+            q.status = "accepted"
+            q.accepted_at = now
+            q.expired_at = None
+            q.updated_at = now
+            _note(
+                q,
+                f"[Estado] {stamp:%d/%m/%Y} Aceptada — compró "
                 f"(seguimiento por WhatsApp) ({user_email})",
             )
     db.commit()
