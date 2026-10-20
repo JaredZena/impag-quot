@@ -3,7 +3,7 @@
 Impag Local, picked by the app and shown on Hoy. Three lists, in order:
 
 1. cotizacion: quotes sent 3–45 days ago that nobody accepted, with fewer
-   than 3 nudges and none in the last 4 days (the cadence of
+   than 3 nudges and none in the last 7 days (the cadence of
    services/quote_followup). A quote never nudged (followup_count 0) is due
    even if a bulk load stamped last_followup_at.
 2. temporada: who bought around this date last year (15 days before to 75
@@ -17,7 +17,7 @@ A day lists every quote that is due (the owner wants them all at once, not
 the day is still DAILY_TARGET people and empty slots go to the other lists.
 "Agregar 10 más" (extra) adds more season and inactive people. One card per person
 (contact_key = the folded name), so three open quotes make one message.
-Someone already messaged is left out for 4 days (quotes), 30 days (others)
+Someone already messaged is left out for 7 days (quotes), 30 days (others)
 or 180 days after "no le interesa".
 
 Each card has a ready message (usted, signed by the sender) and, when the

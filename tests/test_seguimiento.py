@@ -125,6 +125,28 @@ def test_helpers():
     assert seguimiento._hello("VANESSA AGUILAR") == "Hola Vanessa, buen día."
 
 
+def test_nudged_quote_waits_a_week(db):
+    # Hernán 10/10: quotes he messaged on Monday came back on Saturday. A
+    # nudged quote stays off the list for 7 days, not 4.
+    _quote(
+        db,
+        "COT-IMPAG-110926DGO",
+        "Adriana",
+        days=20,
+        followup_count=1,
+        last_followup_at=NOW - timedelta(days=5),
+    )
+    _quote(
+        db,
+        "COT-IMPAG-120926DGO",
+        "Amelia Cano",
+        days=20,
+        followup_count=1,
+        last_followup_at=NOW - timedelta(days=8),
+    )
+    assert [c["customer_name"] for c in _todo(db)] == ["Amelia Cano"]
+
+
 def test_open_quotes_one_card_per_person(db):
     # A bulk load stamped last_followup_at without nudging: still due.
     _quote(

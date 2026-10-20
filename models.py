@@ -1189,9 +1189,9 @@ class Quote(Base):
     __tablename__ = "quote"
 
     id = Column(Integer, primary_key=True, index=True)
-    quote_number = Column(
-        String(20), unique=True, nullable=False
-    )  # Format: TEC-2026-0001
+    # Format: TEC-2026-0001 or COT-IMPAG-NNMMYY[EDO]; a folio reused for
+    # another customer gets a suffix (COT-IMPAG-320926CDMX-2).
+    quote_number = Column(String(30), unique=True, nullable=False)
 
     # Status: draft, sent, viewed, accepted, rejected, expired
     status = Column(String(20), nullable=False, default="draft")

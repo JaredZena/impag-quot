@@ -38,7 +38,7 @@ from services.whatsapp_drafter import draft_quote_followup
 
 # Tunables (env-overridable). Sensible defaults for a solo shop.
 STALE_DAYS = int(os.getenv("FOLLOWUP_STALE_DAYS", "3"))            # nudge N days after send
-REMINDER_INTERVAL_DAYS = int(os.getenv("FOLLOWUP_INTERVAL_DAYS", "4"))  # gap between nudges
+REMINDER_INTERVAL_DAYS = int(os.getenv("FOLLOWUP_INTERVAL_DAYS", "7"))  # gap between nudges (4 felt pushy to the team)
 MAX_FOLLOWUPS = int(os.getenv("FOLLOWUP_MAX", "3"))               # hard cap per quote
 DEAD_AFTER_DAYS = int(os.getenv("FOLLOWUP_DEAD_DAYS", "45"))      # stop; the lead is cold
 FOLLOWUP_CATEGORY_NAME = "Seguimiento a cotizaciones"
