@@ -109,6 +109,9 @@ class Product(Base):
     storefront_title = Column(
         String(200), nullable=True
     )  # Customer-facing name on todoparaelcampo.com.mx; NULL keeps the store's own title
+    storefront_description = Column(
+        Text, nullable=True
+    )  # "Especificaciones en la página": one page row per line (Título:, Clave: valor, - viñeta); NULL keeps the page's own description
     online_sale = Column(
         JSON, nullable=True
     )  # "Vender en línea" switch set in the admin; NULL = never configured (storefront sync uses its own config)

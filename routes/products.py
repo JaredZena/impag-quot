@@ -9,6 +9,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+import re
 from datetime import datetime, timezone
 from models import get_db, Product, Supplier, SupplierProduct, ProductUnit
 from services.price_calculator import (
@@ -47,6 +48,10 @@ class ProductCreate(ProductBase):
     pass
 
 
+# Longest store description today is under 2,000 characters.
+STOREFRONT_DESCRIPTION_MAX = 10000
+
+
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
@@ -63,6 +68,19 @@ class ProductUpdate(BaseModel):
     is_active: Optional[bool] = None
     archived_at: Optional[datetime] = None
     storefront_title: Optional[str] = None
+    # One row of the product page per line; see store_description().
+    storefront_description: Optional[str] = Field(
+        None, max_length=STOREFRONT_DESCRIPTION_MAX
+    )
+
+
+def store_description(value: str) -> Optional[str]:
+    """Normalize the "Especificaciones en la página" text: spaces collapsed
+    inside each line, at most one blank line in a row. Blank clears it so the
+    page keeps its own description."""
+    lines = [" ".join(line.split()) for line in value.splitlines()]
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    return text or None
 
 
 # "Vender en línea" switch for todoparaelcampo.com.mx. The storefront sync
@@ -812,6 +830,8 @@ def get_product(
         "stock": product.stock,
         "specifications": product.specifications,
         "images": presigned_image_urls(product.images),
+        "storefront_title": product.storefront_title,
+        "storefront_description": product.storefront_description,
         "online_sale": product.online_sale,
         "default_margin": (
             float(product.default_margin)
@@ -921,6 +941,8 @@ def update_product(
         if key == "storefront_title" and value is not None:
             # Blank clears the override so the store keeps its own title.
             value = " ".join(value.split())[:200] or None
+        if key == "storefront_description" and value is not None:
+            value = store_description(value)
         setattr(db_product, key, value)
 
     db.commit()
@@ -949,6 +971,7 @@ def update_product(
         "created_at": db_product.created_at,
         "last_updated": db_product.last_updated,
         "storefront_title": db_product.storefront_title,
+        "storefront_description": db_product.storefront_description,
         "online_sale": db_product.online_sale,
     }
     return {"success": True, "data": data, "error": None, "message": None}

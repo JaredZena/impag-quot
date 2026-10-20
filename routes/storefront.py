@@ -105,6 +105,9 @@ def get_storefront_products(
                 # Customer-facing title set by the team in the admin; the sync
                 # applies it only when non-empty.
                 "storefront_title": p.storefront_title,
+                # "Especificaciones en la página": page rows, one per line; the
+                # sync replaces the page's description only when non-empty.
+                "storefront_description": p.storefront_description,
                 "sku": p.sku,
                 # Manual price if set, else the cached calculated fallback —
                 # identical to legacy GET /products.
