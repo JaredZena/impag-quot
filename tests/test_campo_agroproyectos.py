@@ -1055,3 +1055,26 @@ def test_irrigation_design_only_sees_irrigation_categories():
         "cintilla",
         "bomba-solar",
     ]
+
+
+def test_plan_is_saved_when_the_connection_drops_during_the_ai_call(
+    plan_claude, monkeypatch
+):
+    """Neon closes a connection held idle through a long Claude call (apoyos
+    run 1, 2026-10-22). The job must drop it before writing the plan."""
+    released = []
+    real = background.after_ai_call
+
+    def spy(db):
+        released.append(list(plan_claude))
+        db.connection().invalidate()
+        real(db)
+
+    monkeypatch.setattr(background, "after_ai_call", spy)
+    token = _create()["token"]
+    r = client.post(f"/storefront/agro-projects/{token}/plan", json={}, headers=HEADERS)
+    assert r.status_code == 202, r.text
+    assert released == [["agroproyectos.plan"]]  # after the AI call
+    project = _get(token)
+    assert project["status"] == "plan_ready" and project["plan"]["title"]
+    assert project["generating"] is None

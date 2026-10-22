@@ -20,6 +20,7 @@ import os
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from models import SessionLocal
@@ -57,6 +58,26 @@ def submit(name: str, job: Callable[[Session], None]) -> Future:
             db.close()
 
     return _pool().submit(runner)
+
+
+def after_ai_call(db: Session) -> None:
+    """Call right after a long AI call, before the job writes anything.
+
+    The job's reads open a transaction that holds a pooled connection for the
+    whole Claude call (minutes with web search), and Neon closes it in the
+    meantime ("SSL connection has been closed unexpectedly", apoyos run 1 on
+    2026-10-22: 4 of 18 topics lost). Ending the read-only transaction here
+    drops that connection, and the next query checks out a fresh one
+    (pool_pre_ping). Loaded objects stay in the session and reload on access.
+    Only for sessions with no pending writes: the rollback discards them.
+    """
+    try:
+        db.rollback()
+    except DBAPIError as exc:
+        # The connection was already dead: SQLAlchemy invalidates it, raises
+        # once, and leaves the session clean for the writes that follow.
+        if not exc.connection_invalidated:
+            raise
 
 
 def set_sync_for_tests(enabled: bool) -> None:

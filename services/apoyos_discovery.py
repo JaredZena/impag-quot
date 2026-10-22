@@ -31,6 +31,7 @@ from html import escape
 from urllib.parse import urlparse
 
 from sqlalchemy import func
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -556,6 +557,10 @@ def _merge_programs(
             continue
         try:
             apoyo, is_new = _merge_one(db, run, p, settings, now)
+        except SQLAlchemyError:
+            # The session needs a rollback now, so every later program would
+            # fail too: fail the topic with this error instead.
+            raise
         except Exception:
             logger.exception("apoyos run %s: could not merge a program", run.id)
             continue
@@ -703,6 +708,7 @@ def _run_discovery_topic(
         started=time.monotonic(),
         save_tool="guardar_programas",
     )
+    background.after_ai_call(db)
 
     data = ai_usage.tool_input(response, "guardar_programas") or {"programas": []}
     programs = [p for p in (data.get("programas") or []) if isinstance(p, dict)]
@@ -775,6 +781,7 @@ def _run_recheck_topic(
         started=time.monotonic(),
         save_tool="guardar_verificaciones",
     )
+    background.after_ai_call(db)
 
     data = ai_usage.tool_input(response, "guardar_verificaciones") or {
         "verificaciones": []
@@ -989,7 +996,9 @@ def _process_topic_job(run_id: int, topic_key: str, settings: ApoyosSettings):
             topic.update(result)
             topic["status"] = "done"
         except Exception as exc:
-            db.rollback()
+            # A plain rollback() raises on a dead connection, and the topic
+            # was then never marked (estado:coahuila "stalled", run 1).
+            background.after_ai_call(db)
             logger.exception("apoyos run %s topic %s failed", run_id, topic_key)
             run = db.get(ApoyoRun, run_id)
             if run is None:

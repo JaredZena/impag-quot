@@ -1182,3 +1182,70 @@ def test_tick_resumes_a_running_run_instead_of_starting_another():
         assert db.query(ApoyoRun).count() == 1
     finally:
         db.close()
+
+
+def _drop_connection_then_release(calls):
+    """Stands in for background.after_ai_call: first invalidates the job
+    session's connection, as Neon closing it during a long Claude call does
+    (apoyos run 1, 2026-10-22), then runs the real helper."""
+    real = background.after_ai_call
+
+    def spy(db):
+        calls.append("release")
+        db.connection().invalidate()
+        real(db)
+
+    return spy
+
+
+def test_topic_is_saved_when_the_connection_drops_during_the_ai_call(
+    claude, monkeypatch
+):
+    calls: list[str] = []
+    monkeypatch.setattr(
+        background, "after_ai_call", _drop_connection_then_release(calls)
+    )
+    db = db_session()
+    try:
+        run = ApoyoRun(
+            trigger="manual",
+            status="running",
+            topics=[_topic("estado:durango")],
+            started_at=datetime.now(timezone.utc),
+        )
+        db.add(run)
+        db.commit()
+        claude.queue = [{"programas": [_program()]}]
+        apoyos_discovery.step(db, run.id)
+        db.expire_all()
+        assert apoyos_discovery.step(db, run.id)["done"] is True
+        db.refresh(run)
+        assert calls == ["release"]
+        assert run.topics[0]["status"] == "done", run.topics[0]
+        assert run.topics[0]["new"] == 1
+        assert db.query(Apoyo).count() == 1
+    finally:
+        db.close()
+
+
+def test_after_ai_call_tolerates_only_a_dropped_connection():
+    from sqlalchemy.exc import OperationalError
+
+    class FakeSession:
+        def __init__(self, exc):
+            self.exc = exc
+
+        def rollback(self):
+            raise self.exc
+
+    dropped = OperationalError(
+        "ROLLBACK",
+        {},
+        Exception("SSL connection has been closed unexpectedly"),
+        connection_invalidated=True,
+    )
+    background.after_ai_call(FakeSession(dropped))  # swallowed
+
+    other = OperationalError("ROLLBACK", {}, Exception("disk full"))
+    with pytest.raises(OperationalError):
+        background.after_ai_call(FakeSession(other))

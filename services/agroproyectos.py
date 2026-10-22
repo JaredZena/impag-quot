@@ -689,8 +689,10 @@ def _execute_plan(db: Session, project: AgroProject, settings: AgroSettings) -> 
     try:
         response = agroproyectos_ai.generate_plan(project, settings)
     except AIUnavailable as exc:
+        background.after_ai_call(db)
         _fail_step(db, project, exc.reason)
         return
+    background.after_ai_call(db)
     data = ai_usage.json_output(response)
     cost = ai_usage.response_cost(response, settings.model)
     duration_ms = int((time.monotonic() - started) * 1000)
@@ -745,8 +747,10 @@ def _execute_productos(
     try:
         response = agroproyectos_ai.generate_productos(project, settings, candidates)
     except AIUnavailable as exc:
+        background.after_ai_call(db)
         _fail_step(db, project, exc.reason)
         return
+    background.after_ai_call(db)
     data = ai_usage.json_output(response)
     cost = ai_usage.response_cost(response, settings.model)
     duration_ms = int((time.monotonic() - started) * 1000)
@@ -806,8 +810,10 @@ def _execute_riego(
     try:
         response = agroproyectos_ai.generate_riego(project, settings, candidates)
     except AIUnavailable as exc:
+        background.after_ai_call(db)
         _fail_step(db, project, exc.reason)
         return
+    background.after_ai_call(db)
     data = ai_usage.json_output(response)
     cost = ai_usage.response_cost(response, settings.model)
     duration_ms = int((time.monotonic() - started) * 1000)
