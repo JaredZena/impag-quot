@@ -55,7 +55,9 @@ from services.web_orders import _notify_emails
 
 logger = logging.getLogger(__name__)
 
-STALE_RUN_HOURS = 3  # tick(): a run with no topic activity this old is stalled
+# tick(): a run with no topic activity this long was abandoned (it is resumed
+# before that: the daily cron comes back within a day).
+STALE_RUN_HOURS = 36
 # step(): a topic still "running" this old was lost to a deploy/crash. Above
 # the worst case of one topic (TOPIC_BUDGET_SECONDS plus a last call that
 # started just before it ran out), so a slow topic is never run twice.
@@ -859,7 +861,12 @@ def _last_topic_activity(run: ApoyoRun) -> datetime | None:
 
 
 def tick(db: Session) -> dict:
-    running = db.query(ApoyoRun).filter(ApoyoRun.status == "running").all()
+    running = (
+        db.query(ApoyoRun)
+        .filter(ApoyoRun.status == "running")
+        .order_by(ApoyoRun.created_at.asc())
+        .all()
+    )
     now = _now()
     stalled = [
         r
@@ -872,6 +879,12 @@ def tick(db: Session) -> dict:
         run.finished_at = now
     if stalled:
         db.commit()
+    # A run the workflow stopped driving (its loop has a time cap; a big run
+    # can outlast it) is picked up again rather than started over, so two
+    # runs never search side by side.
+    live = [r for r in running if r not in stalled]
+    if live:
+        return {"due": True, "run_id": live[0].id, "reason": "resume"}
 
     queued = (
         db.query(ApoyoRun)

@@ -533,7 +533,8 @@ def test_tick_recovers_stalled_run():
             trigger="schedule",
             status="running",
             topics=[],
-            started_at=datetime.now(timezone.utc) - timedelta(hours=4),
+            started_at=datetime.now(timezone.utc)
+            - timedelta(hours=apoyos_discovery.STALE_RUN_HOURS + 1),
         )
         db.add(stalled)
         db.commit()
@@ -1158,5 +1159,26 @@ def test_slug_is_short_and_readable():
         ) == ("produccion-para-el-bienestar-2026")
         long = apoyos.generate_slug(db, "Apoyo " * 40, None, None)
         assert len(long) <= apoyos.SLUG_MAX and not long.endswith("-")
+    finally:
+        db.close()
+
+
+def test_tick_resumes_a_running_run_instead_of_starting_another():
+    db = db_session()
+    try:
+        live = ApoyoRun(
+            trigger="schedule",
+            status="running",
+            topics=[_topic("estado:durango", status="done"), _topic("estado:sinaloa")],
+            started_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        )
+        db.add(live)
+        db.commit()
+        assert apoyos_discovery.tick(db) == {
+            "due": True,
+            "run_id": live.id,
+            "reason": "resume",
+        }
+        assert db.query(ApoyoRun).count() == 1
     finally:
         db.close()
