@@ -50,7 +50,7 @@ def submit(name: str, job: Callable[[Session], None]) -> Future:
         db = SessionLocal()
         try:
             job(db)
-        except Exception:  # noqa: BLE001 — a worker thread must never die silently
+        except Exception:
             db.rollback()
             logger.exception("background job %s failed", name)
         finally:
