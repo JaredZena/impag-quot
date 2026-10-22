@@ -101,7 +101,7 @@ class ApoyosSettings(BaseModel):
     max_searches_per_topic: int = Field(default=5, ge=1, le=10)
     max_fetches_per_topic: int = Field(default=4, ge=0, le=10)
     max_programs_per_topic: int = Field(default=8, ge=1, le=15)
-    monthly_budget_usd: float = Field(default=40, ge=0, le=1000)
+    monthly_budget_usd: float = Field(default=60, ge=0, le=1000)
     recheck_days: int = Field(default=14, ge=1, le=90)
     keep_closed_days: int = Field(default=60, ge=0, le=365)
     notify_emails: list[str] = Field(default_factory=list, max_length=50)
