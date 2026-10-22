@@ -764,7 +764,8 @@ def test_step_recovers_a_stale_running_topic_and_starts_the_next_one(claude):
                 "estado:durango",
                 status="running",
                 started_at=(
-                    datetime.now(timezone.utc) - timedelta(minutes=10)
+                    datetime.now(timezone.utc)
+                    - timedelta(minutes=apoyos_discovery.STALE_TOPIC_MINUTES + 1)
                 ).isoformat(),
             ),
             _topic("estado:zacatecas"),
@@ -1060,3 +1061,50 @@ def test_site_status_reads_latest_workflow_run(monkeypatch):
     r = client.get("/apoyos/site/status")
     assert r.status_code == 200
     assert r.json()["data"]["conclusion"] == "success"
+
+
+def test_discovery_asks_for_the_save_tool_when_the_model_only_writes_text(monkeypatch):
+    """A turn that ends with a written summary (no guardar_programas call)
+    gets one follow-up asking for the call, so the topic's research is kept."""
+    calls: list[dict] = []
+
+    def fake(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            content = [SimpleNamespace(type="text", text="Encontré un programa…")]
+            stop = "end_turn"
+        else:
+            content = [
+                SimpleNamespace(
+                    type="tool_use",
+                    name="guardar_programas",
+                    input={"programas": [_program()]},
+                )
+            ]
+            stop = "tool_use"
+        return SimpleNamespace(
+            content=content,
+            stop_reason=stop,
+            usage=SimpleNamespace(input_tokens=10, output_tokens=10),
+            model=kwargs["model"],
+        )
+
+    monkeypatch.setattr(ai_usage, "create_message", fake)
+    db = db_session()
+    try:
+        settings = app_settings.read(db, "apoyos", apoyos.ApoyosSettings)
+        run = ApoyoRun(trigger="manual", status="running", topics=[])
+        db.add(run)
+        db.commit()
+        topic = {
+            "key": "estado:durango",
+            "label": "Estado · Durango",
+            "query": "apoyos durango",
+            "kind": "estado",
+        }
+        result = apoyos_discovery._run_discovery_topic(db, run, topic, settings)
+        assert len(calls) == 2
+        assert "guardar_programas" in calls[1]["messages"][-1]["content"]
+        assert result["found"] == 1 and result["new"] == 1
+    finally:
+        db.close()

@@ -56,13 +56,14 @@ from services.web_orders import _notify_emails
 logger = logging.getLogger(__name__)
 
 STALE_RUN_HOURS = 3  # tick(): a run with no topic activity this old is stalled
-STALE_TOPIC_MINUTES = (
-    6  # step(): a topic still "running" this old was lost to a deploy/crash
-)
-TOPIC_BUDGET_SECONDS = 240.0  # per topic, across pause_turn continuations
-PER_CALL_TIMEOUT_SECONDS = (
-    110.0  # one create_message call, now off the HTTP request path
-)
+# step(): a topic still "running" this old was lost to a deploy/crash. Above
+# the worst case of one topic (TOPIC_BUDGET_SECONDS plus a last call that
+# started just before it ran out), so a slow topic is never run twice.
+STALE_TOPIC_MINUTES = 12
+TOPIC_BUDGET_SECONDS = 300.0  # per topic, across pause_turn continuations
+# One create_message call, off the HTTP request path. A single call with
+# several web searches has taken 140-190 s; give it room rather than lose it.
+PER_CALL_TIMEOUT_SECONDS = 300.0
 MAX_CONTINUATIONS = 3
 RECHECK_BATCH = 6
 DEFAULT_ADMIN_URL = "https://impag-admin-app.vercel.app"
@@ -577,6 +578,7 @@ def _continue_until_tool(
     max_tokens: int,
     ref_id: int,
     started: float,
+    save_tool: str,
 ):
     """Run create_message, resuming pause_turn stops (a long server-tool loop)
     within the topic's total budget, up to MAX_CONTINUATIONS times. Now off
@@ -631,6 +633,40 @@ def _continue_until_tool(
         web_searches += ai_usage.tokens_of(response.usage).web_searches
         cost += ai_usage.response_cost(response, settings.model)
         continuations += 1
+
+    # The model sometimes ends its turn with a written summary instead of the
+    # save tool; one short follow-up asks for the call, so a topic's research
+    # is not thrown away.
+    if (
+        response.stop_reason == "end_turn"
+        and ai_usage.tool_input(response, save_tool) is None
+        and (time.monotonic() - started) < TOPIC_BUDGET_SECONDS
+    ):
+        messages.append({"role": "assistant", "content": response.content})
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    f"Ahora llama a {save_tool} con lo que encontraste "
+                    "(una lista vacía si no encontraste nada). No busques más."
+                ),
+            }
+        )
+        response = ai_usage.create_message(
+            feature=feature,
+            model=settings.model,
+            messages=messages,
+            max_tokens=max_tokens,
+            timeout=PER_CALL_TIMEOUT_SECONDS,
+            effort=settings.effort,
+            system=system,
+            tools=tools,
+            ref_type="apoyo_run",
+            ref_id=ref_id,
+            allow_pause=True,
+        )
+        web_searches += ai_usage.tokens_of(response.usage).web_searches
+        cost += ai_usage.response_cost(response, settings.model)
     return response, web_searches, cost
 
 
@@ -663,6 +699,7 @@ def _run_discovery_topic(
         max_tokens=16000,
         ref_id=run.id,
         started=time.monotonic(),
+        save_tool="guardar_programas",
     )
 
     data = ai_usage.tool_input(response, "guardar_programas") or {"programas": []}
@@ -734,6 +771,7 @@ def _run_recheck_topic(
         max_tokens=8000,
         ref_id=run.id,
         started=time.monotonic(),
+        save_tool="guardar_verificaciones",
     )
 
     data = ai_usage.tool_input(response, "guardar_verificaciones") or {
@@ -754,7 +792,14 @@ def _run_recheck_topic(
             continue
         changed = False
         if v.get("still_open") is False:
-            new_close = _parse_date(v.get("closes_at")) or r.closes_at or now.date()
+            # No date in the source: yesterday, so the site shows it as
+            # Cerrada at once (closes_at is the last day it is open).
+            new_close = _parse_date(v.get("closes_at"))
+            if new_close is None:
+                yesterday = today - timedelta(days=1)
+                new_close = (
+                    r.closes_at if r.closes_at and r.closes_at < today else yesterday
+                )
             if r.closes_at != new_close:
                 r.closes_at = new_close
                 changed = True
