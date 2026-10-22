@@ -165,3 +165,43 @@ StoreCategorySlug = Literal[
 def options(labels: dict[str, str]) -> list[dict]:
     """[{value, label}] for admin selects."""
     return [{"value": k, "label": v} for k, v in labels.items()]
+
+
+# ── window status of an apoyo (same rule in the storefront and the admin) ────
+
+WINDOW_LABELS: dict[str, str] = {
+    "abierta": "Abierta",
+    "proxima": "Próximamente",
+    "permanente": "Todo el año",
+    "cerrada": "Cerrada",
+    "sin-fecha": "Fecha por confirmar",
+}
+WINDOW_ORDER = ["abierta", "proxima", "permanente", "sin-fecha", "cerrada"]
+
+
+def today_mx():
+    """Today's date in Mexico (America/Mexico_City), the date windows use."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    return datetime.now(ZoneInfo("America/Mexico_City")).date()
+
+
+def window_of(opens_at, closes_at, permanent: bool, today=None) -> str:
+    """cerrada > proxima > permanente > abierta > sin-fecha (dates are datetime.date or None)."""
+    today = today or today_mx()
+    if closes_at is not None and closes_at < today:
+        return "cerrada"
+    if opens_at is not None and opens_at > today:
+        return "proxima"
+    if permanent:
+        return "permanente"
+    if closes_at is not None:
+        return "abierta"
+    return "sin-fecha"
+
+
+def days_left(closes_at, today=None) -> int | None:
+    if closes_at is None:
+        return None
+    return (closes_at - (today or today_mx())).days
