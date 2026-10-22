@@ -8,8 +8,10 @@
     Filled by POST /jobs/google-metrics-sync (services/business_metrics.py).
   - ventas: this month so far vs the same days of last month (sale ledger).
   - tienda: todoparaelcampo.com.mx in the last 28 days vs the 28 before:
-    visits and WhatsApp clicks (Umami rows, complete days only) and the web
-    quotes / paid web orders the storefront recorded (created_by tienda-web).
+    visits and WhatsApp clicks (GA4 rows, complete days only; GA4 started
+    2026-10-22, so first_day says how much history there is and a window
+    with missing days compares to nothing) and the web quotes / paid web
+    orders the storefront recorded (created_by tienda-web).
   What clients owe and open quotes are already on /hoy (GET /hoy,
   /quotes/pipeline-summary), so they are not repeated here.
   - is_owner: owners also load /finance/dashboard (punto de equilibrio,
@@ -171,7 +173,7 @@ def _ventas(db: Session, today: date) -> dict:
 def _tienda(db: Session, today: date) -> dict:
     daily = defaultdict(dict)
     for r in db.query(BusinessMetric).filter(
-        BusinessMetric.source == "umami",
+        BusinessMetric.source == "ga4",
         BusinessMetric.period == "day",
         BusinessMetric.period_start >= today - timedelta(days=120),
     ):
@@ -179,12 +181,15 @@ def _tienda(db: Session, today: date) -> dict:
     # Today is still running: windows end on the last complete day.
     days = sorted(d for d in daily if d < today)
     last_day = days[-1] if days else None
+    first_day = days[0] if days else None
 
     def window(metric: str, offset: int) -> float | None:
         if last_day is None:
             return None
         hi = last_day - timedelta(days=offset)
         lo = hi - timedelta(days=27)
+        if offset and first_day > lo:
+            return None  # GA4 wasn't running for all of it: nothing to compare
         return sum(daily[d].get(metric, 0) for d in days if lo <= d <= hi)
 
     def web(lo_days: int, hi_days: int, paid: bool = False) -> tuple[int, float]:
@@ -215,10 +220,11 @@ def _tienda(db: Session, today: date) -> dict:
     )
     return {
         "last_day": last_day.isoformat() if last_day else None,
+        "first_day": first_day.isoformat() if first_day else None,
         "visits_28d": window("visits", 0),
         "visits_prev_28d": window("visits", 28),
-        "whatsapp_28d": window("whatsapp-click", 0),
-        "whatsapp_prev_28d": window("whatsapp-click", 28),
+        "whatsapp_28d": window("whatsapp_click", 0),
+        "whatsapp_prev_28d": window("whatsapp_click", 28),
         "series": [
             {"day": d.isoformat(), "visits": daily[d].get("visits", 0)}
             for d in days[-91:]

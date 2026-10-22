@@ -9,16 +9,17 @@ Where each number comes from, until Google approves the Business Profile API:
 - Search Console: clicks and impressions per day for todoparaelcampo.com.mx
   (searchanalytics API, ~2–3 days behind).
 
-All three read with one OAuth refresh token of impagtodoparaelcampo@gmail.com
-(scopes gmail.readonly + webmasters.readonly): GOOGLE_METRICS_REFRESH_TOKEN,
+All of them read with one OAuth refresh token of impagtodoparaelcampo@gmail.com
+(scopes gmail.readonly + webmasters.readonly + analytics.readonly): GOOGLE_METRICS_REFRESH_TOKEN,
 minted with GOOGLE_METRICS_CLIENT_ID/SECRET (falls back to
 GOOGLE_OAUTH_CLIENT_ID/SECRET). Each part fails on its own, so a missing
 Search Console scope never blocks the Business Profile numbers.
 
-The store's traffic comes from Umami Cloud (todoparaelcampo.com.mx): visits
-and pageviews per day plus every tracked event per day (whatsapp-click,
-quote-add, buy-click, ...), read with UMAMI_API_KEY (Umami → Settings → API
-keys). Unset = that part is skipped, not an error.
+The store's traffic comes from Google Analytics 4 (property GA4_PROPERTY_ID,
+stream "Tienda" on todoparaelcampo.com.mx, live since 2026-10-22): sessions,
+users and page views per day plus every event per day (whatsapp_click,
+quote_add, buy_click, ...), read with the same token (analytics.readonly).
+Umami Cloud's free plan has no API, so it is not read here.
 
 Rows land in business_metric (models.BusinessMetric), upserted, so the daily
 job (POST /jobs/google-metrics-sync) can re-read everything safely.
@@ -43,9 +44,13 @@ GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me"
 GSC = "https://searchconsole.googleapis.com/webmasters/v3"
 GBP_SENDER = "businessprofile-noreply@google.com"
 SITE_HINT = "todoparaelcampo"
-UMAMI_API = "https://api.umami.is/v1"
-UMAMI_WEBSITE_ID = "98e9eb72-3cf3-43e6-96cb-6b0a1b8d65ac"  # storefront index.html
-UMAMI_TZ = "America/Mexico_City"
+GA4_DATA = "https://analyticsdata.googleapis.com/v1beta"
+GA4_PROPERTY_ID = "560374705"  # account IMPAG 413131302, stream "Tienda"
+GA4_DAY_METRICS = {
+    "sessions": "visits",
+    "activeUsers": "users",
+    "screenPageViews": "pageviews",
+}
 
 MONTHS_ES = {
     "enero": 1,
@@ -317,76 +322,85 @@ def sync_search_console(db: Session, token: str, days: int = 120) -> dict:
     }
 
 
-# ── Umami (store traffic) ────────────────────────────────────────────────────
+# ── Google Analytics 4 (store traffic) ──────────────────────────────────────
 
 
-def _series_day(x) -> date:
-    """Umami series points carry "2026-10-01 00:00:00" (already in the
-    requested timezone) or an ISO timestamp; the day is the first 10 chars."""
-    return date.fromisoformat(str(x)[:10])
+def _ga4_day(value: str) -> date:
+    return date(int(value[:4]), int(value[4:6]), int(value[6:8]))  # "20261022"
 
 
-def parse_umami_pageviews(data: dict) -> dict[date, dict[str, float]]:
-    """/pageviews?unit=day → {day: {"pageviews": n, "visits": n}}."""
+def parse_ga4_days(report: dict) -> dict[date, dict[str, float]]:
+    """runReport by date with GA4_DAY_METRICS → {day: {"visits": n, ...}}."""
+    names = [
+        GA4_DAY_METRICS.get(h["name"], h["name"])
+        for h in report.get("metricHeaders", [])
+    ]
     out: dict[date, dict[str, float]] = {}
-    for key, metric in (("pageviews", "pageviews"), ("sessions", "visits")):
-        for point in (data or {}).get(key) or []:
-            out.setdefault(_series_day(point["x"]), {})[metric] = point.get("y", 0)
+    for row in report.get("rows", []):
+        day = _ga4_day(row["dimensionValues"][0]["value"])
+        out[day] = {
+            name: float(v["value"]) for name, v in zip(names, row["metricValues"])
+        }
     return out
 
 
-def parse_umami_events(data) -> dict[date, dict[str, float]]:
-    """/events/series?unit=day → {day: {event_name: n}}."""
-    rows = data.get("data", data) if isinstance(data, dict) else data
+def parse_ga4_events(report: dict) -> dict[date, dict[str, float]]:
+    """runReport by date + eventName with eventCount → {day: {event: n}}."""
     out: dict[date, dict[str, float]] = {}
-    for point in rows or []:
-        name, when = point.get("x"), point.get("t")
-        if not name or not when:
-            continue
-        day = out.setdefault(_series_day(when), {})
-        day[str(name)[:40]] = day.get(str(name)[:40], 0) + point.get("y", 0)
+    for row in report.get("rows", []):
+        day_value, event = (d["value"] for d in row["dimensionValues"])
+        out.setdefault(_ga4_day(day_value), {})[event[:40]] = float(
+            row["metricValues"][0]["value"]
+        )
     return out
 
 
-def _umami_get(path: str, key: str, **params):
-    resp = requests.get(
-        f"{os.getenv('UMAMI_API_BASE', UMAMI_API)}{path}",
-        headers={"x-umami-api-key": key, "Accept": "application/json"},
-        params=params,
+def _ga4_report(token: str, property_id: str, body: dict) -> dict:
+    resp = requests.post(
+        f"{GA4_DATA}/properties/{property_id}:runReport",
+        headers={"Authorization": f"Bearer {token}"},
+        json=body,
         timeout=TIMEOUT,
     )
     resp.raise_for_status()
     return resp.json()
 
 
-def sync_umami(db: Session, days: int = 120) -> dict:
-    key = os.getenv("UMAMI_API_KEY")
-    if not key:
-        return {"skipped": "Falta UMAMI_API_KEY"}
-    site = os.getenv("UMAMI_WEBSITE_ID", UMAMI_WEBSITE_ID)
-    now = datetime.now(BUSINESS_TZ)
-    start = datetime.combine(
-        now.date() - timedelta(days=days), datetime.min.time(), tzinfo=BUSINESS_TZ
+def sync_ga4(db: Session, token: str, days: int = 120) -> dict:
+    property_id = os.getenv("GA4_PROPERTY_ID", GA4_PROPERTY_ID)
+    window = [{"startDate": f"{days}daysAgo", "endDate": "today"}]
+    daily = parse_ga4_days(
+        _ga4_report(
+            token,
+            property_id,
+            {
+                "dateRanges": window,
+                "dimensions": [{"name": "date"}],
+                "metrics": [{"name": m} for m in GA4_DAY_METRICS],
+                "limit": days + 5,
+            },
+        )
     )
-    window = {
-        "startAt": int(start.timestamp() * 1000),
-        "endAt": int(now.timestamp() * 1000),
-        "unit": "day",
-        "timezone": UMAMI_TZ,
-    }
-    daily = parse_umami_pageviews(
-        _umami_get(f"/websites/{site}/pageviews", key, **window)
-    )
-    for day, events in parse_umami_events(
-        _umami_get(f"/websites/{site}/events/series", key, **window)
+    for day, events in parse_ga4_events(
+        _ga4_report(
+            token,
+            property_id,
+            {
+                "dateRanges": window,
+                "dimensions": [{"name": "date"}, {"name": "eventName"}],
+                "metrics": [{"name": "eventCount"}],
+                "limit": 10000,
+            },
+        )
     ).items():
         daily.setdefault(day, {}).update(events)
 
     counts = {"new": 0, "updated": 0, "same": 0}
     for day, metrics in daily.items():
         for metric, value in metrics.items():
-            counts[_upsert(db, "umami", metric, "day", day, value)] += 1
+            counts[_upsert(db, "ga4", metric, "day", day, value)] += 1
     return {
+        "property": property_id,
         "days": len(daily),
         "latest_day": max(daily).isoformat() if daily else None,
         **counts,
@@ -394,23 +408,17 @@ def sync_umami(db: Session, days: int = 120) -> dict:
 
 
 def sync_google_metrics(db: Session, dry_run: bool = False) -> dict:
-    """Google (Business Profile + Search Console) and Umami, each on its own:
-    one part failing or unconfigured never blocks the others."""
+    """Business Profile, Search Console and GA4, each on its own: one part
+    failing never blocks the others."""
     result = {"dry_run": dry_run}
-    try:
-        token, google_error = get_metrics_access_token(), None
-    except (RuntimeError, requests.RequestException) as e:
-        token, google_error = None, str(e)[:300]
+    token = get_metrics_access_token()
     for name, fn in (
-        ("business_profile", lambda: sync_business_profile(db, token)),
-        ("search_console", lambda: sync_search_console(db, token)),
-        ("umami", lambda: sync_umami(db)),
+        ("business_profile", sync_business_profile),
+        ("search_console", sync_search_console),
+        ("analytics", sync_ga4),
     ):
-        if name != "umami" and token is None:
-            result[name] = {"error": google_error}
-            continue
         try:
-            result[name] = fn()
+            result[name] = fn(db, token)
         except (RuntimeError, requests.RequestException, KeyError, ValueError) as e:
             db.rollback()
             result[name] = {"error": str(e)[:300]}

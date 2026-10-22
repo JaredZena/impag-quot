@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from models import get_db
 from services.bombeo_sheet_sync import sync_bombeo_sheet
-from services.business_metrics import sync_google_metrics
+from services.business_metrics import MetricsNotConfigured, sync_google_metrics
 from services.quote_followup import sweep_stale_quotes
 from services.supplier_price_sync import sync_supplier_prices
 from services.tool_sheet_sync import sync_tools
@@ -93,6 +93,11 @@ def run_bombeo_sheet_sync(dry_run: bool = False, db: Session = Depends(get_db)):
 @router.post("/google-metrics-sync", dependencies=[Depends(verify_job_token)])
 def run_google_metrics_sync(dry_run: bool = False, db: Session = Depends(get_db)):
     """Business Profile reports + reviews (Gmail), Search Console clicks and
-    Umami store traffic into business_metric, for «Cómo vamos» on /hoy. Each
+    GA4 store traffic into business_metric, for «Cómo vamos» on /hoy. Each
     part reports its own error in the body instead of failing the job."""
-    return sync_google_metrics(db, dry_run=dry_run)
+    try:
+        return sync_google_metrics(db, dry_run=dry_run)
+    except MetricsNotConfigured as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except (RuntimeError, requests.RequestException) as e:
+        raise HTTPException(status_code=502, detail=str(e)[:300])

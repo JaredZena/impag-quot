@@ -187,6 +187,7 @@ def test_sync_google_metrics_keeps_profile_when_search_console_fails(db, monkeyp
         raise RuntimeError("insufficient scope")
 
     monkeypatch.setattr(bm, "sync_search_console", boom)
+    monkeypatch.setattr(bm, "sync_ga4", lambda db, token: {"days": 0})
     result = bm.sync_google_metrics(db)
     assert result["business_profile"] == {"months": 1}
     assert "insufficient scope" in result["search_console"]["error"]
@@ -206,6 +207,7 @@ def test_dry_run_writes_nothing(db, monkeypatch):
         },
     )
     monkeypatch.setattr(bm, "sync_search_console", lambda db, token: {"days": 0})
+    monkeypatch.setattr(bm, "sync_ga4", lambda db, token: {"days": 0})
     result = bm.sync_google_metrics(db, dry_run=True)
     assert result["business_profile"]["new"] == 6
     assert db.query(BusinessMetric).count() == 0
@@ -322,69 +324,63 @@ def test_finance_router_is_owners_only():
     assert auth.require_owner in deps
 
 
-# ── Umami + tienda ───────────────────────────────────────────────────────────
+# ── GA4 + tienda ─────────────────────────────────────────────────────────────
 
-PAGEVIEWS = {
-    "pageviews": [
-        {"x": "2026-10-20 00:00:00", "y": 40},
-        {"x": "2026-10-21 00:00:00", "y": 50},
+GA4_DAYS = {
+    "dimensionHeaders": [{"name": "date"}],
+    "metricHeaders": [
+        {"name": "sessions", "type": "TYPE_INTEGER"},
+        {"name": "activeUsers", "type": "TYPE_INTEGER"},
+        {"name": "screenPageViews", "type": "TYPE_INTEGER"},
     ],
-    "sessions": [
-        {"x": "2026-10-20 00:00:00", "y": 12},
-        {"x": "2026-10-21T00:00:00Z", "y": 15},
+    "rows": [
+        {
+            "dimensionValues": [{"value": "20261020"}],
+            "metricValues": [{"value": "12"}, {"value": "10"}, {"value": "40"}],
+        },
+        {
+            "dimensionValues": [{"value": "20261021"}],
+            "metricValues": [{"value": "15"}, {"value": "11"}, {"value": "50"}],
+        },
     ],
 }
-EVENTS = [
-    {"x": "whatsapp-click", "t": "2026-10-20 00:00:00", "y": 2},
-    {"x": "quote-add", "t": "2026-10-21 00:00:00", "y": 1},
-    {"x": "whatsapp-click", "t": "2026-10-21 00:00:00", "y": 3},
-]
+GA4_EVENTS = {
+    "rows": [
+        {
+            "dimensionValues": [{"value": "20261020"}, {"value": "whatsapp_click"}],
+            "metricValues": [{"value": "2"}],
+        },
+        {
+            "dimensionValues": [{"value": "20261021"}, {"value": "page_view"}],
+            "metricValues": [{"value": "50"}],
+        },
+    ]
+}
 
 
-def test_parse_umami_series():
-    pv = bm.parse_umami_pageviews(PAGEVIEWS)
-    assert pv[date(2026, 10, 20)] == {"pageviews": 40, "visits": 12}
-    assert pv[date(2026, 10, 21)]["visits"] == 15
-    ev = bm.parse_umami_events(EVENTS)
-    assert ev[date(2026, 10, 21)] == {"quote-add": 1, "whatsapp-click": 3}
-    assert bm.parse_umami_events({"data": EVENTS})[date(2026, 10, 20)] == {
-        "whatsapp-click": 2
-    }
-    assert bm.parse_umami_events([]) == {}
+def test_parse_ga4_reports():
+    days = bm.parse_ga4_days(GA4_DAYS)
+    assert days[date(2026, 10, 20)] == {"visits": 12, "users": 10, "pageviews": 40}
+    events = bm.parse_ga4_events(GA4_EVENTS)
+    assert events[date(2026, 10, 20)] == {"whatsapp_click": 2}
+    assert bm.parse_ga4_days({}) == {} and bm.parse_ga4_events({}) == {}
 
 
-def test_sync_umami_skips_without_key(db, monkeypatch):
-    monkeypatch.delenv("UMAMI_API_KEY", raising=False)
-    assert "skipped" in bm.sync_umami(db)
+def test_sync_ga4_upserts(db, monkeypatch):
+    bodies = []
 
+    def fake_report(token, property_id, body):
+        bodies.append((property_id, [d["name"] for d in body["dimensions"]]))
+        return GA4_DAYS if len(body["dimensions"]) == 1 else GA4_EVENTS
 
-def test_sync_umami_upserts(db, monkeypatch):
-    monkeypatch.setenv("UMAMI_API_KEY", "k")
-    calls = []
-
-    def fake_get(path, key, **params):
-        calls.append((path, key, params["unit"], params["timezone"]))
-        return PAGEVIEWS if path.endswith("/pageviews") else EVENTS
-
-    monkeypatch.setattr(bm, "_umami_get", fake_get)
-    first = bm.sync_umami(db)
+    monkeypatch.setattr(bm, "_ga4_report", fake_report)
+    first = bm.sync_ga4(db, "tok")
     db.commit()
     assert first["days"] == 2 and first["latest_day"] == "2026-10-21"
-    assert first["new"] == 2 + 2 + 3  # pageviews+visits ×2 days, 3 event cells
-    assert bm.sync_umami(db)["new"] == 0
-    assert calls[0][1:] == ("k", "day", "America/Mexico_City")
-
-
-def test_google_unconfigured_still_runs_umami(db, monkeypatch):
-    def unconfigured():
-        raise bm.MetricsNotConfigured("Falta GOOGLE_METRICS_REFRESH_TOKEN")
-
-    monkeypatch.setattr(bm, "get_metrics_access_token", unconfigured)
-    monkeypatch.setattr(bm, "sync_umami", lambda db: {"days": 3})
-    result = bm.sync_google_metrics(db)
-    assert "Falta" in result["business_profile"]["error"]
-    assert "Falta" in result["search_console"]["error"]
-    assert result["umami"] == {"days": 3}
+    assert first["new"] == 3 + 3 + 2  # 3 metrics × 2 days + 2 event cells
+    assert bm.sync_ga4(db, "tok")["new"] == 0
+    assert bodies[0] == ("560374705", ["date"])
+    assert bodies[1] == ("560374705", ["date", "eventName"])
 
 
 def _web_quote(db, n, created, total, status=None):
@@ -407,11 +403,11 @@ def test_panel_tienda(client, db):
 
     from services.quote_capture import BUSINESS_TZ
 
-    # Umami: 56 complete days of 3 visits + 1 WhatsApp click, plus today (ignored)
+    # GA4: 56 complete days of 3 visits + 1 WhatsApp click, plus today (ignored)
     for i in range(57):
         day = TODAY - timedelta(days=i)
-        _metric(db, "umami", "visits", "day", day, 100 if i == 0 else 3)
-        _metric(db, "umami", "whatsapp-click", "day", day, 1)
+        _metric(db, "ga4", "visits", "day", day, 100 if i == 0 else 3)
+        _metric(db, "ga4", "whatsapp_click", "day", day, 1)
     _web_quote(db, 1, dt(2026, 10, 20, 12, tzinfo=BUSINESS_TZ), 1000, "approved")
     _web_quote(db, 2, dt(2026, 10, 5, 12, tzinfo=BUSINESS_TZ), 500)
     _web_quote(db, 3, dt(2026, 9, 10, 12, tzinfo=BUSINESS_TZ), 700, "cancelled")
@@ -439,7 +435,19 @@ def test_panel_tienda(client, db):
     assert t["paid_orders_all"] == 2 and t["paid_total_all"] == 1300.0
 
 
-def test_panel_tienda_without_umami(client):
+def test_panel_tienda_without_ga4(client):
     t = client.get("/panel").json()["data"]["tienda"]
     assert t["last_day"] is None and t["visits_28d"] is None
     assert t["web_quotes_28d"] == 0
+
+
+def test_panel_tienda_partial_history(client, db):
+    # GA4 only has 10 complete days: the 28-day total is what exists, and
+    # there is nothing to compare against.
+    for i in range(1, 11):
+        _metric(db, "ga4", "visits", "day", TODAY - timedelta(days=i), 5)
+    db.commit()
+    t = client.get("/panel").json()["data"]["tienda"]
+    assert t["first_day"] == "2026-10-12" and t["last_day"] == "2026-10-21"
+    assert t["visits_28d"] == 50
+    assert t["visits_prev_28d"] is None
