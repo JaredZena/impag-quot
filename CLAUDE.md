@@ -47,6 +47,14 @@ Set these in App Runner, never in the local `.env` (the image bakes it in). They
 - `WEB_ORDERS_MAX_DRAFTS_PER_HOUR`: caps unpaid `checkout_created` drafts per hour. Default 100; `0` turns the cap off. Above the cap `checkout_created` gets 429. Payments are never capped.
 - Buyer confirmation email (the order record and the póliza de garantía, LFPC arts. 52 and 78) needs `RESEND_API_KEY` and `WEB_ORDER_STORE_ADDRESS`, the store's physical address for pickups, claims and warranties. Without both, no email is sent and the fulfillment task tells staff to send it by hand. Optional: `WEB_ORDER_RETURN_ADDRESS` (defaults to the store address) and `WEB_ORDER_FROM_EMAIL` (default `Todo Para El Campo <ventas@todoparaelcampo.com.mx>`; the domain must be verified in Resend).
 
+### Campo IA (`/apoyos`, `/agroproyectos` on todoparaelcampo.com.mx)
+- Claude calls for these tools go through `services/ai_usage.create_message`, which writes one `ai_usage` row per request (tokens, web searches, list-price USD); `GET /ai-usage/summary` feeds the admin's "Uso de IA".
+- Admin-editable settings live in `app_setting` (one JSON document per feature, validated by the feature's pydantic model in `services/apoyos.py` / `services/agroproyectos.py`).
+- App Runner closes every request at 120 s, so AI steps that can run longer (apoyos discovery topics, Agroproyectos plan/productos/riego) run on `services/background.py`'s thread pool and the caller polls. A "generating"/"running" mark older than the stale limit (12 min topics, 6 min agro steps) is treated as lost and can be retried.
+- Discovery is driven by the storefront's `.github/workflows/apoyos.yml` (`/jobs/apoyos/tick` + `/jobs/apoyos/step`, `verify_job_token`); the schedule itself is the admin setting `frequency`.
+- Optional env: `ADMIN_APP_URL` (links in staff emails, default https://impag-admin-app.vercel.app), `AI_BACKGROUND_WORKERS` (default 4).
+- Try prompts locally on sqlite only: `scripts/agro_try_local.py`, `scripts/apoyos_discover_local.py` (both refuse a non-sqlite `DATABASE_URL`).
+
 ## Architecture Overview
 
 ### Core System Components
