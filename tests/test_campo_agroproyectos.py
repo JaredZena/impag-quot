@@ -1037,3 +1037,21 @@ def test_admin_settings_get_and_put():
 
     r = client.put("/agroproyectos/settings", json={"quote_mode": "not-a-mode"})
     assert r.status_code == 422
+
+
+def test_irrigation_design_only_sees_irrigation_categories():
+    from types import SimpleNamespace as NS
+
+    from services import agroproyectos_ai
+
+    candidates = [
+        {"handle": "cintilla", "category_slug": "sistemas-de-riego"},
+        NS(handle="bomba-solar", category_slug="bombeo-solar-agricola"),
+        {"handle": "picadora", "category_slug": "ganaderia-y-procesamiento"},
+        {"handle": "dron", "category_slug": "drones-agricolas"},
+    ]
+    kept = agroproyectos_ai.irrigation_candidates(candidates)
+    assert [c["handle"] if isinstance(c, dict) else c.handle for c in kept] == [
+        "cintilla",
+        "bomba-solar",
+    ]

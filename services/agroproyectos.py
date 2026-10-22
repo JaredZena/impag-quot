@@ -800,6 +800,9 @@ def _execute_riego(
     db: Session, project: AgroProject, settings: AgroSettings, candidates: list[Any]
 ) -> None:
     started = time.monotonic()
+    # Only irrigation equipment is offered: with the whole catalog the design
+    # picked a forage chopper and an electric fence (live run 2026-10-22).
+    candidates = agroproyectos_ai.irrigation_candidates(candidates)
     try:
         response = agroproyectos_ai.generate_riego(project, settings, candidates)
     except AIUnavailable as exc:
