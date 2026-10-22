@@ -8,7 +8,7 @@ Hand-written (autogenerate is NOT trusted on this DB — see MIGRATIONS.md for
 the drift caveat). Only new tables; no existing table is touched.
 
 Revision ID: a7c3e9d2b5f1
-Revises: c6a2e8f4d1b9
+Revises: d7b3f9a2e5c1
 Create Date: 2026-10-22
 """
 
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "a7c3e9d2b5f1"
-down_revision: str | Sequence[str] | None = "c6a2e8f4d1b9"
+down_revision: str | Sequence[str] | None = "d7b3f9a2e5c1"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
