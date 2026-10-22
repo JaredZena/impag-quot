@@ -1507,6 +1507,40 @@ class TaxDeclaration(Base):
     )
 
 
+class BusinessMetric(Base):
+    """One number from outside the app, for the "Cómo vamos" panel on /hoy
+    (services/business_metrics.py). Google's monthly Business Profile report
+    (period="month": profile_views, calls, directions, website_clicks,
+    chat_clicks, interactions), each Google review (source="gbp_review",
+    period="event", value=stars, label=author, ref=Gmail message id) and
+    Search Console per day (source="gsc", period="day": clicks, impressions).
+    Re-syncs upsert on (source, metric, period, period_start, ref)."""
+
+    __tablename__ = "business_metric"
+    __table_args__ = (
+        UniqueConstraint(
+            "source",
+            "metric",
+            "period",
+            "period_start",
+            "ref",
+            name="uq_business_metric_key",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    source = Column(String(20), nullable=False, index=True)
+    metric = Column(String(40), nullable=False)
+    period = Column(String(10), nullable=False)  # day | month | event
+    period_start = Column(Date, nullable=False, index=True)
+    value = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    label = Column(String(200), nullable=True)
+    ref = Column(String(120), nullable=False, default="", server_default="")
+    fetched_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 if database_url.startswith("sqlite"):
     # Tests point DATABASE_URL at sqlite — the Neon endpoint-option rewrite
     # below is postgres-only (a sqlite URL has no hostname) and the pg pool

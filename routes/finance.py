@@ -25,6 +25,8 @@ scale with sales, so they are NOT a fixed expense. Both can be overridden
 per request.
 Sales come from the `sale` ledger (non-quarantined), same as /sales/stats —
 an operational snapshot, NOT accounting books.
+
+Every route is owners-only when OWNER_EMAILS is set (auth.require_owner).
 """
 
 import calendar
@@ -38,7 +40,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from auth import verify_google_token
+from auth import require_owner, verify_google_token
 from models import (
     ExpenseConcept,
     MonthlyExpense,
@@ -52,7 +54,8 @@ from models import (
 router = APIRouter(
     prefix="/finance",
     tags=["finance"],
-    dependencies=[Depends(verify_google_token)],
+    # Owners only once OWNER_EMAILS is set; unset = whole team (auth.py).
+    dependencies=[Depends(require_owner)],
 )
 
 BUSINESS_TZ = ZoneInfo("America/Mexico_City")

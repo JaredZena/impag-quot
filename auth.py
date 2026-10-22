@@ -33,6 +33,18 @@ def get_allowed_emails():
 
 ALLOWED_EMAILS = get_allowed_emails()
 
+
+# Financial analysis (punto de equilibrio, estado de resultados, márgenes,
+# gastos e impuestos) can be limited to the owners (Jared, JD) by listing them
+# in OWNER_EMAILS. Unset = everyone in ALLOWED_EMAILS sees everything, which
+# is the current decision (2026-10-22); set it to lock finance later.
+def get_owner_emails() -> set[str]:
+    raw = os.getenv("OWNER_EMAILS", "")
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
+OWNER_EMAILS = get_owner_emails()
+
 security = HTTPBearer(auto_error=not DISABLE_AUTH)
 
 DEV_USER = {
@@ -198,3 +210,16 @@ def verify_google_token(
         raise HTTPException(
             status_code=401, detail="Token verification failed"
         ) from None
+
+
+def is_owner(user: dict) -> bool:
+    if DISABLE_AUTH or not OWNER_EMAILS:
+        return True
+    return str(user.get("email") or "").lower() in OWNER_EMAILS
+
+
+def require_owner(user: dict = Depends(verify_google_token)) -> dict:
+    """verify_google_token + the email must be in OWNER_EMAILS (when set)."""
+    if not is_owner(user):
+        raise HTTPException(status_code=403, detail="Solo para los dueños")
+    return user

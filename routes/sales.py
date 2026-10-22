@@ -24,7 +24,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import extract, func, or_
 from sqlalchemy.orm import Session
 
-from auth import DISABLE_AUTH, verify_google_token
+from auth import DISABLE_AUTH, is_owner, require_owner, verify_google_token
 from models import Sale, SaleBalance, get_db
 from services.balance_sync import sync_balances
 from services import sale_capture
@@ -361,7 +361,8 @@ def sales_stats(
         "by_payment_method": by_payment_method,
         "by_concept": by_concept,
         "top_customers": top_customers,
-        "margins": margins,
+        # Márgenes: owners only when OWNER_EMAILS is set (auth.py).
+        "margins": margins if is_owner(user) else None,
         "delivery_pending": {
             "count": pending_count,
             "total": float(pending_total or 0),
@@ -388,7 +389,7 @@ def list_margins(
     status: str | None = Query(default=None, max_length=20),
     limit: int = Query(default=60, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    user: dict = Depends(verify_google_token),
+    user: dict = Depends(require_owner),
     db: Session = Depends(get_db),
 ):
     """Per-sale margin rows (one per BALANCES tab), newest folio month first."""

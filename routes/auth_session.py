@@ -2,6 +2,9 @@
 
 - POST /auth/session   Authorization: Bearer <Google ID token>
                        -> {token, expires_at, email}
+- GET  /auth/me        -> {email, is_owner}: the admin hides the financial
+                       screens from non-owners (OWNER_EMAILS in auth.py;
+                       unset = everyone is an owner).
 
 See auth.py for the token format and why it exists (Google ID tokens expire
 hourly and the browser never renewed them). With APP_SESSION_SECRET unset the
@@ -14,6 +17,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from auth import (
     DEV_USER,
     DISABLE_AUTH,
+    is_owner,
     is_session_token,
     issue_session_token,
     security,
@@ -48,4 +52,12 @@ def create_session(token: HTTPAuthorizationCredentials | None = Depends(security
         },
         "error": None,
         "message": None,
+    }
+
+
+@router.get("/me")
+def me(user: dict = Depends(verify_google_token)):
+    return {
+        "success": True,
+        "data": {"email": user["email"], "is_owner": is_owner(user)},
     }

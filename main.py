@@ -44,6 +44,7 @@ from routes.tasks_mgmt import router as tasks_mgmt_router
 from routes.tools import router as tools_router
 from routes.finance import router as finance_router
 from routes.hoy import router as hoy_router
+from routes.panel import router as panel_router
 from routes.whatsapp import router as whatsapp_router
 
 
@@ -142,6 +143,7 @@ app.include_router(pos_router)
 app.include_router(tools_router)
 app.include_router(finance_router)
 app.include_router(hoy_router)
+app.include_router(panel_router)
 
 
 class Message(BaseModel):
