@@ -879,13 +879,18 @@ def tick(db: Session) -> dict:
         .order_by(ApoyoRun.created_at.asc())
         .first()
     )
+    settings = app_settings.read(db, "apoyos", ApoyosSettings)
     if queued is not None:
+        # A manual run ("Buscar apoyos ahora") is queued without topics; they
+        # come from the settings as they are when it starts.
+        if not queued.topics:
+            queued.topics = build_topics(db, settings)
+            flag_modified(queued, "topics")
         queued.status = "running"
         queued.started_at = _now()
         db.commit()
         return {"due": True, "run_id": queued.id, "reason": "queued"}
 
-    settings = app_settings.read(db, "apoyos", ApoyosSettings)
     if not settings.enabled or settings.frequency == "paused":
         return {"due": False, "run_id": None, "reason": "paused"}
 

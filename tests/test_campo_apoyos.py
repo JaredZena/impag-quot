@@ -1108,3 +1108,33 @@ def test_discovery_asks_for_the_save_tool_when_the_model_only_writes_text(monkey
         assert result["found"] == 1 and result["new"] == 1
     finally:
         db.close()
+
+
+def test_tick_builds_topics_for_a_queued_manual_run():
+    """POST /apoyos/runs queues a run with no topics; tick fills them from the
+    settings, so "Buscar apoyos ahora" searches instead of finishing empty."""
+    db = db_session()
+    try:
+        app_settings.write(
+            db,
+            "apoyos",
+            apoyos.ApoyosSettings,
+            {
+                "states": ["durango"],
+                "sectors": ["ganaderia"],
+                "include_national": True,
+                "extra_queries": [],
+            },
+            "dev",
+        )
+        manual = ApoyoRun(trigger="manual", status="queued", topics=[])
+        db.add(manual)
+        db.commit()
+        assert apoyos_discovery.tick(db)["run_id"] == manual.id
+        db.refresh(manual)
+        assert [t["key"] for t in manual.topics] == [
+            "nacional:ganaderia",
+            "estado:durango",
+        ]
+    finally:
+        db.close()
