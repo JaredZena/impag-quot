@@ -1138,3 +1138,25 @@ def test_tick_builds_topics_for_a_queued_manual_run():
         ]
     finally:
         db.close()
+
+
+def test_slug_is_short_and_readable():
+    db = db_session()
+    try:
+        slug = apoyos.generate_slug(
+            db,
+            "Programa Nacional de Tecnificación de Riego «México se tecnifica»",
+            "Comisión Nacional del Agua (CONAGUA) y Secretaría de Agricultura y Desarrollo Rural",
+            2026,
+        )
+        assert (
+            slug
+            == "programa-nacional-de-tecnificacion-de-riego-mexico-se-tecnifica-2026"
+        )
+        assert apoyos.generate_slug(
+            db, "Producción para el Bienestar 2026", "SADER", 2026
+        ) == ("produccion-para-el-bienestar-2026")
+        long = apoyos.generate_slug(db, "Apoyo " * 40, None, None)
+        assert len(long) <= apoyos.SLUG_MAX and not long.endswith("-")
+    finally:
+        db.close()

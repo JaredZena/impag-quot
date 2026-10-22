@@ -157,6 +157,9 @@ def fingerprint_of(title: str | None, organism: str | None, year: int | None) ->
     return f"{slugify(organism)}|{slugify(title)}|{year or ''}"
 
 
+SLUG_MAX = 80
+
+
 def generate_slug(
     db: Session,
     title: str,
@@ -164,8 +167,16 @@ def generate_slug(
     year: int | None = None,
     exclude_id: int | None = None,
 ) -> str:
-    parts = [p for p in (title, organism, str(year) if year else None) if p]
-    base = slugify(" ".join(parts))[:150] or "programa"
+    # A short, readable URL (/apoyos/produccion-para-el-bienestar-2026): the
+    # title, plus the year when the title doesn't carry it, cut at a word
+    # boundary. The organism is left out (it made 150-character URLs); a
+    # clash gets -2, -3… below.
+    base = slugify(title)
+    if year and str(year) not in base:
+        base = f"{base}-{year}"
+    if len(base) > SLUG_MAX:
+        base = base[:SLUG_MAX].rsplit("-", 1)[0]
+    base = base or "programa"
 
     def taken(candidate: str) -> bool:
         query = db.query(Apoyo.id).filter(Apoyo.slug == candidate)
