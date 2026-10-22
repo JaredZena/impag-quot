@@ -9,6 +9,8 @@ Costs are list-price estimates in USD (services/ai_usage.PRICES); the summary
 also carries today's USD→MXN rate when the exchange service has one.
 """
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -34,16 +36,16 @@ FEATURE_LABELS = {
 def _usd_mxn() -> float | None:
     try:
         rate = exchange_rate_service.get_exchange_rate("USD", "MXN")
-    except Exception:
+    except Exception:  # noqa: BLE001 — a rate lookup must never break the dashboard
         return None
     return float(rate) if rate else None
 
 
 @router.get("/summary")
 def get_summary(
-    days: int = Query(default=30, ge=1, le=366),
-    db: Session = Depends(get_db),
-    user=Depends(verify_google_token),
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[dict, Depends(verify_google_token)],
+    days: Annotated[int, Query(ge=1, le=366)] = 30,
 ):
     data = ai_usage.summary(db, days)
     for row in data["by_feature"]:
@@ -55,10 +57,10 @@ def get_summary(
 
 @router.get("/events")
 def get_events(
-    limit: int = Query(default=100, ge=1, le=500),
-    feature: str | None = Query(default=None, max_length=60),
-    db: Session = Depends(get_db),
-    user=Depends(verify_google_token),
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[dict, Depends(verify_google_token)],
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    feature: Annotated[str | None, Query(max_length=60)] = None,
 ):
     rows = ai_usage.recent(db, limit=limit, feature=feature)
     for row in rows:
