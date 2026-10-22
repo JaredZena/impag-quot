@@ -320,3 +320,126 @@ def test_finance_router_is_owners_only():
 
     deps = [d.dependency for d in finance_routes.router.dependencies]
     assert auth.require_owner in deps
+
+
+# ── Umami + tienda ───────────────────────────────────────────────────────────
+
+PAGEVIEWS = {
+    "pageviews": [
+        {"x": "2026-10-20 00:00:00", "y": 40},
+        {"x": "2026-10-21 00:00:00", "y": 50},
+    ],
+    "sessions": [
+        {"x": "2026-10-20 00:00:00", "y": 12},
+        {"x": "2026-10-21T00:00:00Z", "y": 15},
+    ],
+}
+EVENTS = [
+    {"x": "whatsapp-click", "t": "2026-10-20 00:00:00", "y": 2},
+    {"x": "quote-add", "t": "2026-10-21 00:00:00", "y": 1},
+    {"x": "whatsapp-click", "t": "2026-10-21 00:00:00", "y": 3},
+]
+
+
+def test_parse_umami_series():
+    pv = bm.parse_umami_pageviews(PAGEVIEWS)
+    assert pv[date(2026, 10, 20)] == {"pageviews": 40, "visits": 12}
+    assert pv[date(2026, 10, 21)]["visits"] == 15
+    ev = bm.parse_umami_events(EVENTS)
+    assert ev[date(2026, 10, 21)] == {"quote-add": 1, "whatsapp-click": 3}
+    assert bm.parse_umami_events({"data": EVENTS})[date(2026, 10, 20)] == {
+        "whatsapp-click": 2
+    }
+    assert bm.parse_umami_events([]) == {}
+
+
+def test_sync_umami_skips_without_key(db, monkeypatch):
+    monkeypatch.delenv("UMAMI_API_KEY", raising=False)
+    assert "skipped" in bm.sync_umami(db)
+
+
+def test_sync_umami_upserts(db, monkeypatch):
+    monkeypatch.setenv("UMAMI_API_KEY", "k")
+    calls = []
+
+    def fake_get(path, key, **params):
+        calls.append((path, key, params["unit"], params["timezone"]))
+        return PAGEVIEWS if path.endswith("/pageviews") else EVENTS
+
+    monkeypatch.setattr(bm, "_umami_get", fake_get)
+    first = bm.sync_umami(db)
+    db.commit()
+    assert first["days"] == 2 and first["latest_day"] == "2026-10-21"
+    assert first["new"] == 2 + 2 + 3  # pageviews+visits ×2 days, 3 event cells
+    assert bm.sync_umami(db)["new"] == 0
+    assert calls[0][1:] == ("k", "day", "America/Mexico_City")
+
+
+def test_google_unconfigured_still_runs_umami(db, monkeypatch):
+    def unconfigured():
+        raise bm.MetricsNotConfigured("Falta GOOGLE_METRICS_REFRESH_TOKEN")
+
+    monkeypatch.setattr(bm, "get_metrics_access_token", unconfigured)
+    monkeypatch.setattr(bm, "sync_umami", lambda db: {"days": 3})
+    result = bm.sync_google_metrics(db)
+    assert "Falta" in result["business_profile"]["error"]
+    assert "Falta" in result["search_console"]["error"]
+    assert result["umami"] == {"days": 3}
+
+
+def _web_quote(db, n, created, total, status=None):
+    db.add(
+        Quote(
+            quote_number=f"WEB-{n}",
+            customer_name="Web",
+            customer_phone="6770000000",
+            status="sent",
+            total=Decimal(str(total)),
+            created_by="tienda-web",
+            payment_status=status,
+            created_at=created,
+        )
+    )
+
+
+def test_panel_tienda(client, db):
+    from datetime import datetime as dt
+
+    from services.quote_capture import BUSINESS_TZ
+
+    # Umami: 56 complete days of 3 visits + 1 WhatsApp click, plus today (ignored)
+    for i in range(57):
+        day = TODAY - timedelta(days=i)
+        _metric(db, "umami", "visits", "day", day, 100 if i == 0 else 3)
+        _metric(db, "umami", "whatsapp-click", "day", day, 1)
+    _web_quote(db, 1, dt(2026, 10, 20, 12, tzinfo=BUSINESS_TZ), 1000, "approved")
+    _web_quote(db, 2, dt(2026, 10, 5, 12, tzinfo=BUSINESS_TZ), 500)
+    _web_quote(db, 3, dt(2026, 9, 10, 12, tzinfo=BUSINESS_TZ), 700, "cancelled")
+    _web_quote(db, 4, dt(2026, 8, 1, 12, tzinfo=BUSINESS_TZ), 300, "mismatch")
+    db.add(
+        Quote(
+            quote_number="Q-1",
+            customer_name="Mostrador",
+            customer_phone="6770000001",
+            status="sent",
+            total=Decimal("9999"),
+            created_by="hernan@impag.test",
+            payment_status="approved",
+            created_at=dt(2026, 10, 20, 12, tzinfo=BUSINESS_TZ),
+        )
+    )
+    db.commit()
+
+    t = client.get("/panel").json()["data"]["tienda"]
+    assert t["last_day"] == "2026-10-21"
+    assert t["visits_28d"] == 84 and t["visits_prev_28d"] == 84
+    assert t["whatsapp_28d"] == 28
+    assert t["web_quotes_28d"] == 2 and t["web_quotes_prev_28d"] == 1
+    assert t["paid_orders_28d"] == 1 and t["paid_total_28d"] == 1000.0
+    assert t["paid_orders_all"] == 2 and t["paid_total_all"] == 1300.0
+
+
+def test_panel_tienda_without_umami(client):
+    t = client.get("/panel").json()["data"]["tienda"]
+    assert t["last_day"] is None and t["visits_28d"] is None
+    assert t["web_quotes_28d"] == 0

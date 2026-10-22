@@ -1,4 +1,4 @@
-"""Google numbers for the "Cómo vamos" panel on /hoy (routes/panel.py).
+"""Outside numbers for the "Cómo vamos" panel on /hoy (routes/panel.py).
 
 Where each number comes from, until Google approves the Business Profile API:
 - Business Profile, per month: Google's own "informe de rendimiento" email to
@@ -14,6 +14,11 @@ All three read with one OAuth refresh token of impagtodoparaelcampo@gmail.com
 minted with GOOGLE_METRICS_CLIENT_ID/SECRET (falls back to
 GOOGLE_OAUTH_CLIENT_ID/SECRET). Each part fails on its own, so a missing
 Search Console scope never blocks the Business Profile numbers.
+
+The store's traffic comes from Umami Cloud (todoparaelcampo.com.mx): visits
+and pageviews per day plus every tracked event per day (whatsapp-click,
+quote-add, buy-click, ...), read with UMAMI_API_KEY (Umami → Settings → API
+keys). Unset = that part is skipped, not an error.
 
 Rows land in business_metric (models.BusinessMetric), upserted, so the daily
 job (POST /jobs/google-metrics-sync) can re-read everything safely.
@@ -38,6 +43,9 @@ GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me"
 GSC = "https://searchconsole.googleapis.com/webmasters/v3"
 GBP_SENDER = "businessprofile-noreply@google.com"
 SITE_HINT = "todoparaelcampo"
+UMAMI_API = "https://api.umami.is/v1"
+UMAMI_WEBSITE_ID = "98e9eb72-3cf3-43e6-96cb-6b0a1b8d65ac"  # storefront index.html
+UMAMI_TZ = "America/Mexico_City"
 
 MONTHS_ES = {
     "enero": 1,
@@ -309,15 +317,100 @@ def sync_search_console(db: Session, token: str, days: int = 120) -> dict:
     }
 
 
+# ── Umami (store traffic) ────────────────────────────────────────────────────
+
+
+def _series_day(x) -> date:
+    """Umami series points carry "2026-10-01 00:00:00" (already in the
+    requested timezone) or an ISO timestamp; the day is the first 10 chars."""
+    return date.fromisoformat(str(x)[:10])
+
+
+def parse_umami_pageviews(data: dict) -> dict[date, dict[str, float]]:
+    """/pageviews?unit=day → {day: {"pageviews": n, "visits": n}}."""
+    out: dict[date, dict[str, float]] = {}
+    for key, metric in (("pageviews", "pageviews"), ("sessions", "visits")):
+        for point in (data or {}).get(key) or []:
+            out.setdefault(_series_day(point["x"]), {})[metric] = point.get("y", 0)
+    return out
+
+
+def parse_umami_events(data) -> dict[date, dict[str, float]]:
+    """/events/series?unit=day → {day: {event_name: n}}."""
+    rows = data.get("data", data) if isinstance(data, dict) else data
+    out: dict[date, dict[str, float]] = {}
+    for point in rows or []:
+        name, when = point.get("x"), point.get("t")
+        if not name or not when:
+            continue
+        day = out.setdefault(_series_day(when), {})
+        day[str(name)[:40]] = day.get(str(name)[:40], 0) + point.get("y", 0)
+    return out
+
+
+def _umami_get(path: str, key: str, **params):
+    resp = requests.get(
+        f"{os.getenv('UMAMI_API_BASE', UMAMI_API)}{path}",
+        headers={"x-umami-api-key": key, "Accept": "application/json"},
+        params=params,
+        timeout=TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def sync_umami(db: Session, days: int = 120) -> dict:
+    key = os.getenv("UMAMI_API_KEY")
+    if not key:
+        return {"skipped": "Falta UMAMI_API_KEY"}
+    site = os.getenv("UMAMI_WEBSITE_ID", UMAMI_WEBSITE_ID)
+    now = datetime.now(BUSINESS_TZ)
+    start = datetime.combine(
+        now.date() - timedelta(days=days), datetime.min.time(), tzinfo=BUSINESS_TZ
+    )
+    window = {
+        "startAt": int(start.timestamp() * 1000),
+        "endAt": int(now.timestamp() * 1000),
+        "unit": "day",
+        "timezone": UMAMI_TZ,
+    }
+    daily = parse_umami_pageviews(
+        _umami_get(f"/websites/{site}/pageviews", key, **window)
+    )
+    for day, events in parse_umami_events(
+        _umami_get(f"/websites/{site}/events/series", key, **window)
+    ).items():
+        daily.setdefault(day, {}).update(events)
+
+    counts = {"new": 0, "updated": 0, "same": 0}
+    for day, metrics in daily.items():
+        for metric, value in metrics.items():
+            counts[_upsert(db, "umami", metric, "day", day, value)] += 1
+    return {
+        "days": len(daily),
+        "latest_day": max(daily).isoformat() if daily else None,
+        **counts,
+    }
+
+
 def sync_google_metrics(db: Session, dry_run: bool = False) -> dict:
-    token = get_metrics_access_token()
+    """Google (Business Profile + Search Console) and Umami, each on its own:
+    one part failing or unconfigured never blocks the others."""
     result = {"dry_run": dry_run}
+    try:
+        token, google_error = get_metrics_access_token(), None
+    except (RuntimeError, requests.RequestException) as e:
+        token, google_error = None, str(e)[:300]
     for name, fn in (
-        ("business_profile", sync_business_profile),
-        ("search_console", sync_search_console),
+        ("business_profile", lambda: sync_business_profile(db, token)),
+        ("search_console", lambda: sync_search_console(db, token)),
+        ("umami", lambda: sync_umami(db)),
     ):
+        if name != "umami" and token is None:
+            result[name] = {"error": google_error}
+            continue
         try:
-            result[name] = fn(db, token)
+            result[name] = fn()
         except (RuntimeError, requests.RequestException, KeyError, ValueError) as e:
             db.rollback()
             result[name] = {"error": str(e)[:300]}
