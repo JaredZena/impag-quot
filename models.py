@@ -1541,6 +1541,209 @@ class BusinessMetric(Base):
     )
 
 
+# ── Admin-editable settings (services/app_settings.py) ───────────────────────
+
+
+class AppSetting(Base):
+    """One JSON document of admin-editable settings per feature (key), e.g.
+    "apoyos" or "agroproyectos". Each feature validates its own document with
+    a pydantic model and merges it over code defaults, so a missing or partial
+    row always reads back as a complete, valid configuration."""
+
+    __tablename__ = "app_setting"
+
+    key = Column(String(60), primary_key=True)
+    value = Column(JSON, nullable=False, default=dict)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    updated_by = Column(String(255), nullable=True)  # admin email
+
+
+# ── AI usage and cost ledger (services/ai_usage.py) ──────────────────────────
+
+
+class AIUsage(Base):
+    """One Claude request: tokens, server-tool calls and its list-price cost in
+    USD. Written for every storefront AI tool (Agroproyectos, Apoyos discovery,
+    Cotizador solar) so the admin can track usage and spend per feature."""
+
+    __tablename__ = "ai_usage"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    feature = Column(String(60), nullable=False, index=True)  # e.g. agroproyectos.plan
+    model = Column(String(60), nullable=True)  # the model that served the request
+    requested_model = Column(String(60), nullable=True)
+    input_tokens = Column(Integer, nullable=False, default=0)
+    output_tokens = Column(Integer, nullable=False, default=0)
+    cache_creation_input_tokens = Column(Integer, nullable=False, default=0)
+    cache_read_input_tokens = Column(Integer, nullable=False, default=0)
+    web_search_requests = Column(Integer, nullable=False, default=0)
+    web_fetch_requests = Column(Integer, nullable=False, default=0)
+    cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
+    duration_ms = Column(Integer, nullable=True)
+    status = Column(String(20), nullable=False, default="ok")  # ok | error | refusal | max_tokens | timeout
+    error_code = Column(String(60), nullable=True)
+    ref_type = Column(String(30), nullable=True)  # agro_project | apoyo_run | quote
+    ref_id = Column(Integer, nullable=True, index=True)
+
+
+# ── Apoyos gubernamentales (services/apoyos.py) ──────────────────────────────
+
+
+class Apoyo(Base):
+    """A government support program (subsidio, crédito, seguro…) for
+    producers, found by the discovery job (services/apoyos_discovery.py) or
+    added by hand. Only status="published" rows reach the storefront
+    (/apoyos), through GET /storefront/apoyos and the storefront's
+    apoyos workflow."""
+
+    __tablename__ = "apoyo"
+
+    id = Column(Integer, primary_key=True, index=True)
+    slug = Column(String(160), nullable=False, unique=True, index=True)
+    # draft (AI found it, staff have not reviewed) | published | rejected | archived
+    status = Column(String(20), nullable=False, default="draft", index=True)
+    title = Column(String(300), nullable=False)
+    program = Column(String(300), nullable=True)  # parent program, e.g. "Producción para el Bienestar"
+    organism = Column(String(200), nullable=True)  # SADER, SEDRAD Durango, FIRA, CONAFOR…
+    level = Column(String(20), nullable=True)  # federal | estatal | municipal | financiera | otro
+    states = Column(JSON, nullable=True)  # ["nacional"] or state slugs ["durango", …]
+    sectors = Column(JSON, nullable=True)  # agricultura, ganaderia, forestal, …
+    support_types = Column(JSON, nullable=True)  # subsidio, credito, seguro, …
+    summary = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
+    beneficiaries = Column(Text, nullable=True)
+    amount_text = Column(String(500), nullable=True)
+    amount_max_mxn = Column(Numeric(14, 2), nullable=True)
+    requirements = Column(JSON, nullable=True)  # list of strings
+    how_to_apply = Column(JSON, nullable=True)  # list of steps
+    opens_at = Column(Date, nullable=True)
+    closes_at = Column(Date, nullable=True)
+    deadline_text = Column(String(300), nullable=True)
+    permanent = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    year = Column(Integer, nullable=True)
+    source_url = Column(String(1000), nullable=True)
+    sources = Column(JSON, nullable=True)  # [{url, title}]
+    category_slugs = Column(JSON, nullable=True)  # storefront categories this can buy
+    confidence = Column(String(10), nullable=True)  # alta | media | baja
+    ai_notes = Column(Text, nullable=True)
+    fingerprint = Column(String(200), nullable=True, index=True)
+    featured = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    discovered_run_id = Column(Integer, nullable=True)
+    first_seen_at = Column(DateTime(timezone=True), nullable=True)
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    verified_by = Column(String(255), nullable=True)
+    published_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    updated_by = Column(String(255), nullable=True)
+
+
+class ApoyoRun(Base):
+    """One discovery run: a list of search topics processed one /jobs step
+    at a time (App Runner caps a request at 120 s)."""
+
+    __tablename__ = "apoyo_run"
+
+    id = Column(Integer, primary_key=True, index=True)
+    trigger = Column(String(20), nullable=False, default="schedule")  # schedule | manual
+    # queued | running | done | failed | cancelled
+    status = Column(String(20), nullable=False, default="queued", index=True)
+    topics = Column(JSON, nullable=True)  # [{key, label, query, status, found, new, updated, error, cost_usd}]
+    found_count = Column(Integer, nullable=False, default=0)
+    new_count = Column(Integer, nullable=False, default=0)
+    updated_count = Column(Integer, nullable=False, default=0)
+    closed_count = Column(Integer, nullable=False, default=0)
+    cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
+    web_searches = Column(Integer, nullable=False, default=0)
+    error = Column(Text, nullable=True)
+    triggered_by = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+
+# ── Agroproyectos: AI project designer (services/agroproyectos.py) ───────────
+
+
+class AgroProject(Base):
+    """One project a storefront visitor designed at /agroproyectos: their
+    idea, situation and budget, the AI plan, product picks and irrigation
+    design, and the staff follow-up pipeline. Unauthenticated buyer input:
+    it never creates or fills Customer rows (see web_orders._link_customer)."""
+
+    __tablename__ = "agro_project"
+
+    id = Column(Integer, primary_key=True, index=True)
+    token = Column(String(36), nullable=False, unique=True, index=True)  # public access
+    ref = Column(String(30), nullable=False, unique=True)  # AGR-YYMMDD-XXXX
+    # pending → plan → productos → listo (generation progress) | error
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    # nuevo | contactado | en_seguimiento | cotizado | ganado | perdido | descartado
+    lead_status = Column(String(20), nullable=False, default="nuevo", index=True)
+    producer_type = Column(String(20), nullable=True)  # nuevo | mejorar | diversificar
+    idea = Column(Text, nullable=False)
+    current_operation = Column(Text, nullable=True)
+    inputs = Column(JSON, nullable=True)  # the whole validated form
+    contact_name = Column(String(200), nullable=True)
+    contact_phone = Column(String(30), nullable=True, index=True)
+    contact_email = Column(String(255), nullable=True)
+    state = Column(String(60), nullable=True, index=True)
+    municipio = Column(String(120), nullable=True)
+    budget_mxn = Column(Numeric(14, 2), nullable=True)
+    budget_unknown = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    wants_financing = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    project_kind = Column(String(60), nullable=True, index=True)  # AI-classified slug
+    sector = Column(String(30), nullable=True, index=True)
+    title = Column(String(300), nullable=True)
+    investment_min_mxn = Column(Numeric(14, 2), nullable=True)
+    investment_max_mxn = Column(Numeric(14, 2), nullable=True)
+    plan = Column(JSON, nullable=True)
+    products = Column(JSON, nullable=True)
+    irrigation = Column(JSON, nullable=True)
+    error = Column(String(120), nullable=True)
+    quote_id = Column(Integer, ForeignKey("quote.id", ondelete="SET NULL"), nullable=True)
+    questions_count = Column(Integer, nullable=False, default=0)
+    events = Column(JSON, nullable=True)  # {"whatsapp_click": iso, "print": iso, …}
+    contact_requested_at = Column(DateTime(timezone=True), nullable=True)
+    contact_request = Column(JSON, nullable=True)  # {preferred, best_time, message}
+    cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
+    generation_ms = Column(Integer, nullable=True)
+    model = Column(String(60), nullable=True)
+    utm = Column(JSON, nullable=True)  # {source, medium, campaign, referrer, apoyo}
+    staff_notes = Column(Text, nullable=True)
+    assigned_to = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AgroProjectMessage(Base):
+    """A follow-up question about a project and the AI's answer."""
+
+    __tablename__ = "agro_project_message"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(
+        Integer,
+        ForeignKey("agro_project.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    role = Column(String(10), nullable=False)  # user | assistant
+    content = Column(Text, nullable=False)
+    cost_usd = Column(Numeric(12, 6), nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 if database_url.startswith("sqlite"):
     # Tests point DATABASE_URL at sqlite — the Neon endpoint-option rewrite
     # below is postgres-only (a sqlite URL has no hostname) and the pg pool

@@ -52,6 +52,7 @@ import anthropic
 from sqlalchemy.orm import Session
 
 from config import claude_api_key
+from services import ai_usage
 from services.web_quotes import REVIEW_LABELS, create_quote_request
 
 logger = logging.getLogger(__name__)
@@ -304,10 +305,18 @@ def _content_blocks(files: list[tuple[bytes, str]]) -> list[dict]:
 
 
 def _structured_call(
-    content: list[dict], schema: dict, effort: str, timeout: float, max_tokens: int
+    content: list[dict],
+    schema: dict,
+    effort: str,
+    timeout: float,
+    max_tokens: int,
 ) -> dict:
-    """One Claude request whose text answer is JSON matching `schema`."""
+    """One Claude request whose text answer is JSON matching `schema`.
+    Recorded in the AI usage ledger (services/ai_usage.py): the bill read as
+    solar.read_bill, the explanation as solar.advice."""
+    feature = "solar.read_bill" if schema is BILL_SCHEMA else "solar.advice"
     client = _client()
+    started = time.monotonic()
     try:
         response = client.with_options(timeout=timeout).beta.messages.create(
             model=model(),
@@ -322,10 +331,23 @@ def _structured_call(
         )
     except anthropic.APIStatusError as exc:
         logger.error("solar quote: Claude HTTP %s", exc.status_code)
+        ai_usage.record(
+            feature=feature, model=None, requested_model=model(), tokens=ai_usage.Tokens(),
+            duration_ms=int((time.monotonic() - started) * 1000), status="error",
+            error_code=f"ai_http_{exc.status_code}",
+        )
         raise SolarUnavailable("ai_error") from exc
     except anthropic.APIConnectionError as exc:  # includes timeouts
         logger.error("solar quote: Claude unreachable: %s", type(exc).__name__)
+        ai_usage.record(
+            feature=feature, model=None, requested_model=model(), tokens=ai_usage.Tokens(),
+            duration_ms=int((time.monotonic() - started) * 1000), status="error",
+            error_code="ai_unreachable",
+        )
         raise SolarUnavailable("ai_unreachable") from exc
+    ai_usage.record_response(
+        response, feature=feature, requested_model=model(), started=started
+    )
     if response.stop_reason in ("refusal", "max_tokens"):
         logger.error("solar quote: Claude stopped with %s", response.stop_reason)
         raise SolarUnavailable(f"ai_{response.stop_reason}")

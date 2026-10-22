@@ -92,6 +92,8 @@ REVIEW_LABELS = {
     "solar_large": "sistema interconectado grande: confirma la ingeniería y el precio",
     "solar_media_tension": "tarifa de media tensión: requiere ingeniería",
     "solar_install_outside": "instalación fuera de Durango: agrega traslado y viáticos",
+    # Agroproyectos (services/agroproyectos.py)
+    "agroproyecto": "proyecto diseñado con IA (Agroproyectos): revisa cantidades, precios y el diseño antes de enviar",
 }
 
 

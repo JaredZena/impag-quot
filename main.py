@@ -12,6 +12,12 @@ from sqlalchemy.orm import Session
 
 from auth import verify_google_token
 from models import Conversation, ConversationMessage, Query, get_db
+from routes.agroproyectos import router as agroproyectos_router
+from routes.agroproyectos import storefront_router as agroproyectos_storefront_router
+from routes.ai_usage import router as ai_usage_router
+from routes.apoyos import jobs_router as apoyos_jobs_router
+from routes.apoyos import router as apoyos_router
+from routes.apoyos import storefront_router as apoyos_storefront_router
 from routes.auth_session import router as auth_session_router
 from routes.balance import router as balance_router
 from routes.campaigns import router as campaigns_router
@@ -136,6 +142,13 @@ app.include_router(notifications_router)
 app.include_router(public_quotes_router)
 app.include_router(storefront_router)
 app.include_router(storefront_orders_router)
+# Campo IA: Apoyos gubernamentales, Agroproyectos and the AI usage ledger.
+app.include_router(apoyos_router)
+app.include_router(apoyos_jobs_router)
+app.include_router(apoyos_storefront_router)
+app.include_router(agroproyectos_router)
+app.include_router(agroproyectos_storefront_router)
+app.include_router(ai_usage_router)
 app.include_router(storefront_quotes_router)
 app.include_router(storefront_solar_router)
 app.include_router(sales_router)
