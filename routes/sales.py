@@ -6,6 +6,8 @@ Sales ledger routes (mirror of the VENTAS Google Sheet).
                      daily GitHub Action calls it machine-to-machine).
 - GET  /sales/stats  dashboard aggregates (Google auth)
 - GET  /sales        filtered row listing (Google auth)
+- GET  /sales/customer-types  buyers per producer type, by what they bought
+                     (services/customer_types.py; Google auth)
 - POST /sales/capture register a *Venta NN_MM_YYYY* WhatsApp message
                      (services/sale_capture.py; from 2026-10-01 it is the ledger)
 
@@ -28,6 +30,7 @@ from auth import DISABLE_AUTH, is_owner, require_owner, verify_google_token
 from models import Sale, SaleBalance, get_db
 from services.balance_sync import sync_balances
 from services import sale_capture
+from services.customer_types import customer_types
 from services.sales_sync import sync_all
 
 # NOTE: like routes/storefront.py, this router must NOT apply
@@ -381,6 +384,16 @@ def sales_stats(
         "ytd_total": float(ytd_total or 0),
         "label": STATS_LABEL,
     }
+
+
+@router.get("/customer-types")
+def sales_customer_types(
+    year: int | None = Query(default=None, ge=2000, le=2100),
+    user: dict = Depends(verify_google_token),
+    db: Session = Depends(get_db),
+):
+    """«Clientes por tipo»: each buyer classified by what they bought."""
+    return customer_types(db, year=year)
 
 
 @router.get("/margins")
