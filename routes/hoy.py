@@ -200,6 +200,12 @@ class OutcomeIn(BaseModel):
     outcome: str
 
 
+class SnoozeIn(BaseModel):
+    quote_ids: list[int] = Field(min_length=1, max_length=20)
+    due: date
+    reason: str | None = Field(default=None, max_length=120)
+
+
 @router.get("/seguimiento")
 def seguimiento_del_dia(
     extra: int = Query(default=0, ge=0, le=60),
@@ -249,3 +255,27 @@ def resultado_seguimiento(
     except seguimiento.SeguimientoError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"success": True, "data": seguimiento.contact_dict(contact)}
+
+
+@router.post("/seguimiento/posponer")
+def posponer_seguimiento(
+    data: SnoozeIn,
+    db: Session = Depends(get_db),
+    user: dict = Depends(verify_google_token),
+):
+    """The customer asked to be contacted later: the card's quotes wait until
+    `due` (their Siguiente paso) and come back on the list that day."""
+    try:
+        quotes = seguimiento.snooze(
+            db,
+            quote_ids=data.quote_ids,
+            due=data.due,
+            reason=data.reason,
+            user_email=user.get("email", "unknown"),
+        )
+    except seguimiento.SeguimientoError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "success": True,
+        "data": {"quote_ids": [q.id for q in quotes], "due": data.due.isoformat()},
+    }

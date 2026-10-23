@@ -20,6 +20,12 @@ the day is still DAILY_TARGET people and empty slots go to the other lists.
 Someone already messaged is left out for 7 days (quotes), 30 days (others)
 or 180 days after "no le interesa".
 
+A quote whose Siguiente paso (services/quote_next_action) is dated after
+today waits for that date: the team already decided when to act. "Posponer"
+on a card writes that Siguiente paso (SNOOZE_ACTION) for the day the customer
+asked ("cuando le llegue la pastura", usually January); on that day the
+person is back on the list even if the quote is past 45 days or 3 nudges.
+
 Each card has a ready message (usted, signed by the sender) and, when the
 app knows the number, a wa.me link that opens WhatsApp with it typed.
 Sending stays a person's click: automating WhatsApp Business puts the
@@ -45,6 +51,7 @@ from services.quote_followup import (
     REMINDER_INTERVAL_DAYS,
     STALE_DAYS,
 )
+from services.quote_next_action import MAX_ACTION, clean, set_next_action
 
 DAILY_TARGET = 20
 QUOTAS = (("cotizacion", 12), ("temporada", 5), ("inactivo", 3))
@@ -58,6 +65,10 @@ OUTCOME_LABEL = {
 }
 COOLDOWN_DAYS = {"cotizacion": REMINDER_INTERVAL_DAYS, "temporada": 30, "inactivo": 30}
 NOT_INTERESTED_DAYS = 180
+SNOOZE_ACTION = "Retomar seguimiento por WhatsApp"
+SNOOZE_MAX_DAYS = 366
+# A postponed quote is past its vigencia by the time it comes back.
+SNOOZE_STATUSES = ("sent", "viewed", "expired")
 SEASON_BEFORE_DAYS, SEASON_AFTER_DAYS = 15, 75
 SEASON_QUIET_DAYS = 60
 INACTIVE_MIN_TOTAL = Decimal(10000)
@@ -262,10 +273,22 @@ class _Phones:
         return self.by_key.get(key)
 
 
+def _snooze_reason(quote: Quote) -> str:
+    """ "pospuesta al 01/12: espera la pastura" """
+    why = (quote.next_action or "")[len(SNOOZE_ACTION) :].lstrip(": ").strip()
+    when = f"pospuesta al {quote.next_action_due:%d/%m}"
+    return f"{when}: {why}" if why else when
+
+
 def _quote_cards(
     db: Session, now: datetime, sender: str | None, phones: _Phones
 ) -> list[Card]:
-    quotes = (
+    today = now.astimezone(BUSINESS_TZ).date()
+    not_paid = or_(
+        Quote.payment_status.is_(None),
+        Quote.payment_status.notin_(PAYMENT_STATUSES_NOT_CHASED),
+    )
+    due = (
         db.query(Quote)
         .filter(
             Quote.status.in_(("sent", "viewed")),
@@ -279,13 +302,30 @@ def _quote_cards(
                 Quote.last_followup_at.is_(None),
                 Quote.last_followup_at <= now - timedelta(days=REMINDER_INTERVAL_DAYS),
             ),
-            or_(
-                Quote.payment_status.is_(None),
-                Quote.payment_status.notin_(PAYMENT_STATUSES_NOT_CHASED),
-            ),
+            or_(Quote.next_action_due.is_(None), Quote.next_action_due <= today),
+            not_paid,
         )
-        .order_by(Quote.sent_at.desc())
         .all()
+    )
+    # Postponed with "Posponer" and due today or earlier: back regardless of
+    # age or nudges, because the customer asked to be contacted then.
+    returning = (
+        db.query(Quote)
+        .filter(
+            Quote.status.in_(SNOOZE_STATUSES),
+            Quote.sent_at.isnot(None),
+            Quote.accepted_at.is_(None),
+            Quote.next_action.like(f"{SNOOZE_ACTION}%"),
+            Quote.next_action_due <= today,
+            not_paid,
+        )
+        .all()
+    )
+    snoozed = {q.id for q in returning}
+    quotes = sorted(
+        {q.id: q for q in [*due, *returning]}.values(),
+        key=lambda q: _aware(q.sent_at),
+        reverse=True,
     )
     grouped: dict[str, list[Quote]] = defaultdict(list)
     for q in quotes:
@@ -308,7 +348,14 @@ def _quote_cards(
         what = " y ".join(materials[:2]) if materials else None
         cotizacion = f"la cotización de {what}" if what else "la cotización"
         expired = now > sent_at + timedelta(days=latest.validity_days or 15)
-        if latest.followup_count or expired:
+        back = next((q for q in qs if q.id in snoozed), None)
+        if back:
+            ask = (
+                f"Le escribo como quedamos sobre {cotizacion} que le enviamos el "
+                f"{sent_local:%d/%m}. Si ya está listo, se la actualizamos con "
+                "precios de hoy. ¿Le interesa?"
+            )
+        elif latest.followup_count or expired:
             ask = (
                 f"{cotizacion[:1].upper()}{cotizacion[1:]} que le enviamos el "
                 f"{sent_local:%d/%m} ya pasó su vigencia; si sigue interesado se la "
@@ -329,7 +376,7 @@ def _quote_cards(
                     what,
                     f"enviada {sent_local:%d/%m}",
                     _money(total) if total else None,
-                    f"seguimiento #{nudge}",
+                    _snooze_reason(back) if back else f"seguimiento #{nudge}",
                     f"+{len(qs) - 1} cotización(es)" if len(qs) > 1 else None,
                 ],
             )
@@ -566,6 +613,9 @@ def log_contact(
             q.last_followup_at = now
             q.followup_count = (q.followup_count or 0) + 1
             _note(q, f"[Seguimiento] {stamp:%d/%m/%Y} WhatsApp enviado ({user_email})")
+        if (q.next_action or "").startswith(SNOOZE_ACTION):
+            # The postponed follow-up is the one being done now.
+            set_next_action(q, None, None, None, who=user_email, now=now)
         q.updated_at = now
     contact = FollowupContact(
         contact_key=key,
@@ -671,3 +721,38 @@ def set_outcome(
     db.commit()
     db.refresh(contact)
     return contact
+
+
+def snooze(
+    db: Session,
+    *,
+    quote_ids: list[int],
+    due: date,
+    user_email: str,
+    reason: str | None = None,
+    now: datetime | None = None,
+) -> list[Quote]:
+    """ "Posponer": the customer asked to be contacted later. Each open quote on
+    the card gets the Siguiente paso SNOOZE_ACTION on `due`, owned by whoever
+    postponed it, so it leaves the list until then, comes back that day (see
+    _quote_cards) and shows in «Qué sigue» on Cotizaciones."""
+    now = now or datetime.now(timezone.utc)
+    today = now.astimezone(BUSINESS_TZ).date()
+    if due <= today:
+        raise SeguimientoError("Elige una fecha después de hoy")
+    if due > today + timedelta(days=SNOOZE_MAX_DAYS):
+        raise SeguimientoError("Elige una fecha dentro del próximo año")
+    quotes = (
+        db.query(Quote)
+        .filter(Quote.id.in_(quote_ids or []), Quote.status.in_(SNOOZE_STATUSES))
+        .all()
+    )
+    if not quotes:
+        raise SeguimientoError("Sólo se pueden posponer cotizaciones abiertas")
+    why = clean(reason)
+    action = f"{SNOOZE_ACTION}: {why}" if why else SNOOZE_ACTION
+    owner = sender_name(db, user_email)
+    for q in quotes:
+        set_next_action(q, action[:MAX_ACTION], owner, due, who=user_email, now=now)
+    db.commit()
+    return quotes

@@ -38,6 +38,7 @@ from models import (
     get_db,
 )
 from services import seguimiento
+from services.quote_capture import BUSINESS_TZ
 from services.quote_followup import sweep_stale_quotes
 
 TABLES = [
@@ -368,6 +369,129 @@ def test_misclicked_outcome_reopens_the_quote(db):
     db.commit()
     assert mark("respondio", 6) == "accepted"
     assert db.get(Quote, q.id).notes.count("se corrigió el seguimiento") == 2
+
+
+def test_postponed_quote_waits_and_comes_back(db):
+    q = _quote(
+        db,
+        "COT-IMPAG-150926DGO",
+        "Omar Barraza",
+        phone="6771234567",
+        days=39,
+        material="10 M Plastico invernadero 6.2",
+        followup_count=1,
+        last_followup_at=NOW - timedelta(days=8),
+    )
+    assert [c["customer_name"] for c in _todo(db)] == ["Omar Barraza"]
+
+    seguimiento.snooze(
+        db,
+        quote_ids=[q.id],
+        due=date(2026, 12, 1),
+        reason=" espera la pastura ",
+        user_email="hernan@x.com",
+        now=NOW,
+    )
+    db.expire_all()
+    q = db.get(Quote, q.id)
+    assert q.next_action == f"{seguimiento.SNOOZE_ACTION}: espera la pastura"
+    assert (q.next_action_owner, q.next_action_due) == ("Hernán", date(2026, 12, 1))
+    assert "[Siguiente paso]" in q.notes
+    assert _todo(db) == []
+
+    # Past 45 days by then, but the customer asked for that day.
+    nov30 = datetime(2026, 11, 30, 18, 0, tzinfo=timezone.utc)
+    dec1 = datetime(2026, 12, 1, 18, 0, tzinfo=timezone.utc)
+    assert seguimiento.daily_list(db, now=nov30)["todo"] == []
+    [card] = seguimiento.daily_list(db, sender_email="hernan@x.com", now=dec1)["todo"]
+    assert card["quote_ids"] == [q.id]
+    assert "pospuesta al 01/12: espera la pastura" in card["reason"]
+    assert (
+        "Le escribo como quedamos sobre la cotización de 10 M Plastico"
+        in card["message"]
+    )
+
+    # Sending it completes the postponed step, so it does not come back weekly.
+    seguimiento.log_contact(
+        db,
+        customer_name=card["customer_name"],
+        kind="cotizacion",
+        key=card["key"],
+        quote_ids=card["quote_ids"],
+        message=card["message"],
+        user_email="hernan@x.com",
+        now=dec1,
+    )
+    db.expire_all()
+    q = db.get(Quote, q.id)
+    assert q.next_action is None and q.next_action_due is None
+    assert q.notes.rstrip().endswith("hernan@x.com: hecho")
+    later = dec1 + timedelta(days=8)
+    assert seguimiento.daily_list(db, now=later)["todo"] == []
+
+
+def test_scheduled_next_step_holds_the_card(db):
+    q = _quote(db, "COT-IMPAG-200926DGO", "Rosa Ibarra", days=10)
+    q.next_action, q.next_action_due = "Llamar para cerrar", date(2026, 10, 6)
+    db.commit()
+    assert _todo(db) == []  # NOW is 10-03
+    q.next_action_due = date(2026, 10, 3)
+    db.commit()
+    assert [c["customer_name"] for c in _todo(db)] == ["Rosa Ibarra"]
+    # Not a "Posponer": an old quote with a due step stays out.
+    q.sent_at = NOW - timedelta(days=60)
+    db.commit()
+    assert _todo(db) == []
+
+
+def test_snooze_rejects_bad_input(db):
+    q = _quote(db, "COT-IMPAG-210926DGO", "Rosa Ibarra", days=10)
+    lost = _quote(db, "COT-IMPAG-220926DGO", "Rosa Ibarra", days=10, status="rejected")
+
+    def snooze(ids, due):
+        seguimiento.snooze(
+            db, quote_ids=ids, due=due, user_email="hernan@x.com", now=NOW
+        )
+
+    for ids, due in [
+        ([q.id], date(2026, 10, 3)),  # today
+        ([q.id], date(2027, 10, 5)),  # over a year
+        ([], date(2026, 12, 1)),
+        ([lost.id], date(2026, 12, 1)),
+    ]:
+        with pytest.raises(seguimiento.SeguimientoError):
+            snooze(ids, due)
+    db.expire_all()
+    assert db.get(Quote, q.id).next_action is None
+
+
+def test_posponer_through_the_api(db):
+    q = _quote(
+        db,
+        "COT-IMPAG-230926DGO",
+        "Omar Barraza",
+        days=10,
+        now=datetime.now(timezone.utc),
+    )
+    client = _client()
+    today = datetime.now(BUSINESS_TZ).date()
+    bad = client.post(
+        "/hoy/seguimiento/posponer",
+        json={"quote_ids": [q.id], "due": today.isoformat()},
+    )
+    assert bad.status_code == 400 and "después de hoy" in bad.json()["detail"]
+    due = today + timedelta(days=40)
+    res = client.post(
+        "/hoy/seguimiento/posponer",
+        json={
+            "quote_ids": [q.id],
+            "due": due.isoformat(),
+            "reason": "espera la pastura",
+        },
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["data"] == {"quote_ids": [q.id], "due": due.isoformat()}
+    assert client.get("/hoy/seguimiento").json()["data"]["todo"] == []
 
 
 def test_messaged_people_wait(db):
