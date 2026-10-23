@@ -733,15 +733,19 @@ def snooze(
     now: datetime | None = None,
 ) -> list[Quote]:
     """ "Posponer": the customer asked to be contacted later. Each open quote on
-    the card gets the Siguiente paso SNOOZE_ACTION on `due`, owned by whoever
-    postponed it, so it leaves the list until then, comes back that day (see
-    _quote_cards) and shows in «Qué sigue» on Cotizaciones."""
+    the card gets the Siguiente paso "SNOOZE_ACTION: reason" on `due`, owned by
+    whoever postponed it, so it leaves the list until then, comes back that day
+    (see _quote_cards) and shows in «Qué sigue» on Cotizaciones. The reason is
+    required: months later it is what the message has to pick up from."""
     now = now or datetime.now(timezone.utc)
     today = now.astimezone(BUSINESS_TZ).date()
     if due <= today:
         raise SeguimientoError("Elige una fecha después de hoy")
     if due > today + timedelta(days=SNOOZE_MAX_DAYS):
         raise SeguimientoError("Elige una fecha dentro del próximo año")
+    why = clean(reason)
+    if not why:
+        raise SeguimientoError("Escribe el motivo: qué está esperando el cliente")
     quotes = (
         db.query(Quote)
         .filter(Quote.id.in_(quote_ids or []), Quote.status.in_(SNOOZE_STATUSES))
@@ -749,8 +753,7 @@ def snooze(
     )
     if not quotes:
         raise SeguimientoError("Sólo se pueden posponer cotizaciones abiertas")
-    why = clean(reason)
-    action = f"{SNOOZE_ACTION}: {why}" if why else SNOOZE_ACTION
+    action = f"{SNOOZE_ACTION}: {why}"
     owner = sender_name(db, user_email)
     for q in quotes:
         set_next_action(q, action[:MAX_ACTION], owner, due, who=user_email, now=now)

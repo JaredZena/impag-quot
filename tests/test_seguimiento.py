@@ -448,19 +448,26 @@ def test_snooze_rejects_bad_input(db):
     q = _quote(db, "COT-IMPAG-210926DGO", "Rosa Ibarra", days=10)
     lost = _quote(db, "COT-IMPAG-220926DGO", "Rosa Ibarra", days=10, status="rejected")
 
-    def snooze(ids, due):
+    def snooze(ids, due, reason="espera la pastura"):
         seguimiento.snooze(
-            db, quote_ids=ids, due=due, user_email="hernan@x.com", now=NOW
+            db,
+            quote_ids=ids,
+            due=due,
+            reason=reason,
+            user_email="hernan@x.com",
+            now=NOW,
         )
 
-    for ids, due in [
-        ([q.id], date(2026, 10, 3)),  # today
-        ([q.id], date(2027, 10, 5)),  # over a year
-        ([], date(2026, 12, 1)),
-        ([lost.id], date(2026, 12, 1)),
+    for ids, due, reason, error in [
+        ([q.id], date(2026, 10, 3), "espera", "después de hoy"),  # today
+        ([q.id], date(2027, 10, 5), "espera", "próximo año"),
+        ([q.id], date(2026, 12, 1), None, "motivo"),
+        ([q.id], date(2026, 12, 1), "   ", "motivo"),
+        ([], date(2026, 12, 1), "espera", "abiertas"),
+        ([lost.id], date(2026, 12, 1), "espera", "abiertas"),
     ]:
-        with pytest.raises(seguimiento.SeguimientoError):
-            snooze(ids, due)
+        with pytest.raises(seguimiento.SeguimientoError, match=error):
+            snooze(ids, due, reason)
     db.expire_all()
     assert db.get(Quote, q.id).next_action is None
 
@@ -477,7 +484,7 @@ def test_posponer_through_the_api(db):
     today = datetime.now(BUSINESS_TZ).date()
     bad = client.post(
         "/hoy/seguimiento/posponer",
-        json={"quote_ids": [q.id], "due": today.isoformat()},
+        json={"quote_ids": [q.id], "due": today.isoformat(), "reason": "espera"},
     )
     assert bad.status_code == 400 and "después de hoy" in bad.json()["detail"]
     due = today + timedelta(days=40)
