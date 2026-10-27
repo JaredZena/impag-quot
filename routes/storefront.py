@@ -7,17 +7,23 @@ Storefront integration routes (todoparaelcampo-storefront).
 - POST /storefront/publish         trigger the storefront publish-prices
                                    workflow via repository_dispatch
 - GET  /storefront/publish-status  last run of the publish-prices workflow
+- GET  /storefront/visibility      hidden store pages for the sync (X-API-Key)
+- GET  /storefront/pages/visibility  «Mostrar en la tienda» rows (admin)
+- PUT  /storefront/pages/visibility  hide / show one store page (admin)
 """
 
 import os
+import re
 import secrets
+from datetime import datetime, timezone
 
 import requests
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from auth import verify_google_token
-from models import Product, get_db
+from models import Product, StorefrontPageVisibility, get_db
 from services.price_calculator import (
     calculate_product_price_with_currency,
     get_lowest_supplier_cost_with_currency,
@@ -41,6 +47,19 @@ def _github_headers(token: str) -> dict:
     }
 
 
+def _require_feed_key(x_api_key: str | None) -> None:
+    """X-API-Key auth shared by the machine-to-machine feeds (the sync Action)."""
+    expected_key = os.getenv("STOREFRONT_API_KEY")
+    if not expected_key:
+        raise HTTPException(status_code=503, detail="STOREFRONT_API_KEY not configured")
+    # Compare as bytes: str compare_digest raises TypeError on non-ASCII input,
+    # which would turn a garbage header into a 500 instead of a 401.
+    if not x_api_key or not secrets.compare_digest(
+        x_api_key.encode("utf-8", "replace"), expected_key.encode("utf-8")
+    ):
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
 @router.get("/products")
 def get_storefront_products(
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
@@ -56,15 +75,7 @@ def get_storefront_products(
     the sync script's pagination (batch = payload["data"], stop when fewer
     than `limit` items return) keeps working unchanged.
     """
-    expected_key = os.getenv("STOREFRONT_API_KEY")
-    if not expected_key:
-        raise HTTPException(status_code=503, detail="STOREFRONT_API_KEY not configured")
-    # Compare as bytes: str compare_digest raises TypeError on non-ASCII input,
-    # which would turn a garbage header into a 500 instead of a 401.
-    if not x_api_key or not secrets.compare_digest(
-        x_api_key.encode("utf-8", "replace"), expected_key.encode("utf-8")
-    ):
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    _require_feed_key(x_api_key)
 
     # Public base URL for product images (e.g. an R2 custom domain / public
     # bucket domain). Read at REQUEST time so App Runner env changes apply
@@ -235,3 +246,93 @@ def get_storefront_publish_status(user: dict = Depends(verify_google_token)):
         "created_at": run.get("created_at"),
         "html_url": run.get("html_url"),
     }
+
+
+# ------------------------------------------------- «Mostrar en la tienda»
+
+# A storefront handle as the store writes it: lowercase words joined by "-",
+# with the few Shopify-era marks (®, ™, º) some old pages still carry. Never a
+# path, whitespace or markup.
+_HANDLE_RE = re.compile(r"^[a-z0-9][a-z0-9\-®™º]*$")
+NOTE_MAX = 300
+
+
+class PageVisibilityIn(BaseModel):
+    handle: str = Field(min_length=1, max_length=255)
+    hidden: bool
+    note: str | None = Field(default=None, max_length=NOTE_MAX)
+
+    @field_validator("handle")
+    @classmethod
+    def _handle(cls, v: str) -> str:
+        v = v.strip()
+        if not _HANDLE_RE.match(v):
+            raise ValueError("invalid storefront handle")
+        return v
+
+    @field_validator("note")
+    @classmethod
+    def _note(cls, v: str | None) -> str | None:
+        v = " ".join((v or "").split())
+        return v or None
+
+
+def _visibility_out(row: StorefrontPageVisibility) -> dict:
+    return {
+        "handle": row.handle,
+        "hidden": bool(row.hidden),
+        "note": row.note,
+        "updated_by": row.updated_by,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+@router.get("/visibility")
+def get_storefront_visibility(
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    db: Session = Depends(get_db),
+):
+    """Hidden store pages, for scripts/backend_sync.py (writes
+    src/data/visibility-admin.json; the build leaves those pages out)."""
+    _require_feed_key(x_api_key)
+    rows = (
+        db.query(StorefrontPageVisibility.handle)
+        .filter(StorefrontPageVisibility.hidden.is_(True))
+        .order_by(StorefrontPageVisibility.handle.asc())
+        .all()
+    )
+    return {"hidden": [r.handle for r in rows]}
+
+
+@router.get("/pages/visibility")
+def list_page_visibility(
+    user: dict = Depends(verify_google_token), db: Session = Depends(get_db)
+):
+    """Every page the admin has switched (hidden or shown again)."""
+    rows = (
+        db.query(StorefrontPageVisibility)
+        .order_by(StorefrontPageVisibility.handle.asc())
+        .all()
+    )
+    return {"pages": [_visibility_out(r) for r in rows]}
+
+
+@router.put("/pages/visibility")
+def set_page_visibility(
+    body: PageVisibilityIn,
+    user: dict = Depends(verify_google_token),
+    db: Session = Depends(get_db),
+):
+    """Hide or show one store page. Takes effect on the next publish
+    (the admin's «Publicar» button or the daily run)."""
+    row = db.get(StorefrontPageVisibility, body.handle)
+    if row is None:
+        row = StorefrontPageVisibility(handle=body.handle)
+        db.add(row)
+    row.hidden = body.hidden
+    row.note = body.note
+    row.updated_by = (user or {}).get("email")
+    row.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(row)
+    return _visibility_out(row)

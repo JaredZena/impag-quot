@@ -138,6 +138,22 @@ class Product(Base):
     supplier_products = relationship("SupplierProduct", back_populates="product")
 
 
+class StorefrontPageVisibility(Base):
+    """«Mostrar en la tienda» switch set in the admin, one row per page of
+    todoparaelcampo.com.mx (its storefront handle). Only the store knows its
+    pages, so a handle may have no backend product at all. hidden=True drops
+    the page from the store on the next publish; no row (or hidden=False) =
+    shown. Read by the storefront sync through GET /storefront/visibility."""
+
+    __tablename__ = "storefront_page_visibility"
+
+    handle = Column(String(255), primary_key=True)
+    hidden = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    note = Column(Text, nullable=True)  # why it was hidden ("ya no lo manejamos")
+    updated_by = Column(String(255), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class SupplierProduct(Base):
     __tablename__ = "supplier_product"
 
