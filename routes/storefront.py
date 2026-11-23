@@ -10,6 +10,10 @@ Storefront integration routes (todoparaelcampo-storefront).
 - GET  /storefront/visibility      hidden store pages for the sync (X-API-Key)
 - GET  /storefront/pages/visibility  «Mostrar en la tienda» rows (admin)
 - PUT  /storefront/pages/visibility  hide / show one store page (admin)
+- GET  /storefront/links           admin-picked page -> product links for the
+                                   sync (X-API-Key)
+- GET  /storefront/pages/links     «Ligar producto» rows (admin)
+- PUT  /storefront/pages/link      link / unlink one store page (admin)
 """
 
 import os
@@ -23,7 +27,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from auth import verify_google_token
-from models import Product, StorefrontPageVisibility, get_db
+from models import Product, StorefrontPageLink, StorefrontPageVisibility, get_db
 from services.price_calculator import (
     calculate_product_price_with_currency,
     get_lowest_supplier_cost_with_currency,
@@ -336,3 +340,77 @@ def set_page_visibility(
     db.commit()
     db.refresh(row)
     return _visibility_out(row)
+
+
+class PageLinkIn(BaseModel):
+    handle: str = Field(min_length=1, max_length=255)
+    # None = the page has no product in the system (removes a wrong match).
+    product_id: int | None = Field(ge=1)
+
+    @field_validator("handle")
+    @classmethod
+    def _handle(cls, v: str) -> str:
+        v = v.strip()
+        if not _HANDLE_RE.match(v):
+            raise ValueError("invalid storefront handle")
+        return v
+
+
+def _link_out(row: StorefrontPageLink) -> dict:
+    product = row.product
+    return {
+        "handle": row.handle,
+        "product_id": row.product_id,
+        "product_name": product.name if product is not None else None,
+        "updated_by": row.updated_by,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+@router.get("/links")
+def get_storefront_links(
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    db: Session = Depends(get_db),
+):
+    """Admin-picked links, for scripts/backend_sync.py: each one wins over
+    scripts/product-mapping.json for its page (product_id null = no product)."""
+    _require_feed_key(x_api_key)
+    rows = db.query(StorefrontPageLink).order_by(StorefrontPageLink.handle.asc()).all()
+    return {"links": [{"handle": r.handle, "product_id": r.product_id} for r in rows]}
+
+
+@router.get("/pages/links")
+def list_page_links(
+    user: dict = Depends(verify_google_token), db: Session = Depends(get_db)
+):
+    """Every page the admin has linked (or unlinked) by hand."""
+    rows = db.query(StorefrontPageLink).order_by(StorefrontPageLink.handle.asc()).all()
+    return {"links": [_link_out(r) for r in rows]}
+
+
+@router.put("/pages/link")
+def set_page_link(
+    body: PageLinkIn,
+    user: dict = Depends(verify_google_token),
+    db: Session = Depends(get_db),
+):
+    """Link one store page to the product that prices it, or say it has none.
+    Takes effect on the next publish (the admin's «Publicar» button or the
+    daily run). Only an active, unarchived product can price a page: the sync
+    never reads the others."""
+    if body.product_id is not None:
+        product = db.get(Product, body.product_id)
+        if product is None or product.archived_at is not None or not product.is_active:
+            raise HTTPException(
+                status_code=404, detail="Product not found or not active"
+            )
+    row = db.get(StorefrontPageLink, body.handle)
+    if row is None:
+        row = StorefrontPageLink(handle=body.handle)
+        db.add(row)
+    row.product_id = body.product_id
+    row.updated_by = (user or {}).get("email")
+    row.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(row)
+    return _link_out(row)

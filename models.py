@@ -154,6 +154,26 @@ class StorefrontPageVisibility(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class StorefrontPageLink(Base):
+    """«Ligar producto» set in the admin: which backend product prices a page of
+    todoparaelcampo.com.mx (its storefront handle). Wins over the storefront's
+    name-matched scripts/product-mapping.json on the next publish.
+    product_id NULL = the admin says the page has no product in the system
+    (a wrong automatic match removed). No row = the mapping file decides.
+    Read by the storefront sync through GET /storefront/links."""
+
+    __tablename__ = "storefront_page_link"
+
+    handle = Column(String(255), primary_key=True)
+    product_id = Column(
+        Integer, ForeignKey("product.id", ondelete="CASCADE"), nullable=True
+    )
+    updated_by = Column(String(255), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    product = relationship("Product")
+
+
 class SupplierProduct(Base):
     __tablename__ = "supplier_product"
 
