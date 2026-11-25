@@ -27,6 +27,11 @@ router = APIRouter(
 
 
 # Pydantic models for request/response
+def _unit_upper(value):
+    # "caja " and "Caja" are CAJA: the enum values are uppercase.
+    return value.strip().upper() if isinstance(value, str) else value
+
+
 class ProductBase(BaseModel):
     name: str
     description: Optional[str] = None
@@ -42,6 +47,8 @@ class ProductBase(BaseModel):
     specifications: Optional[Any] = None
     default_margin: Optional[float] = None
     is_active: Optional[bool] = True
+
+    _normalize_unit = field_validator("unit", mode="before")(_unit_upper)
 
 
 class ProductCreate(ProductBase):
@@ -72,6 +79,8 @@ class ProductUpdate(BaseModel):
     storefront_description: Optional[str] = Field(
         None, max_length=STOREFRONT_DESCRIPTION_MAX
     )
+
+    _normalize_unit = field_validator("unit", mode="before")(_unit_upper)
 
 
 def store_description(value: str) -> Optional[str]:

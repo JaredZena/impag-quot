@@ -37,6 +37,7 @@ class ProductUnit(enum.Enum):
     KG = "KG"
     PAQUETE = "PAQUETE"
     KIT = "KIT"
+    CAJA = "CAJA"
 
 
 class Supplier(Base):
