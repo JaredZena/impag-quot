@@ -14,6 +14,10 @@ Storefront integration routes (todoparaelcampo-storefront).
                                    sync (X-API-Key)
 - GET  /storefront/pages/links     «Ligar producto» rows (admin)
 - PUT  /storefront/pages/link      link / unlink one store page (admin)
+- GET  /storefront/new-pages       admin-created pages for the sync (X-API-Key)
+- GET  /storefront/pages/new       «Nueva página» rows (admin)
+- POST /storefront/pages/new       create a store page from a product (admin)
+- DELETE /storefront/pages/new/{handle}  take an admin-created page off (admin)
 """
 
 import os
@@ -27,7 +31,13 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from auth import verify_google_token
-from models import Product, StorefrontPageLink, StorefrontPageVisibility, get_db
+from models import (
+    Product,
+    StorefrontNewPage,
+    StorefrontPageLink,
+    StorefrontPageVisibility,
+    get_db,
+)
 from services.price_calculator import (
     calculate_product_price_with_currency,
     get_lowest_supplier_cost_with_currency,
@@ -123,6 +133,9 @@ def get_storefront_products(
                 # "Especificaciones en la página": page rows, one per line; the
                 # sync replaces the page's description only when non-empty.
                 "storefront_description": p.storefront_description,
+                # The product's own description: the first text of a page made
+                # with «Nueva página» when storefront_description is empty.
+                "description": p.description,
                 "sku": p.sku,
                 # Manual price if set, else the cached calculated fallback —
                 # identical to legacy GET /products.
@@ -414,3 +427,145 @@ def set_page_link(
     db.commit()
     db.refresh(row)
     return _link_out(row)
+
+
+# ------------------------------------------------------------ «Nueva página»
+
+# A new page's handle: plain lowercase ASCII words joined by "-" (the admin
+# builds it from the store name). No ®/™: a mark in a new URL broke checkout
+# links once (10-03).
+_NEW_HANDLE_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_CATEGORY_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+class NewPageIn(BaseModel):
+    handle: str = Field(min_length=3, max_length=120)
+    product_id: int = Field(ge=1)
+    category_slug: str = Field(min_length=2, max_length=100)
+
+    @field_validator("handle")
+    @classmethod
+    def _handle(cls, v: str) -> str:
+        v = v.strip()
+        if not _NEW_HANDLE_RE.match(v):
+            raise ValueError("invalid storefront handle")
+        return v
+
+    @field_validator("category_slug")
+    @classmethod
+    def _category(cls, v: str) -> str:
+        v = v.strip()
+        if not _CATEGORY_SLUG_RE.match(v):
+            raise ValueError("invalid category")
+        return v
+
+
+def _new_page_out(row: StorefrontNewPage) -> dict:
+    product = row.product
+    return {
+        "handle": row.handle,
+        "product_id": row.product_id,
+        "product_name": product.name if product is not None else None,
+        # What the page is called in the store («Nombre en la tienda» or the name).
+        "title": (
+            (product.storefront_title or product.name) if product is not None else None
+        ),
+        "category_slug": row.category_slug,
+        "created_by": row.created_by,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+@router.get("/new-pages")
+def get_storefront_new_pages(
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    db: Session = Depends(get_db),
+):
+    """Admin-created pages, for scripts/backend_sync.py: it adds each page
+    from its product and removes admin-made pages that have no row."""
+    _require_feed_key(x_api_key)
+    rows = db.query(StorefrontNewPage).order_by(StorefrontNewPage.handle.asc()).all()
+    return {
+        "pages": [
+            {
+                "handle": r.handle,
+                "product_id": r.product_id,
+                "category_slug": r.category_slug,
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.get("/pages/new")
+def list_new_pages(
+    user: dict = Depends(verify_google_token), db: Session = Depends(get_db)
+):
+    """Every page created in the admin, published or still waiting."""
+    rows = (
+        db.query(StorefrontNewPage)
+        .order_by(StorefrontNewPage.created_at.desc(), StorefrontNewPage.handle.asc())
+        .all()
+    )
+    return {"pages": [_new_page_out(r) for r in rows]}
+
+
+@router.post("/pages/new", status_code=201)
+def create_new_page(
+    body: NewPageIn,
+    user: dict = Depends(verify_google_token),
+    db: Session = Depends(get_db),
+):
+    """Create a store page from a product. The page appears on the next
+    publish (the admin's «Publicar» button or the daily run). The product needs
+    a photo: the store never shows a page without one."""
+    product = db.get(Product, body.product_id)
+    if product is None or product.archived_at is not None or not product.is_active:
+        raise HTTPException(status_code=404, detail="Product not found or not active")
+    if not product.images:
+        raise HTTPException(status_code=422, detail="product_has_no_photo")
+    if (
+        db.query(StorefrontNewPage)
+        .filter(StorefrontNewPage.product_id == body.product_id)
+        .first()
+        is not None
+    ):
+        raise HTTPException(status_code=409, detail="product_has_page")
+    # A link or switch row means the page already exists on the store.
+    if (
+        db.get(StorefrontNewPage, body.handle) is not None
+        or db.get(StorefrontPageLink, body.handle) is not None
+        or db.get(StorefrontPageVisibility, body.handle) is not None
+    ):
+        raise HTTPException(status_code=409, detail="handle_taken")
+    row = StorefrontNewPage(
+        handle=body.handle,
+        product_id=body.product_id,
+        category_slug=body.category_slug,
+        created_by=(user or {}).get("email"),
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _new_page_out(row)
+
+
+@router.delete("/pages/new/{handle}")
+def delete_new_page(
+    handle: str,
+    user: dict = Depends(verify_google_token),
+    db: Session = Depends(get_db),
+):
+    """Cancel a page that has not been published yet, or take a published
+    admin-made page off the store on the next publish."""
+    row = db.get(StorefrontNewPage, handle)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Page not found")
+    # The page's switch and link go with it, so its address can be used again.
+    for extra in (StorefrontPageVisibility, StorefrontPageLink):
+        db.query(extra).filter(extra.handle == handle).delete(synchronize_session=False)
+    db.delete(row)
+    db.commit()
+    # A body, not 204: the admin's apiRequest always reads JSON.
+    return {"deleted": handle}

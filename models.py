@@ -175,6 +175,26 @@ class StorefrontPageLink(Base):
     product = relationship("Product")
 
 
+class StorefrontNewPage(Base):
+    """«Nueva página» created in the admin: a page of todoparaelcampo.com.mx
+    made from a backend product (its photo, price, name and description). The
+    storefront sync adds the page on the next publish and keeps it while the
+    row exists; deleting the row takes the page off on the next publish.
+    Read by the sync through GET /storefront/new-pages."""
+
+    __tablename__ = "storefront_new_page"
+
+    handle = Column(String(255), primary_key=True)
+    product_id = Column(
+        Integer, ForeignKey("product.id", ondelete="CASCADE"), nullable=False
+    )
+    category_slug = Column(String(100), nullable=False)
+    created_by = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    product = relationship("Product")
+
+
 class SupplierProduct(Base):
     __tablename__ = "supplier_product"
 
