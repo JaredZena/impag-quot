@@ -1,5 +1,6 @@
 import math
 import time
+import traceback
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -100,6 +101,48 @@ static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+
+class _ServerErrorKeepsCors:
+    """Turn an unhandled error into a JSON 500 *inside* CORSMiddleware.
+
+    Starlette's own 500 comes from its outermost middleware, so it has no CORS
+    headers. The browser then hides it and the admin says «Sin conexión con el
+    servidor» for what is really a server bug (11-26: Hernán saving a product
+    as Paquete). Added before CORSMiddleware so it sits inside it.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = False
+
+        async def _send(message):
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, _send)
+        except Exception:
+            if started:
+                raise
+            print(f"❌ Unhandled error on {scope['method']} {scope['path']}")
+            traceback.print_exc()
+            response = JSONResponse(
+                status_code=500,
+                content={
+                    "detail": "El servidor tuvo un error y no completó la acción. Avísale a Jared."
+                },
+            )
+            await response(scope, receive, send)
+
+
+app.add_middleware(_ServerErrorKeepsCors)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

@@ -114,3 +114,30 @@ def test_update_without_unit_keeps_it():
     res = client.put(f"/products/{pid}", json={"name": "Kit de riego 2"})
     assert res.status_code == 200, res.text
     assert res.json()["data"]["unit"] == "KIT"
+
+
+def test_model_targets_the_type_prod_uses():
+    # Prod's product.unit is typed product_unit; a stray productunit type
+    # also exists and got CAJA by mistake on 11-25.
+    assert Product.__table__.c.unit.type.name == "product_unit"
+
+
+def test_server_error_keeps_cors_headers():
+    # A DB error used to come back without CORS headers, so the admin showed
+    # «Sin conexión con el servidor» instead of a server error.
+    origin = "https://impag-admin-app.vercel.app"
+
+    def _broken_db():
+        raise RuntimeError("invalid input value for enum product_unit")
+        yield
+
+    app.dependency_overrides[get_db] = _broken_db
+    try:
+        res = client.put(
+            "/products/1", json={"unit": "PAQUETE"}, headers={"Origin": origin}
+        )
+    finally:
+        app.dependency_overrides[get_db] = _override_get_db
+    assert res.status_code == 500
+    assert res.headers["access-control-allow-origin"] == origin
+    assert "Avísale a Jared" in res.json()["detail"]

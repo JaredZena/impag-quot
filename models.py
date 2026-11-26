@@ -94,7 +94,13 @@ class Product(Base):
     description = Column(Text, nullable=True)
     base_sku = Column(String(50), nullable=True)
     category_id = Column(Integer, ForeignKey("product_category.id"))
-    unit = Column(Enum(ProductUnit), nullable=False, default=ProductUnit.PIEZA)
+    # Prod's column type is `product_unit`; a stray `productunit` type also
+    # exists but no column uses it. New units go into product_unit.
+    unit = Column(
+        Enum(ProductUnit, name="product_unit"),
+        nullable=False,
+        default=ProductUnit.PIEZA,
+    )
     package_size = Column(
         Integer, nullable=True
     )  # Number of units in a package (e.g., 1000 pieces per package)
