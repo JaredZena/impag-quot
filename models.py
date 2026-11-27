@@ -201,6 +201,24 @@ class StorefrontNewPage(Base):
     product = relationship("Product")
 
 
+class StorefrontPageCategory(Base):
+    """«Colección» picked in the admin for an existing page of
+    todoparaelcampo.com.mx (Hernán 11-26: a page filed in the wrong
+    collection needed a developer to move it). The storefront sync re-files
+    the page on the next publish. Pages made with «Nueva página» keep their
+    collection in storefront_new_page instead. Read by the sync through
+    GET /storefront/page-categories."""
+
+    __tablename__ = "storefront_page_category"
+
+    handle = Column(String(255), primary_key=True)
+    category_slug = Column(String(100), nullable=False)
+    updated_by = Column(String(255), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class SupplierProduct(Base):
     __tablename__ = "supplier_product"
 

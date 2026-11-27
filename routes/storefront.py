@@ -18,6 +18,10 @@ Storefront integration routes (todoparaelcampo-storefront).
 - GET  /storefront/pages/new       «Nueva página» rows (admin)
 - POST /storefront/pages/new       create a store page from a product (admin)
 - DELETE /storefront/pages/new/{handle}  take an admin-created page off (admin)
+- GET  /storefront/page-categories  admin-picked collections for the sync
+                                   (X-API-Key)
+- GET  /storefront/pages/categories  «Colección» rows (admin)
+- PUT  /storefront/pages/category   move one store page to a collection (admin)
 """
 
 import os
@@ -34,6 +38,7 @@ from auth import verify_google_token
 from models import (
     Product,
     StorefrontNewPage,
+    StorefrontPageCategory,
     StorefrontPageLink,
     StorefrontPageVisibility,
     get_db,
@@ -569,3 +574,105 @@ def delete_new_page(
     db.commit()
     # A body, not 204: the admin's apiRequest always reads JSON.
     return {"deleted": handle}
+
+
+# --------------------------------------------------------------- «Colección»
+
+
+class PageCategoryIn(BaseModel):
+    handle: str = Field(min_length=1, max_length=255)
+    category_slug: str = Field(min_length=2, max_length=100)
+
+    @field_validator("handle")
+    @classmethod
+    def _handle(cls, v: str) -> str:
+        v = v.strip()
+        if not _HANDLE_RE.match(v):
+            raise ValueError("invalid storefront handle")
+        return v
+
+    @field_validator("category_slug")
+    @classmethod
+    def _category(cls, v: str) -> str:
+        v = v.strip()
+        if not _CATEGORY_SLUG_RE.match(v):
+            raise ValueError("invalid category")
+        return v
+
+
+def _category_out(row: StorefrontPageCategory) -> dict:
+    return {
+        "handle": row.handle,
+        "category_slug": row.category_slug,
+        "updated_by": row.updated_by,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+@router.get("/page-categories")
+def get_storefront_page_categories(
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    db: Session = Depends(get_db),
+):
+    """Admin-picked collections, for scripts/backend_sync.py: it re-files each
+    page into its collection (an unknown collection or page is reported)."""
+    _require_feed_key(x_api_key)
+    rows = (
+        db.query(StorefrontPageCategory)
+        .order_by(StorefrontPageCategory.handle.asc())
+        .all()
+    )
+    return {
+        "categories": [
+            {"handle": r.handle, "category_slug": r.category_slug} for r in rows
+        ]
+    }
+
+
+@router.get("/pages/categories")
+def list_page_categories(
+    user: dict = Depends(verify_google_token), db: Session = Depends(get_db)
+):
+    """Every page the admin has moved to a collection."""
+    rows = (
+        db.query(StorefrontPageCategory)
+        .order_by(StorefrontPageCategory.handle.asc())
+        .all()
+    )
+    return {"pages": [_category_out(r) for r in rows]}
+
+
+@router.put("/pages/category")
+def set_page_category(
+    body: PageCategoryIn,
+    user: dict = Depends(verify_google_token),
+    db: Session = Depends(get_db),
+):
+    """Move one store page to a collection. Takes effect on the next publish
+    (the admin's «Publicar» button or the daily run). A page made with «Nueva
+    página» keeps its collection on its own row, so that row changes instead."""
+    email = (user or {}).get("email")
+    now = datetime.now(timezone.utc)
+    new_page = db.get(StorefrontNewPage, body.handle)
+    if new_page is not None:
+        new_page.category_slug = body.category_slug
+        db.query(StorefrontPageCategory).filter(
+            StorefrontPageCategory.handle == body.handle
+        ).delete(synchronize_session=False)
+        db.commit()
+        return {
+            "handle": body.handle,
+            "category_slug": body.category_slug,
+            "updated_by": email,
+            "updated_at": now.isoformat(),
+        }
+    row = db.get(StorefrontPageCategory, body.handle)
+    if row is None:
+        row = StorefrontPageCategory(handle=body.handle)
+        db.add(row)
+    row.category_slug = body.category_slug
+    row.updated_by = email
+    row.updated_at = now
+    db.commit()
+    db.refresh(row)
+    return _category_out(row)
