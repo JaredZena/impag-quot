@@ -133,8 +133,8 @@ COT_VALUES = [
 COT_FORMULAS = [
     [],
     COT_HEADER,
-    ["", "", "", "", "", "='Villarreal Division Equipos'!H7"],
-    ["", "", "", "", "", "='Villarreal Division Equipos'!H14"],
+    ["", "", "", "", "", "='Plantillas Villarreal Division Equipos'!H7"],
+    ["", "", "", "", "", "='Plantillas Villarreal Division Equipos'!H14"],
     ["", "", "", "", "", ""],
     [],
     ["", "", "", "", "", "=R3"],

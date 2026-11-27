@@ -54,7 +54,10 @@ SPREADSHEET_ID = os.getenv(
     "BOMBEO_SPREADSHEET_ID", "1iajqKglj4-wbcnBKA97l042clI8VT6gqhWv4kFwMlmM"
 )
 PARTS_TAB = "PRECIOS VDE"
-KITS_TAB = "Villarreal Division Equipos"
+# JD renamed this tab (was "Villarreal Division Equipos") and every sync 502'd
+# with "Unable to parse range" from then until 11-26. The cotizador's VDE
+# formulas follow the rename, so this must match the tab's current name.
+KITS_TAB = os.getenv("BOMBEO_KITS_TAB", "Plantillas Villarreal Division Equipos")
 COTIZADOR_TAB = "Cotizador Bombeo Solar Agricola"
 
 SUPPLIER_ID = 37  # Villarreal Division Equipos (VDE)
